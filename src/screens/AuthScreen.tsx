@@ -60,8 +60,15 @@ export default function AuthScreen() {
       // registered natively — works in Expo Go and in production builds
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
       if (result.type === 'success' && result.url) {
-        const { error: sessErr } = await supabase.auth.exchangeCodeForSession(result.url);
-        if (sessErr) Alert.alert('Erreur Google', sessErr.message);
+        const params = new URLSearchParams(result.url.split('#')[1] ?? result.url.split('?')[1] ?? '');
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token') ?? '';
+        if (access_token) {
+          const { error: sessErr } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (sessErr) Alert.alert('Erreur Google', sessErr.message);
+        } else {
+          Alert.alert('Erreur Google', 'Aucun token reçu. Réessaie.');
+        }
       }
     } finally {
       setGoogleLoading(false);
