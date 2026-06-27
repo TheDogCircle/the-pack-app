@@ -485,7 +485,7 @@ export default function FeedScreen() {
           { key: 'activite', label: 'Activité' },
           { key: 'explorer', label: 'Explorer' },
           { key: 'membres',  label: 'Membres' },
-          { key: 'evenements', label: 'Événements' },
+          { key: 'evenements', label: 'Events' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
@@ -666,7 +666,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
     alignSelf: 'flex-start', minWidth: '100%',
   },
-  tab: { paddingVertical: 9, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
+  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
   tabActive: { backgroundColor: colors.bordeaux },
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },

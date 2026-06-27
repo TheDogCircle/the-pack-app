@@ -665,8 +665,9 @@ const styles = StyleSheet.create({
   },
   favFilterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
     borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white,
+    flexShrink: 0,
   },
   favFilterText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
   favFilterBadge: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted },

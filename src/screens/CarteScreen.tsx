@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Supercluster from 'supercluster';
 import {
   View, StyleSheet, Text, TouchableOpacity, ActivityIndicator,
-  Animated, ScrollView, Linking, Dimensions, Modal,
+  Animated, ScrollView, Linking, Dimensions, Modal, Keyboard,
   TextInput, KeyboardAvoidingView, Platform, Alert, FlatList, Image, Share, PanResponder,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -304,6 +304,7 @@ export default function CarteScreen() {
   }
 
   async function openFiche(lieu: Lieu) {
+    Keyboard.dismiss();
     setSheetLoading(true);
     setPrevSelectedId(selectedLieu?.id ?? null);
     if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
