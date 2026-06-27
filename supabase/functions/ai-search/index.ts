@@ -55,11 +55,14 @@ serve(async (req) => {
       return `${i + 1}|${l.id}|${l.nom}|${CAT[l.cat] || l.cat}|${l.ville}|${desc}|${tags.join(',')}|${note}`;
     }).join('\n');
 
-    const prompt = `App dog-friendly. Recherche: "${query.trim()}"
-Lieux (#|id|nom|type|ville|desc|tags|note):
+    const prompt = `Tu es un assistant pour une app dog-friendly française. Recherche utilisateur: "${query.trim()}"
+
+Lieux disponibles (format: #|id|nom|type|ville|description|équipements|note):
 ${lieuxText}
-Réponds JSON uniquement: {"r":[{"i":"id","t":"raison 8 mots max"}]}
-3-4 résultats max. Si rien: {"r":[]}`;
+
+Sélectionne 3-4 lieux qui correspondent. Réponds UNIQUEMENT avec ce JSON valide:
+{"results":[{"id":"uuid","raison":"explication courte"}]}
+Si aucun résultat: {"results":[]}`;
 
     const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -70,22 +73,24 @@ Réponds JSON uniquement: {"r":[{"i":"id","t":"raison 8 mots max"}]}
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 180,
+        max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
     const aiData = await aiResp.json();
-    const text = aiData.content?.[0]?.text?.trim() || '{"r":[]}';
+    console.log('AI response:', JSON.stringify(aiData));
+    const text = aiData.content?.[0]?.text?.trim() || '{"results":[]}';
+    console.log('AI text:', text);
 
-    let parsed: { r: { i: string; t: string }[] } = { r: [] };
-    try { parsed = JSON.parse(text); } catch { /* keep empty */ }
+    let parsed: { results: { id: string; raison: string }[] } = { results: [] };
+    try { parsed = JSON.parse(text); } catch (e) { console.log('Parse error:', e); }
 
-    const enriched = (parsed.r || [])
+    const enriched = (parsed.results || [])
       .map(r => {
-        const lieu = lieux.find(l => l.id === r.i);
+        const lieu = lieux.find(l => l.id === r.id);
         if (!lieu) return null;
-        return { lieu, raison: r.t };
+        return { lieu, raison: r.raison };
       })
       .filter(Boolean);
 
