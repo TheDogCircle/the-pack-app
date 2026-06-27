@@ -48,37 +48,60 @@ function PostCard({ post }: { post: Post }) {
   else if (post.date_debut) periode = `Dès le ${fmtDate(post.date_debut)}`;
   else if (post.date_expiration) periode = `Jusqu'au ${fmtDate(post.date_expiration)}`;
 
-  return (
-    <View style={styles.postCard}>
-      {post.image_url ? (
+  if (post.image_url) {
+    return (
+      <View style={styles.postCard}>
         <View style={styles.postImgWrap}>
           <Image source={{ uri: post.image_url }} style={styles.postImg} resizeMode="cover" />
-          <LinearGradient colors={['transparent', 'rgba(20,8,8,0.6)']} style={styles.postImgGradient} />
-          <View style={[styles.typeBadge, { backgroundColor: cfg.bg }]}>
-            <Text style={styles.typeBadgeIcon}>{cfg.icon}</Text>
-            <Text style={[styles.typeBadgeText, { color: cfg.text }]}>{cfg.label}</Text>
-          </View>
-          {periode ? (
-            <View style={styles.periodeBadge}>
-              <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.85)" />
-              <Text style={styles.periodeText}>{periode}</Text>
+          <LinearGradient colors={['rgba(0,0,0,0.08)', 'rgba(20,8,8,0.82)']} style={styles.postImgGradient} />
+
+          {/* Top row */}
+          <View style={styles.postTopRow}>
+            <View style={[styles.typeBadge, { backgroundColor: cfg.bg }]}>
+              <Text style={styles.typeBadgeIcon}>{cfg.icon}</Text>
+              <Text style={[styles.typeBadgeText, { color: cfg.text }]}>{cfg.label}</Text>
             </View>
-          ) : null}
-        </View>
-      ) : (
-        <View style={styles.postNoImgHeader}>
-          <View style={[styles.typeBadge, { backgroundColor: cfg.bg }]}>
-            <Text style={styles.typeBadgeIcon}>{cfg.icon}</Text>
-            <Text style={[styles.typeBadgeText, { color: cfg.text }]}>{cfg.label}</Text>
+            {periode ? (
+              <View style={styles.periodeBadge}>
+                <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.85)" />
+                <Text style={styles.periodeText}>{periode}</Text>
+              </View>
+            ) : null}
           </View>
-          {periode ? (
-            <View style={styles.periodeRowAlt}>
-              <Ionicons name="calendar-outline" size={10} color={colors.textMuted} />
-              <Text style={styles.periodeTextAlt}>{periode}</Text>
+
+          {/* Bottom overlay: titre + bouton */}
+          <View style={styles.postImgBottom}>
+            <Text style={styles.postTitreOverlay} numberOfLines={2}>{post.titre}</Text>
+            <View style={styles.postImgBottomRow}>
+              {post.contenu ? <Text style={styles.postContenuOverlay} numberOfLines={2}>{post.contenu}</Text> : <View />}
+              {post.lien ? (
+                <TouchableOpacity style={styles.postBtnSmall} onPress={() => Linking.openURL(post.lien!)}>
+                  <Text style={styles.postBtnSmallText}>Découvrir</Text>
+                  <Ionicons name="arrow-forward" size={11} color={colors.ivory} />
+                </TouchableOpacity>
+              ) : null}
             </View>
-          ) : null}
+          </View>
         </View>
-      )}
+      </View>
+    );
+  }
+
+  // Sans image
+  return (
+    <View style={styles.postCard}>
+      <View style={[styles.postNoImgStripe, { backgroundColor: cfg.bg }]}>
+        <View style={styles.postNoImgStripeRow}>
+          <Text style={styles.typeBadgeIcon}>{cfg.icon}</Text>
+          <Text style={styles.postNoImgStripeLabel}>{cfg.label}</Text>
+        </View>
+        {periode ? (
+          <View style={styles.periodeRowAlt}>
+            <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.75)" />
+            <Text style={styles.periodeTextAlt}>{periode}</Text>
+          </View>
+        ) : null}
+      </View>
       <View style={styles.postBody}>
         <Text style={styles.postTitre}>{post.titre}</Text>
         {post.contenu ? <Text style={styles.postContenu}>{post.contenu}</Text> : null}
@@ -314,39 +337,51 @@ const styles = StyleSheet.create({
 
   // Post card
   postCard: {
-    backgroundColor: colors.white,
     borderRadius: 18, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4,
   },
-  postImgWrap: { position: 'relative', width: '100%', height: 210 },
-  postImg: { width: '100%', height: 210 },
-  postImgGradient: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 90 },
+  postImgWrap: { position: 'relative', width: '100%', height: 230 },
+  postImg: { width: '100%', height: 230 },
+  postImgGradient: { position: 'absolute', inset: 0, top: 0, left: 0, right: 0, bottom: 0, height: 230 },
 
+  postTopRow: {
+    position: 'absolute', top: 14, left: 14, right: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
   typeBadge: {
-    position: 'absolute', top: 14, left: 14,
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: 20, paddingHorizontal: 11, paddingVertical: 5,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18, shadowRadius: 3, elevation: 3,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 3,
   },
   typeBadgeIcon: { fontSize: 10, color: '#fff' },
   typeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11 },
 
   periodeBadge: {
-    position: 'absolute', bottom: 12, right: 14,
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(0,0,0,0.38)', borderRadius: 12,
     paddingHorizontal: 9, paddingVertical: 4,
   },
   periodeText: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.92)' },
 
-  postNoImgHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 16, gap: 8,
+  postImgBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, gap: 6 },
+  postTitreOverlay: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: '#fff', lineHeight: 27 },
+  postImgBottomRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 },
+  postContenuOverlay: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.78)', lineHeight: 17 },
+  postBtnSmall: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.18)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 20, paddingHorizontal: 13, paddingVertical: 7, flexShrink: 0,
   },
-  periodeRowAlt: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  periodeTextAlt: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  postBtnSmallText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
 
-  postBody: { padding: 18, gap: 8 },
+  // Sans image
+  postNoImgStripe: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+  postNoImgStripeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  postNoImgStripeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#fff' },
+  periodeRowAlt: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  periodeTextAlt: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
+
+  postBody: { backgroundColor: colors.white, padding: 18, gap: 8 },
   postTitre: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, lineHeight: 25 },
   postContenu: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, lineHeight: 20 },
   postBtn: {
