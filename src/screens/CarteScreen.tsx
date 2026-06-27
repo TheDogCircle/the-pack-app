@@ -1168,7 +1168,7 @@ export default function CarteScreen() {
         showsUserLocation
         showsMyLocationButton={false}
       >
-        {clusters.map((cluster: any) => {
+        {!showEvents && clusters.map((cluster: any) => {
           const [lng, lat] = cluster.geometry.coordinates;
           const { cluster: isCluster, cluster_id, point_count, lieu } = cluster.properties;
 
