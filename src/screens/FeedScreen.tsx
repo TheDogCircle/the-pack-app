@@ -407,9 +407,12 @@ export default function FeedScreen() {
               {item.lieu.ville ? <Text style={styles.ville}>{item.lieu.ville}</Text> : null}
               {item.lieu.nom ? <Text style={styles.dogInfo}>🐾 {item.lieu.nom}</Text> : null}
               {(membresMutual[item.user.id] || 0) > 0 && (
-                <Text style={styles.mutualText}>
-                  👥 {membresMutual[item.user.id]} ami{membresMutual[item.user.id] > 1 ? 's' : ''} en commun
-                </Text>
+                <View style={styles.mutualRow}>
+                  <Ionicons name="people-outline" size={12} color={colors.terra} />
+                  <Text style={styles.mutualText}>
+                    {membresMutual[item.user.id]} ami{membresMutual[item.user.id] > 1 ? 's' : ''} en commun
+                  </Text>
+                </View>
               )}
             </>
           ) : (
@@ -729,7 +732,8 @@ const styles = StyleSheet.create({
   lieuName: { fontFamily: 'DMSans_500Medium', color: colors.terra },
   ville: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
   dogInfo: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
-  mutualText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 3 },
+  mutualRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  mutualText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
   followBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: colors.bordeaux },
   followBtnActive: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.bordeaux },
   followBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#fff' },
