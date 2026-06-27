@@ -398,54 +398,52 @@ export default function ProfilScreen() {
         const filtered = favFilter === 'tous' ? favoris : favoris.filter(f => f.liste === favFilter);
         const activeFilter = FAV_FILTERS.find(f => f.key === favFilter)!;
         return (
-          <View style={{ flex: 1 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.favFiltersRow} contentContainerStyle={styles.favFiltersContent}>
-              {FAV_FILTERS.map(f => {
-                const active = favFilter === f.key;
-                const cnt = f.key === 'tous' ? favoris.length : favoris.filter(x => x.liste === f.key).length;
-                return (
-                  <TouchableOpacity
-                    key={f.key}
-                    onPress={() => setFavFilter(f.key as any)}
-                    style={[styles.favFilterPill, active && { backgroundColor: f.color, borderColor: f.color }]}
-                  >
-                    <Ionicons name={f.icon} size={12} color={active ? colors.ivory : f.color} />
-                    <Text style={[styles.favFilterText, active && { color: colors.ivory }]}>{f.label}</Text>
-                    {cnt > 0 && <Text style={[styles.favFilterBadge, active && { color: 'rgba(255,255,255,0.7)' }]}>{cnt}</Text>}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <ScrollView contentContainerStyle={[styles.tabContent, { paddingTop: 8 }]}>
-              {filtered.length === 0 ? (
-                <View style={styles.emptyTab}>
-                  <Text style={styles.emptyIcon}>{favFilter === 'favori' ? '🤍' : favFilter === 'a_tester' ? '🔖' : favFilter === 'deja_teste' ? '✅' : '🤍'}</Text>
-                  <Text style={styles.emptyText}>Aucun lieu dans cette liste.</Text>
-                </View>
-              ) : (
-                filtered.map(item => (
-                  <View key={item.id} style={styles.favCard}>
-                    <View style={styles.favInfo}>
-                      <Text style={styles.favEmoji}>{CAT_EMOJI[item.lieux?.cat || 'autre'] || '📍'}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.favNom} numberOfLines={1}>{item.lieux?.nom || 'Lieu supprimé'}</Text>
-                        {item.lieux?.ville ? <Text style={styles.favVille}>{item.lieux.ville}</Text> : null}
-                      </View>
-                    </View>
-                    <Ionicons
-                      name={activeFilter.icon}
-                      size={14}
-                      color={activeFilter.color}
-                      style={{ marginRight: 8 }}
-                    />
-                    <TouchableOpacity onPress={() => removeFavori(item.id)} style={styles.favDelete}>
-                      <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+          <FlatList
+            data={filtered}
+            keyExtractor={item => item.id}
+            contentContainerStyle={[styles.tabContent, { paddingTop: 8 }]}
+            ListHeaderComponent={
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.favFiltersRow} contentContainerStyle={styles.favFiltersContent}>
+                {FAV_FILTERS.map(f => {
+                  const active = favFilter === f.key;
+                  const cnt = f.key === 'tous' ? favoris.length : favoris.filter(x => x.liste === f.key).length;
+                  return (
+                    <TouchableOpacity
+                      key={f.key}
+                      onPress={() => setFavFilter(f.key as any)}
+                      style={[styles.favFilterPill, active && { backgroundColor: f.color, borderColor: f.color }]}
+                    >
+                      <Ionicons name={f.icon} size={12} color={active ? colors.ivory : f.color} />
+                      <Text style={[styles.favFilterText, active && { color: colors.ivory }]}>{f.label}</Text>
+                      {cnt > 0 && <Text style={[styles.favFilterBadge, active && { color: 'rgba(255,255,255,0.7)' }]}>{cnt}</Text>}
                     </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            }
+            stickyHeaderIndices={[0]}
+            ListEmptyComponent={
+              <View style={styles.emptyTab}>
+                <Text style={styles.emptyIcon}>{favFilter === 'favori' ? '🤍' : favFilter === 'a_tester' ? '🔖' : favFilter === 'deja_teste' ? '✅' : '🤍'}</Text>
+                <Text style={styles.emptyText}>Aucun lieu dans cette liste.</Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <View style={styles.favCard}>
+                <View style={styles.favInfo}>
+                  <Text style={styles.favEmoji}>{CAT_EMOJI[item.lieux?.cat || 'autre'] || '📍'}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.favNom} numberOfLines={1}>{item.lieux?.nom || 'Lieu supprimé'}</Text>
+                    {item.lieux?.ville ? <Text style={styles.favVille}>{item.lieux.ville}</Text> : null}
                   </View>
-                ))
-              )}
-            </ScrollView>
-          </View>
+                </View>
+                <Ionicons name={activeFilter.icon} size={14} color={activeFilter.color} style={{ marginRight: 8 }} />
+                <TouchableOpacity onPress={() => removeFavori(item.id)} style={styles.favDelete}>
+                  <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+            )}
+          />
         );
       })()}
 
@@ -661,7 +659,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   favFiltersContent: {
-    flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center',
+    flexDirection: 'row', gap: 8, paddingLeft: 16, paddingRight: 24, paddingVertical: 10, alignItems: 'center',
   },
   favFilterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
