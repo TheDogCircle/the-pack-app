@@ -275,17 +275,19 @@ export default function CarteScreen() {
   }
 
   function onCatPress(cat: string | null) {
-    setActiveCat(cat);
+    const next = (cat !== null && cat === activeCat) ? null : cat;
+    setActiveCat(next);
     setFavFilter(null);
     setAutresOpen(false);
-    fetchLieux(region, cat);
+    fetchLieux(region, next);
   }
 
   function onAutresCatPress(cat: string) {
-    setActiveCat(cat);
+    const next = cat === activeCat ? null : cat;
+    setActiveCat(next);
     setFavFilter(null);
     setAutresOpen(false);
-    fetchLieux(region, cat);
+    fetchLieux(region, next);
   }
 
   async function onFavFilterPress(liste: string) {
