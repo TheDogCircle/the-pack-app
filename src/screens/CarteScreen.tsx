@@ -247,7 +247,7 @@ export default function CarteScreen() {
         const loc = await Location.getCurrentPositionAsync({});
         setUserLat(loc.coords.latitude);
         setUserLng(loc.coords.longitude);
-        const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.2, longitudeDelta: 0.2 };
+        const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.1, longitudeDelta: 0.1 };
         setRegion(r);
         mapRef.current?.animateToRegion(r, 800);
         fetchLieux(r, null);
