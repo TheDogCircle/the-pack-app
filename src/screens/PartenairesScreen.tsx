@@ -41,7 +41,7 @@ export default function PartenairesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
 
-  useEffect(() => { init(); }, []);
+  useEffect(() => { init(); }, [session?.user?.id]);
 
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();

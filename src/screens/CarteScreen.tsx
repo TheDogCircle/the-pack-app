@@ -198,6 +198,16 @@ export default function CarteScreen() {
           .then(({ data }) => setMyDogName(data?.nom_chien ?? null));
       }
     });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user.id ?? null);
+      if (session?.user.id) {
+        supabase.from('profils').select('nom_chien').eq('id', session.user.id).single()
+          .then(({ data }) => setMyDogName(data?.nom_chien ?? null));
+      } else {
+        setMyDogName(null);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {

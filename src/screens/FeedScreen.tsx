@@ -69,7 +69,7 @@ export default function FeedScreen() {
   const [membresFollowing, setMembresFollowing] = useState<Set<string>>(new Set());
   const [membresMutual, setMembresMutual] = useState<Record<string, number>>({});
 
-  useEffect(() => { load(); }, [tab]);
+  useEffect(() => { load(); }, [tab, session?.user?.id]);
 
   async function load() {
     setLoading(true);
