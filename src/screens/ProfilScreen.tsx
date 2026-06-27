@@ -403,23 +403,25 @@ export default function ProfilScreen() {
             keyExtractor={item => item.id}
             contentContainerStyle={[styles.tabContent, { paddingTop: 8 }]}
             ListHeaderComponent={
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.favFiltersRow} contentContainerStyle={styles.favFiltersContent}>
-                {FAV_FILTERS.map(f => {
-                  const active = favFilter === f.key;
-                  const cnt = f.key === 'tous' ? favoris.length : favoris.filter(x => x.liste === f.key).length;
-                  return (
-                    <TouchableOpacity
-                      key={f.key}
-                      onPress={() => setFavFilter(f.key as any)}
-                      style={[styles.favFilterPill, active && { backgroundColor: f.color, borderColor: f.color }]}
-                    >
-                      <Ionicons name={f.icon} size={12} color={active ? colors.ivory : f.color} />
-                      <Text style={[styles.favFilterText, active && { color: colors.ivory }]}>{f.label}</Text>
-                      {cnt > 0 && <Text style={[styles.favFilterBadge, active && { color: 'rgba(255,255,255,0.7)' }]}>{cnt}</Text>}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+              <View style={styles.favFiltersRow}>
+                <View style={styles.favFiltersContent}>
+                  {FAV_FILTERS.map(f => {
+                    const active = favFilter === f.key;
+                    const cnt = f.key === 'tous' ? favoris.length : favoris.filter(x => x.liste === f.key).length;
+                    return (
+                      <TouchableOpacity
+                        key={f.key}
+                        onPress={() => setFavFilter(f.key as any)}
+                        style={[styles.favFilterPill, active && { backgroundColor: f.color, borderColor: f.color }]}
+                      >
+                        <Ionicons name={f.icon} size={12} color={active ? colors.ivory : f.color} />
+                        <Text style={[styles.favFilterText, active && { color: colors.ivory }]}>{f.label}</Text>
+                        {cnt > 0 && <Text style={[styles.favFilterBadge, active && { color: 'rgba(255,255,255,0.7)' }]}>{cnt}</Text>}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
             }
             stickyHeaderIndices={[0]}
             ListEmptyComponent={
@@ -659,13 +661,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   favFiltersContent: {
-    flexDirection: 'row', gap: 8, paddingLeft: 16, paddingRight: 24, paddingVertical: 10, alignItems: 'center',
+    flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 10,
+    alignItems: 'center', justifyContent: 'center',
   },
   favFilterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, height: 34, borderRadius: 20,
+    paddingHorizontal: 10, height: 34, borderRadius: 20,
     borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white,
-    flexShrink: 0,
   },
   favFilterText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
   favFilterBadge: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted },
