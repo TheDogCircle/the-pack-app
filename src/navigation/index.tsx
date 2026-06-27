@@ -15,6 +15,7 @@ import PartenairesScreen from '../screens/PartenairesScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import MessagerieScreen from '../screens/MessagerieScreen';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -33,6 +34,7 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }> = {
   Carte:       { active: 'map',             inactive: 'map-outline' },
   Evenements:  { active: 'calendar',        inactive: 'calendar-outline' },
+  Messagerie:  { active: 'chatbubbles',     inactive: 'chatbubbles-outline' },
   Meute:       { active: 'people',          inactive: 'people-outline' },
   Partenaires: { active: 'pricetag',        inactive: 'pricetag-outline' },
   Profil:      { active: 'person-circle',   inactive: 'person-circle-outline' },
@@ -111,6 +113,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
       <Tab.Screen name="Evenements" component={EvenementsScreen} options={{ title: 'Événements' }} />
+      <Tab.Screen name="Messagerie" component={MessagerieScreen} options={{ title: 'Messages' }} />
       <Tab.Screen
         name="Partenaires" component={PartenairesScreen}
         options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
