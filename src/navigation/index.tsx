@@ -39,12 +39,39 @@ const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }
 function MainTabs() {
   const { session } = useSession();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [meuteBadge, setMeuteBadge] = useState(false);
+  const [partBadge, setPartBadge] = useState(false);
 
   useEffect(() => {
     if (!session) { setAvatarUrl(null); return; }
     supabase.from('profils').select('avatar_url').eq('id', session.user.id).single()
       .then(({ data }) => setAvatarUrl(data?.avatar_url ?? null));
+    checkBadges(session.user.id);
   }, [session?.user.id]);
+
+  async function checkBadges(userId: string) {
+    const since48h = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const since7d  = new Date(Date.now() -  7 * 86400 * 1000).toISOString();
+
+    // Partenaires : nouveaux posts dans les 7 derniers jours
+    const { count: partCount } = await supabase
+      .from('partenaire_posts').select('id', { count: 'exact', head: true })
+      .eq('actif', true).gte('created_at', since7d);
+    setPartBadge((partCount ?? 0) > 0);
+
+    // Meute : avis ou photos des gens suivis dans les 48h
+    const { data: follows } = await supabase
+      .from('follows').select('following_id')
+      .eq('follower_id', userId).eq('statut', 'accepte');
+    if (follows?.length) {
+      const ids = follows.map((f: any) => f.following_id);
+      const [{ count: a }, { count: p }] = await Promise.all([
+        supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', ids).gte('created_at', since48h),
+        supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', ids).eq('validee', true).gte('created_at', since48h),
+      ]);
+      setMeuteBadge(((a ?? 0) + (p ?? 0)) > 0);
+    }
+  }
 
   return (
     <Tab.Navigator
@@ -60,6 +87,7 @@ function MainTabs() {
         tabBarActiveTintColor: colors.terraPale,
         tabBarInactiveTintColor: 'rgba(245,239,224,0.45)',
         tabBarLabelStyle: { fontFamily: 'DMSans_500Medium', fontSize: 10, letterSpacing: 0.4 },
+        tabBarBadgeStyle: { minWidth: 8, height: 8, borderRadius: 4, padding: 0, top: 2, right: 2, backgroundColor: colors.terra },
         tabBarIcon: ({ focused, color }) => {
           if (route.name === 'Profil' && avatarUrl) {
             return (
@@ -79,10 +107,18 @@ function MainTabs() {
         },
       })}
     >
-      <Tab.Screen name="Carte"       component={CarteScreen}       options={{ title: 'Carte' }} />
-      <Tab.Screen name="Partenaires" component={PartenairesScreen} options={{ title: 'Partenaires' }} />
-      <Tab.Screen name="Meute"       component={FeedScreen}        options={{ title: 'Meute' }} />
-      <Tab.Screen name="Profil"      component={ProfilScreen}      options={{ title: 'Mon profil' }} />
+      <Tab.Screen name="Carte"       component={CarteScreen}  options={{ title: 'Carte' }} />
+      <Tab.Screen
+        name="Partenaires" component={PartenairesScreen}
+        options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
+        listeners={{ focus: () => setPartBadge(false) }}
+      />
+      <Tab.Screen
+        name="Meute" component={FeedScreen}
+        options={{ title: 'Meute', tabBarBadge: meuteBadge ? ' ' : undefined }}
+        listeners={{ focus: () => setMeuteBadge(false) }}
+      />
+      <Tab.Screen name="Profil" component={ProfilScreen} options={{ title: 'Mon profil' }} />
     </Tab.Navigator>
   );
 }
