@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
   filtersScroll: { borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
-  filtersContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
+  filtersContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, alignItems: 'center' },
   filterChip: {
     paddingVertical: 7, paddingHorizontal: 14,
     borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white,
