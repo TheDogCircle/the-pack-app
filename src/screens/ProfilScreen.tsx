@@ -82,6 +82,9 @@ export default function ProfilScreen() {
   const [notifFollow, setNotifFollow] = useState(true);
   const [notifLieuNearby, setNotifLieuNearby] = useState(true);
   const [favFilter, setFavFilter] = useState<'tous' | 'favori' | 'a_tester' | 'deja_teste'>('tous');
+  const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
+  const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
+  const [followListLoading, setFollowListLoading] = useState(false);
   const cardRef = useRef<View>(null);
 
   const [prenom, setPrenom] = useState('');
@@ -197,6 +200,27 @@ export default function ProfilScreen() {
     }
   }
 
+  async function openFollowModal(type: 'followers' | 'following') {
+    setFollowModal(type);
+    setFollowListLoading(true);
+    setFollowList([]);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setFollowListLoading(false); return; }
+    let userIds: string[] = [];
+    if (type === 'followers') {
+      const { data } = await supabase.from('follows').select('follower_id').eq('following_id', session.user.id).eq('statut', 'accepte');
+      userIds = (data || []).map((f: any) => f.follower_id);
+    } else {
+      const { data } = await supabase.from('follows').select('following_id').eq('follower_id', session.user.id).eq('statut', 'accepte');
+      userIds = (data || []).map((f: any) => f.following_id);
+    }
+    if (userIds.length > 0) {
+      const { data: profils } = await supabase.from('profils').select('id,prenom,username,avatar_url,ville').in('id', userIds);
+      setFollowList(profils || []);
+    }
+    setFollowListLoading(false);
+  }
+
   async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby', value: boolean) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -234,14 +258,14 @@ export default function ProfilScreen() {
               <Text style={styles.statNum}>{favoris.length}</Text>
               <Text style={styles.statLabel}>Favoris</Text>
             </View>
-            <View style={styles.statItem}>
+            <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('followers')} activeOpacity={0.7}>
               <Text style={styles.statNum}>{followersCount}</Text>
               <Text style={styles.statLabel}>Abonnés</Text>
-            </View>
-            <View style={styles.statItem}>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('following')} activeOpacity={0.7}>
               <Text style={styles.statNum}>{followingCount}</Text>
               <Text style={styles.statLabel}>Abonnements</Text>
-            </View>
+            </TouchableOpacity>
           </View>
           {(() => {
             const pts = profil?.points || 0;
@@ -462,7 +486,16 @@ export default function ProfilScreen() {
             </View>
           }
           renderItem={({ item }) => (
-            <View style={styles.avisCard}>
+            <TouchableOpacity
+              style={styles.avisCard}
+              activeOpacity={item.lieu_id ? 0.75 : 1}
+              onPress={() => {
+                if (item.lieu_id) {
+                  mapNavigation.setPendingLieu(item.lieu_id);
+                  navigation.navigate('Tabs', { screen: 'Carte' });
+                }
+              }}
+            >
               <View style={styles.avisHeader}>
                 <Text style={styles.avisNom} numberOfLines={1}>
                   {CAT_EMOJI[item.lieux?.cat || 'autre'] || '📍'} {item.lieux?.nom || 'Lieu inconnu'}
@@ -475,8 +508,16 @@ export default function ProfilScreen() {
               </View>
               {item.lieux?.ville ? <Text style={styles.avisVille}>{item.lieux.ville}</Text> : null}
               {item.commentaire ? <Text style={styles.avisComment} numberOfLines={3}>{item.commentaire}</Text> : null}
-              <Text style={styles.avisDate}>{new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-            </View>
+              <View style={styles.avisFooter}>
+                <Text style={styles.avisDate}>{new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                {item.lieu_id && (
+                  <View style={styles.avisGoRow}>
+                    <Ionicons name="map-outline" size={11} color={colors.terra} />
+                    <Text style={styles.avisGoText}>Voir sur la carte</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
           )}
         />
       )}
@@ -556,6 +597,53 @@ export default function ProfilScreen() {
         {profil?.username ? <Text style={styles.shareCardUrlUser}>@{profil.username}</Text> : null}
         <View style={{ height: 36 }} />
       </View>
+
+      {/* Follow list modal */}
+      <Modal visible={!!followModal} animationType="slide" transparent>
+        <View style={styles.followOverlay}>
+          <View style={styles.followCard}>
+            <View style={styles.followCardHeader}>
+              <Text style={styles.followCardTitle}>
+                {followModal === 'followers' ? 'Abonnés' : 'Abonnements'}
+              </Text>
+              <TouchableOpacity onPress={() => setFollowModal(null)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {followListLoading ? (
+              <ActivityIndicator style={{ padding: 40 }} color={colors.terra} />
+            ) : followList.length === 0 ? (
+              <View style={styles.followEmpty}>
+                <Text style={styles.followEmptyText}>
+                  {followModal === 'followers' ? 'Aucun abonné pour l\'instant' : 'Tu ne suis personne encore'}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={followList}
+                keyExtractor={item => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.followRow}
+                    activeOpacity={0.7}
+                    onPress={() => { setFollowModal(null); navigation.navigate('ProfilPublic', { userId: item.id }); }}
+                  >
+                    {item.avatar_url
+                      ? <Image source={{ uri: item.avatar_url }} style={styles.followAvatar} />
+                      : <View style={styles.followAvatarFallback}><Text style={styles.followAvatarLetter}>{(item.prenom || '?')[0].toUpperCase()}</Text></View>}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.followNom}>{item.prenom || 'Membre'}</Text>
+                      {item.username ? <Text style={styles.followUsername}>@{item.username}</Text> : null}
+                      {item.ville ? <Text style={styles.followVille}>{item.ville}</Text> : null}
+                    </View>
+                    <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Race picker modal */}
       <Modal visible={raceModal} animationType="slide" transparent>
@@ -791,4 +879,35 @@ const styles = StyleSheet.create({
   raceItemActive: { backgroundColor: colors.terra + '0D' },
   raceItemText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux },
   raceItemTextActive: { fontFamily: 'DMSans_500Medium', color: colors.terra },
+
+  avisFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
+  avisGoRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  avisGoText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+
+  followOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  followCard: {
+    backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    maxHeight: '75%', paddingBottom: 32,
+  },
+  followCardHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  followCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  followEmpty: { alignItems: 'center', paddingVertical: 48 },
+  followEmptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  followRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 20,
+    borderBottomWidth: 1, borderBottomColor: colors.border + '55',
+  },
+  followAvatar: { width: 44, height: 44, borderRadius: 22 },
+  followAvatarFallback: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.bordeaux + '15', alignItems: 'center', justifyContent: 'center',
+  },
+  followAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  followNom: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  followUsername: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  followVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 });

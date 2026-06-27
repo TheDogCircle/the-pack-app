@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, ActivityIndicator, Dimensions,
+  Image, ActivityIndicator, Dimensions, Modal, FlatList,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +56,9 @@ export default function ProfilPublicScreen() {
   const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'adresses' | 'photos' | 'avis'>('adresses');
+  const [followModal, setFollowModal] = useState(false);
+  const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
+  const [followListLoading, setFollowListLoading] = useState(false);
 
   useEffect(() => { init(); }, []);
 
@@ -134,6 +137,19 @@ export default function ProfilPublicScreen() {
     setFollowLoading(false);
   }
 
+  async function openFollowersModal() {
+    setFollowModal(true);
+    setFollowListLoading(true);
+    setFollowList([]);
+    const { data } = await supabase.from('follows').select('follower_id').eq('following_id', userId).eq('statut', 'accepte');
+    const ids = (data || []).map((f: any) => f.follower_id);
+    if (ids.length > 0) {
+      const { data: profils } = await supabase.from('profils').select('id,prenom,username,avatar_url,ville').in('id', ids);
+      setFollowList(profils || []);
+    }
+    setFollowListLoading(false);
+  }
+
   function goToLieu(lieuId: string) {
     mapNavigation.setPendingLieu(lieuId);
     navigation.navigate('Tabs', { screen: 'Carte' });
@@ -187,14 +203,14 @@ export default function ProfilPublicScreen() {
 
         <View style={styles.statsRow}>
           {[
-            { label: 'Avis',    value: stats.avis },
-            { label: 'Adresses', value: stats.favoris },
-            { label: 'Abonnés', value: stats.followers },
+            { label: 'Avis',     value: stats.avis,      onPress: undefined },
+            { label: 'Adresses', value: stats.favoris,   onPress: undefined },
+            { label: 'Abonnés',  value: stats.followers, onPress: openFollowersModal },
           ].map(s => (
-            <View key={s.label} style={styles.stat}>
+            <TouchableOpacity key={s.label} style={styles.stat} onPress={s.onPress} activeOpacity={s.onPress ? 0.7 : 1}>
               <Text style={styles.statNum}>{s.value}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
+              <Text style={[styles.statLabel, s.onPress && { color: colors.terraPale }]}>{s.label}</Text>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -341,6 +357,48 @@ export default function ProfilPublicScreen() {
           </ScrollView>
         )
       )}
+      {/* Modal abonnés */}
+      <Modal visible={followModal} animationType="slide" transparent>
+        <View style={styles.followOverlay}>
+          <View style={styles.followCard}>
+            <View style={styles.followCardHeader}>
+              <Text style={styles.followCardTitle}>Abonnés</Text>
+              <TouchableOpacity onPress={() => setFollowModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {followListLoading ? (
+              <ActivityIndicator style={{ padding: 40 }} color={colors.terra} />
+            ) : followList.length === 0 ? (
+              <View style={styles.followEmpty}>
+                <Text style={styles.followEmptyText}>Aucun abonné pour l'instant</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={followList}
+                keyExtractor={item => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.followRow}
+                    activeOpacity={0.7}
+                    onPress={() => { setFollowModal(false); navigation.push('ProfilPublic', { userId: item.id }); }}
+                  >
+                    {item.avatar_url
+                      ? <Image source={{ uri: item.avatar_url }} style={styles.followAvatar} />
+                      : <View style={styles.followAvatarFallback}><Text style={styles.followAvatarLetter}>{(item.prenom || '?')[0].toUpperCase()}</Text></View>}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.followNom}>{item.prenom || 'Membre'}</Text>
+                      {item.username ? <Text style={styles.followUsername}>@{item.username}</Text> : null}
+                      {item.ville ? <Text style={styles.followVille}>{item.ville}</Text> : null}
+                    </View>
+                    <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -421,4 +479,31 @@ const styles = StyleSheet.create({
   avisVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   starsRow: { flexDirection: 'row', gap: 2 },
   avisComment: { fontFamily: 'DMSans_300Light', fontSize: 12, color: colors.textMid, lineHeight: 18, fontStyle: 'italic' },
+
+  followOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  followCard: {
+    backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    maxHeight: '75%', paddingBottom: 32,
+  },
+  followCardHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  followCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  followEmpty: { alignItems: 'center', paddingVertical: 48 },
+  followEmptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  followRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 20,
+    borderBottomWidth: 1, borderBottomColor: colors.border + '55',
+  },
+  followAvatar: { width: 44, height: 44, borderRadius: 22 },
+  followAvatarFallback: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.bordeaux + '15', alignItems: 'center', justifyContent: 'center',
+  },
+  followAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  followNom: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  followUsername: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  followVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 });
