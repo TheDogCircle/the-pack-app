@@ -2056,7 +2056,7 @@ const styles = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: colors.ivoryPale,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: SCREEN_H * 0.82,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: SCREEN_H * 0.45, maxHeight: SCREEN_H * 0.82,
     shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 12,
   },
   handleArea: { position: 'absolute', top: 0, left: (SCREEN_W - 100) / 2, width: 100, paddingTop: 10, paddingBottom: 14, alignItems: 'center', zIndex: 30 },
