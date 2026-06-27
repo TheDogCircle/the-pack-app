@@ -165,6 +165,9 @@ export default function CarteScreen() {
   const [dogTagModal, setDogTagModal] = useState(false);
   const [dogTagInput, setDogTagInput] = useState('');
   const [pendingPhotoUri, setPendingPhotoUri] = useState<string | null>(null);
+  const [aiMode, setAiMode] = useState(false);
+  const [aiResults, setAiResults] = useState<{ lieu: Lieu; raison: string }[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -478,9 +481,40 @@ export default function CarteScreen() {
 
   function onSearchChange(text: string) {
     setSearchQuery(text);
+    setAiResults([]);
+    if (aiMode) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => searchLieux(text), 300);
     if (text.length < 2) { setSearchResults([]); setCityResults([]); setShowResults(false); }
+  }
+
+  async function triggerAiSearch() {
+    if (!searchQuery.trim()) return;
+    Keyboard.dismiss();
+    setAiLoading(true);
+    setShowResults(false);
+    setAiResults([]);
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-search', {
+        body: { query: searchQuery.trim(), userLat, userLng },
+      });
+      if (!error && data?.results?.length) {
+        setAiResults(data.results);
+      } else {
+        setAiResults([]);
+      }
+    } catch { setAiResults([]); }
+    setAiLoading(false);
+  }
+
+  function toggleAiMode() {
+    const next = !aiMode;
+    setAiMode(next);
+    setSearchQuery('');
+    setSearchResults([]);
+    setCityResults([]);
+    setShowResults(false);
+    setAiResults([]);
   }
 
   function onSelectLieu(lieu: Lieu) {
@@ -1202,22 +1236,35 @@ export default function CarteScreen() {
 
       {/* Search + filters overlay */}
       <View style={styles.topOverlay} pointerEvents="box-none">
-        <View style={styles.searchContainer} pointerEvents="auto">
-          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 12 }} />
+        <View style={[styles.searchContainer, aiMode && styles.searchContainerAi]} pointerEvents="auto">
+          {aiMode
+            ? <Ionicons name="sparkles" size={16} color={colors.terra} style={{ marginLeft: 12 }} />
+            : <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 12 }} />
+          }
           <TextInput
             style={styles.searchInput}
-            placeholder="Lieu, ville, quartier…"
-            placeholderTextColor={colors.textMuted}
+            placeholder={aiMode ? 'Décris ce que tu cherches…' : 'Lieu, ville, quartier…'}
+            placeholderTextColor={aiMode ? colors.terra + '99' : colors.textMuted}
             value={searchQuery}
             onChangeText={onSearchChange}
-            onFocus={() => { if (selectedLieu) closeFiche(); if (searchResults.length > 0 || cityResults.length > 0) setShowResults(true); }}
+            onFocus={() => { if (selectedLieu) closeFiche(); if (!aiMode && (searchResults.length > 0 || cityResults.length > 0)) setShowResults(true); }}
             returnKeyType="search"
+            onSubmitEditing={() => { if (aiMode) triggerAiSearch(); }}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); setCityResults([]); setShowResults(false); }}>
-              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-            </TouchableOpacity>
-          )}
+          {aiLoading
+            ? <ActivityIndicator size="small" color={colors.terra} style={{ marginRight: 6 }} />
+            : searchQuery.length > 0
+              ? <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); setCityResults([]); setShowResults(false); setAiResults([]); }}>
+                  <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              : null
+          }
+          <TouchableOpacity
+            style={[styles.aiToggleBtn, aiMode && styles.aiToggleBtnActive]}
+            onPress={toggleAiMode}
+          >
+            <Text style={[styles.aiToggleText, aiMode && styles.aiToggleTextActive]}>✦ IA</Text>
+          </TouchableOpacity>
           <View style={styles.searchDivider} />
           <TouchableOpacity style={styles.listToggleBtn} onPress={() => setListView(v => !v)}>
             <Ionicons name={listView ? 'map-outline' : 'list-outline'} size={18} color={listView ? colors.terra : colors.bordeaux} />
@@ -1285,7 +1332,7 @@ export default function CarteScreen() {
           </View>
         )}
 
-        {showResults && totalSearchResults > 0 && (
+        {showResults && totalSearchResults > 0 && !aiMode && (
           <View style={styles.resultsDropdown} pointerEvents="auto">
             {cityResults.map((city, idx) => (
               <TouchableOpacity
@@ -1322,6 +1369,42 @@ export default function CarteScreen() {
                 </TouchableOpacity>
               );
             })}
+          </View>
+        )}
+
+        {aiMode && aiResults.length > 0 && (
+          <View style={styles.resultsDropdown} pointerEvents="auto">
+            <View style={styles.aiResultsHeader}>
+              <Text style={styles.aiResultsHeaderText}>✦ Suggestions IA</Text>
+            </View>
+            {aiResults.map((r, idx) => {
+              const rCfg = CAT_CONFIG[r.lieu.cat] || CAT_CONFIG.autre;
+              return (
+                <TouchableOpacity
+                  key={r.lieu.id}
+                  style={[styles.resultItem, idx < aiResults.length - 1 && styles.resultItemBorder]}
+                  onPress={() => { setAiResults([]); onSelectLieu(r.lieu); }}
+                >
+                  <View style={[styles.resultIconWrap, { backgroundColor: rCfg.color + '22' }]}>
+                    <Ionicons name={rCfg.icon} size={16} color={rCfg.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.resultNom} numberOfLines={1}>{r.lieu.nom}</Text>
+                    <Text style={styles.aiResultRaison} numberOfLines={2}>{r.raison}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {aiMode && !aiLoading && aiResults.length === 0 && searchQuery.length > 2 && (
+          <View pointerEvents="auto">
+            <TouchableOpacity style={styles.aiSearchHint} onPress={triggerAiSearch}>
+              <Text style={styles.aiSearchHintText}>Appuyer pour rechercher avec l'IA</Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.terra} />
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -2018,7 +2101,25 @@ const styles = StyleSheet.create({
     borderRadius: 14, marginHorizontal: 12, borderWidth: 1, borderColor: colors.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 6, elevation: 4,
   },
+  searchContainerAi: { borderColor: colors.terra, borderWidth: 1.5 },
   searchInput: { flex: 1, height: 44, paddingHorizontal: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  aiToggleBtn: {
+    marginHorizontal: 6, paddingHorizontal: 9, paddingVertical: 5,
+    borderRadius: 10, borderWidth: 1.5, borderColor: colors.border,
+  },
+  aiToggleBtnActive: { backgroundColor: colors.terra, borderColor: colors.terra },
+  aiToggleText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted },
+  aiToggleTextActive: { color: colors.ivory },
+  aiResultsHeader: { paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  aiResultsHeaderText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, letterSpacing: 0.5 },
+  aiResultRaison: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.terra, lineHeight: 16, marginTop: 1 },
+  aiSearchHint: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: colors.white, borderRadius: 14, marginHorizontal: 12,
+    borderWidth: 1, borderColor: colors.terra + '55', paddingVertical: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 2,
+  },
+  aiSearchHintText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
   filtersContent: { paddingHorizontal: 12, gap: 8, paddingBottom: 4 },
   filterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.white,

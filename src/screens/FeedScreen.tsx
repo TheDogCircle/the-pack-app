@@ -128,18 +128,21 @@ export default function FeedScreen() {
     const merged: FeedItem[] = [
       ...(avis || []).map((a: any) => ({
         id: 'a-' + a.id, type: 'avis' as const,
+        lieuId: a.lieu_id,
         user: { id: a.user_id, prenom: profilMap[a.user_id]?.prenom || 'Membre', avatar_url: profilMap[a.user_id]?.avatar_url || null, username: profilMap[a.user_id]?.username || null },
         lieu: lieuMap[a.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         note: a.note, commentaire: a.commentaire, created_at: a.created_at,
       })),
       ...(favoris || []).map((f: any) => ({
         id: 'f-' + f.id, type: 'favori' as const,
+        lieuId: f.lieu_id,
         user: { id: f.user_id, prenom: profilMap[f.user_id]?.prenom || 'Membre', avatar_url: profilMap[f.user_id]?.avatar_url || null },
         lieu: lieuMap[f.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         created_at: f.created_at,
       })),
       ...(photoData || []).map((p: any) => ({
         id: 'p-' + p.id, type: 'photo' as const,
+        lieuId: p.lieu_id,
         user: { id: p.user_id, prenom: profilMap[p.user_id]?.prenom || 'Membre', avatar_url: profilMap[p.user_id]?.avatar_url || null, username: profilMap[p.user_id]?.username || null },
         lieu: lieuMap[p.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         photoUrl: p.url, nomChien: p.nom_chien || null, created_at: p.created_at,
@@ -415,7 +418,10 @@ export default function FeedScreen() {
                 <Text style={styles.bold}>{item.user.prenom}</Text>
                 {item.user.username ? <Text style={styles.username}> @{item.user.username}</Text> : null}
                 {item.type === 'avis' ? ' a noté ' : item.type === 'photo' ? ' a partagé une photo de ' : ' a ajouté aux favoris '}
-                <Text style={styles.lieuName}>
+                <Text
+                  style={[styles.lieuName, item.lieuId && { textDecorationLine: 'underline' }]}
+                  onPress={() => { if (item.lieuId) { mapNavigation.setPendingLieu(item.lieuId); navigation.navigate('Tabs', { screen: 'Carte' }); } }}
+                >
                   {CAT_EMOJI[item.lieu.cat] || '📍'} {item.lieu.nom}
                 </Text>
               </Text>
@@ -432,7 +438,15 @@ export default function FeedScreen() {
               ) : null}
               {isPhoto && item.photoUrl ? (
                 <>
-                  <Image source={{ uri: item.photoUrl }} style={styles.feedPhoto} />
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      if (item.lieuId) { mapNavigation.setPendingLieu(item.lieuId); navigation.navigate('Tabs', { screen: 'Carte' }); }
+                    }}
+                  >
+                    <Image source={{ uri: item.photoUrl }} style={styles.feedPhoto} />
+                  </TouchableOpacity>
                   {item.nomChien && (
                     <View style={styles.feedDogTag}>
                       <Text style={styles.feedDogTagText}>🐾 {item.nomChien}</Text>

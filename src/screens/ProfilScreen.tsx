@@ -15,6 +15,7 @@ import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { savePushToken } from '../lib/notifications';
+import { mapNavigation } from '../lib/mapNavigation';
 
 const RACES = [
   'Akita Inu','Alaskan Malamute','Basenji','Basset Hound','Beagle','Berger Allemand',
@@ -60,7 +61,7 @@ type Profil = {
 type LieuMini = { id: string; nom: string; ville: string; cat: string };
 type FavItem = { id: string; lieu_id: string; liste: string; lieux: LieuMini | null };
 type AvisItem = { id: string; note: number; commentaire: string | null; created_at: string; lieu_id: string; lieux: LieuMini | null };
-type PhotoItem = { id: string; url: string; validee: boolean };
+type PhotoItem = { id: string; url: string; validee: boolean; lieu_id: string | null };
 
 export default function ProfilScreen() {
   const navigation = useNavigation<any>();
@@ -101,7 +102,7 @@ export default function ProfilScreen() {
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
-      supabase.from('photos').select('id,url,validee').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(40),
+      supabase.from('photos').select('id,url,validee,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(40),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', session.user.id).eq('statut', 'accepte'),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', session.user.id).eq('statut', 'accepte'),
     ]);
@@ -494,14 +495,23 @@ export default function ProfilScreen() {
             contentContainerStyle={{ padding: 16, gap: 4 }}
             columnWrapperStyle={{ gap: 4 }}
             renderItem={({ item }) => (
-              <View style={styles.photoCell}>
+              <TouchableOpacity
+                style={styles.photoCell}
+                activeOpacity={item.lieu_id ? 0.8 : 1}
+                onPress={() => {
+                  if (item.lieu_id) {
+                    mapNavigation.setPendingLieu(item.lieu_id);
+                    navigation.navigate('Tabs', { screen: 'Carte' });
+                  }
+                }}
+              >
                 <Image source={{ uri: item.url }} style={styles.photoCellImg} />
                 {!item.validee && (
                   <View style={styles.photoPendingOverlay}>
                     <Text style={styles.photoPendingText}>En attente</Text>
                   </View>
                 )}
-              </View>
+              </TouchableOpacity>
             )}
           />
         )
