@@ -58,10 +58,7 @@ export default function FeedScreen() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'activite' | 'explorer' | 'membres' | 'evenements'>('activite');
-  const [evenements, setEvenements] = useState<Evenement[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
-  const [eventInscription, setEventInscription] = useState(false);
+  const [tab, setTab] = useState<'activite' | 'explorer' | 'membres'>('activite');
   const [searchMembre, setSearchMembre] = useState('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [photoLikesCount, setPhotoLikesCount] = useState<Record<string, number>>({});
@@ -76,7 +73,6 @@ export default function FeedScreen() {
     if (tab === 'activite') await loadActivite();
     else if (tab === 'explorer') await loadExplorer();
     else if (tab === 'membres') await loadMembres();
-    else if (tab === 'evenements') await loadEvenements();
     setLoading(false);
   }
 
@@ -502,7 +498,6 @@ export default function FeedScreen() {
           { key: 'activite', label: 'Activité' },
           { key: 'explorer', label: 'Explorer' },
           { key: 'membres',  label: 'Membres' },
-          { key: 'evenements', label: 'Events' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
@@ -512,57 +507,6 @@ export default function FeedScreen() {
 
       {loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
-      ) : tab === 'evenements' ? (
-        <FlatList
-          data={evenements}
-          keyExtractor={e => e.id}
-          contentContainerStyle={[styles.list, evenements.length === 0 && { flex: 1, justifyContent: 'center' }]}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await loadEvenements(); setRefreshing(false); }} tintColor={colors.terra} />}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="calendar-outline" size={40} color={colors.textMuted} style={{ marginBottom: 12 }} />
-              <Text style={styles.emptyText}>Aucun événement à venir pour l'instant</Text>
-            </View>
-          }
-          renderItem={({ item: e }) => {
-            const date = new Date(e.date_heure);
-            const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-            const heureStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-            const diffDays = Math.ceil((date.getTime() - Date.now()) / 86400000);
-            return (
-              <TouchableOpacity style={styles.eventCard} onPress={() => setSelectedEvent(e)} activeOpacity={0.85}>
-                {e.image_url && <Image source={{ uri: e.image_url }} style={styles.eventImage} />}
-                {!e.image_url && <View style={styles.eventImagePlaceholder}><Ionicons name="calendar-outline" size={28} color={colors.bordeaux + '40'} /></View>}
-                <View style={styles.eventBody}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                    <Text style={styles.eventTitle} numberOfLines={2}>{e.titre}</Text>
-                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                      {diffDays <= 3 && <View style={styles.urgencyBadge}><Text style={styles.urgencyText}>{diffDays === 0 ? "Auj." : diffDays === 1 ? 'Demain' : `J-${diffDays}`}</Text></View>}
-                      {e.payant ? <View style={styles.paidBadge}><Text style={styles.paidText}>{e.prix ? `${e.prix} €` : 'Payant'}</Text></View> : <View style={styles.freeBadge}><Text style={styles.freeText}>Gratuit</Text></View>}
-                    </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                    <Ionicons name="calendar-outline" size={11} color={colors.textMuted} />
-                    <Text style={styles.eventDate}>{dateStr} à {heureStr}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Ionicons name="location-outline" size={11} color={colors.textMuted} />
-                    <Text style={styles.eventLocation}>{e.ville}{e.adresse ? ` — ${e.adresse}` : ''}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                    <Text style={styles.eventOrga}>@{e.profils?.username || 'anonyme'}</Text>
-                    {e.nb_inscrits !== undefined && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                        <Ionicons name="people-outline" size={11} color={colors.textMuted} />
-                        <Text style={styles.eventCount}>{e.nb_inscrits}{e.max_participants ? `/${e.max_participants}` : ''}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
-        />
       ) : (
         <FlatList
           data={tab === 'membres' && searchMembre.length > 0
@@ -603,72 +547,6 @@ export default function FeedScreen() {
         />
       )}
 
-      {/* ─── EVENT DETAIL MODAL ─── */}
-      <Modal visible={!!selectedEvent} animationType="slide" transparent onRequestClose={() => setSelectedEvent(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedEvent(null)}>
-              <Ionicons name="close" size={22} color={colors.textMid} />
-            </TouchableOpacity>
-            {selectedEvent && (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {selectedEvent.image_url && <Image source={{ uri: selectedEvent.image_url }} style={styles.modalImage} />}
-                <View style={styles.modalContent}>
-                  <Text style={styles.modalTitle}>{selectedEvent.titre}</Text>
-                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-                    {selectedEvent.payant
-                      ? <View style={styles.paidBadge}><Text style={styles.paidText}>{selectedEvent.prix ? `${selectedEvent.prix} €` : 'Payant'}</Text></View>
-                      : <View style={styles.freeBadge}><Text style={styles.freeText}>✓ Gratuit</Text></View>}
-                    {selectedEvent.nb_inscrits !== undefined && (
-                      <View style={styles.countBadge}><Text style={styles.countBadgeText}>{selectedEvent.nb_inscrits}{selectedEvent.max_participants ? `/${selectedEvent.max_participants}` : ''} inscrits</Text></View>
-                    )}
-                  </View>
-                  <View style={styles.modalInfoRow}>
-                    <Ionicons name="calendar-outline" size={17} color={colors.textMuted} style={{ marginTop: 2 }} />
-                    <View>
-                      <Text style={styles.modalInfoMain}>{new Date(selectedEvent.date_heure).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-                      <Text style={styles.modalInfoSub}>à {new Date(selectedEvent.date_heure).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.modalInfoRow}>
-                    <Ionicons name="location-outline" size={17} color={colors.textMuted} style={{ marginTop: 2 }} />
-                    <View>
-                      <Text style={styles.modalInfoMain}>{selectedEvent.ville}</Text>
-                      {selectedEvent.adresse && <Text style={styles.modalInfoSub}>{selectedEvent.adresse}</Text>}
-                    </View>
-                  </View>
-                  <View style={[styles.modalInfoRow, { marginBottom: 16 }]}>
-                    <Ionicons name="person-outline" size={17} color={colors.textMuted} style={{ marginTop: 2 }} />
-                    <Text style={styles.modalInfoSub}>Organisé par @{selectedEvent.profils?.username || 'anonyme'}</Text>
-                  </View>
-                  {selectedEvent.description && (
-                    <Text style={styles.modalDesc}>{selectedEvent.description}</Text>
-                  )}
-                  {selectedEvent.max_participants && (selectedEvent.nb_inscrits || 0) >= selectedEvent.max_participants && !selectedEvent.je_suis_inscrit ? (
-                    <View style={styles.fullBadge}><Text style={styles.fullText}>Complet — plus de places disponibles</Text></View>
-                  ) : selectedEvent.je_suis_inscrit ? (
-                    <TouchableOpacity
-                      style={styles.cancelBtn}
-                      onPress={() => toggleEventInscription(selectedEvent.id, false)}
-                      disabled={eventInscription}
-                    >
-                      <Text style={styles.cancelBtnText}>✓ Inscrit · Annuler mon inscription</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.joinBtn}
-                      onPress={() => toggleEventInscription(selectedEvent.id, true)}
-                      disabled={eventInscription}
-                    >
-                      <Text style={styles.joinBtnText}>S'inscrire{selectedEvent.payant && selectedEvent.prix ? ` — ${selectedEvent.prix} €` : ''}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
