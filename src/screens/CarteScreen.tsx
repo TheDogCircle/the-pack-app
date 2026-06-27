@@ -95,6 +95,14 @@ type LieuFull = Lieu & {
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null };
 type CityResult = { nom: string; lat: number; lng: number };
+type EventMarker = {
+  id: string; titre: string; date_heure: string;
+  adresse: string | null; ville: string;
+  lat: number; lng: number;
+  max_participants: number | null; payant: boolean; prix: number | null;
+  nb_inscrits: number; je_suis_inscrit: boolean;
+  profils: { prenom: string | null; username: string | null } | null;
+};
 
 export default function CarteScreen() {
   const navigation = useNavigation<any>();
@@ -173,6 +181,10 @@ export default function CarteScreen() {
   const [aiMode, setAiMode] = useState(false);
   const [aiResults, setAiResults] = useState<{ lieu: Lieu; raison: string }[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showEvents, setShowEvents] = useState(false);
+  const [mapEvents, setMapEvents] = useState<EventMarker[]>([]);
+  const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
+  const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,6 +277,11 @@ export default function CarteScreen() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (showEvents) loadMapEvents();
+    else setMapEvents([]);
+  }, [showEvents, userId]);
 
   async function fetchLieux(r: Region, cat: string | null) {
     setLoading(true);
@@ -699,6 +716,50 @@ export default function CarteScreen() {
     setFeedbackModal(false);
     setFeedbackText('');
     Alert.alert('Merci !', 'Ton message a bien été envoyé 🐾');
+  }
+
+  async function loadMapEvents() {
+    const now = new Date().toISOString();
+    const { data } = await supabase
+      .from('evenements')
+      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,profils(prenom,username)')
+      .eq('valide', true).eq('actif', true)
+      .gte('date_heure', now)
+      .not('lat', 'is', null)
+      .not('lng', 'is', null);
+    const list = (data || []) as any[];
+    if (!list.length) { setMapEvents([]); return; }
+    const ids = list.map((e: any) => e.id);
+    const [partsRes, ...counts] = await Promise.all([
+      userId
+        ? supabase.from('participations').select('event_id').eq('user_id', userId).in('event_id', ids)
+        : Promise.resolve({ data: null }),
+      ...ids.map((id: string) =>
+        supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
+      ),
+    ]);
+    const inscritIds = new Set(((partsRes as any).data || []).map((p: any) => p.event_id));
+    setMapEvents(list.map((e: any, i: number) => ({
+      ...e,
+      nb_inscrits: (counts[i] as any).count || 0,
+      je_suis_inscrit: inscritIds.has(e.id),
+    })));
+  }
+
+  async function toggleMapEventInscription(eventId: string, join: boolean) {
+    if (!userId) { showLoginPrompt(); return; }
+    setMapEventInscLoading(true);
+    if (join) {
+      await supabase.from('participations').insert({ event_id: eventId, user_id: userId });
+    } else {
+      await supabase.from('participations').delete().eq('event_id', eventId).eq('user_id', userId);
+    }
+    setMapEventInscLoading(false);
+    const update = (e: EventMarker): EventMarker => e.id !== eventId ? e : {
+      ...e, je_suis_inscrit: join, nb_inscrits: e.nb_inscrits + (join ? 1 : -1),
+    };
+    setMapEvents(prev => prev.map(update));
+    setSelectedMapEvent(prev => prev ? update(prev) : prev);
   }
 
   async function handleMapLongPress(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) {
@@ -1158,6 +1219,22 @@ export default function CarteScreen() {
             </Marker>
           );
         })}
+        {showEvents && mapEvents.map(e => (
+          <Marker
+            key={`ev-${e.id}`}
+            coordinate={{ latitude: e.lat, longitude: e.lng }}
+            tracksViewChanges={selectedMapEvent?.id === e.id}
+            anchor={{ x: 0.5, y: 1 }}
+            onPress={() => setSelectedMapEvent(e)}
+          >
+            <View style={styles.eventPin}>
+              <View style={[styles.eventBubble, selectedMapEvent?.id === e.id && styles.eventBubbleSelected]}>
+                <Ionicons name="calendar" size={14} color="#fff" />
+              </View>
+              <View style={styles.eventTail} />
+            </View>
+          </Marker>
+        ))}
       </MapView>
 
       {/* List view */}
@@ -1327,6 +1404,14 @@ export default function CarteScreen() {
               </TouchableOpacity>
             );
           })}
+          <View style={styles.filterSep} />
+          <TouchableOpacity
+            style={[styles.filterPill, showEvents && { backgroundColor: '#4A7FA5', borderColor: '#4A7FA5' }]}
+            onPress={() => setShowEvents(v => !v)}
+          >
+            <Ionicons name="calendar-outline" size={13} color={showEvents ? '#fff' : '#4A7FA5'} />
+            <Text style={[styles.filterLabel, showEvents && styles.filterLabelActive]}>Événements</Text>
+          </TouchableOpacity>
         </ScrollView>}
 
         {!listView && autresOpen && (
@@ -1975,6 +2060,99 @@ export default function CarteScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Event detail modal */}
+      <Modal visible={!!selectedMapEvent} transparent animationType="slide" onRequestClose={() => setSelectedMapEvent(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedMapEvent(null)}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={[styles.modalCard, { gap: 14 }]}>
+              {selectedMapEvent && (() => {
+                const date = new Date(selectedMapEvent.date_heure);
+                const isFull = !!(selectedMapEvent.max_participants && selectedMapEvent.nb_inscrits >= selectedMapEvent.max_participants && !selectedMapEvent.je_suis_inscrit);
+                return (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                      <View style={styles.eventModalIcon}>
+                        <Ionicons name="calendar" size={18} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventModalTitle}>{selectedMapEvent.titre}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setSelectedMapEvent(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Ionicons name="close" size={20} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.eventModalRow}>
+                      <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+                      <Text style={styles.eventModalText}>
+                        {date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                    <View style={styles.eventModalRow}>
+                      <Ionicons name="location-outline" size={14} color={colors.textMuted} />
+                      <Text style={styles.eventModalText} numberOfLines={2}>
+                        {selectedMapEvent.ville}{selectedMapEvent.adresse ? ` · ${selectedMapEvent.adresse}` : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.eventModalRow}>
+                      <Ionicons name="people-outline" size={14} color={colors.textMuted} />
+                      <Text style={styles.eventModalText}>
+                        {selectedMapEvent.nb_inscrits}{selectedMapEvent.max_participants ? `/${selectedMapEvent.max_participants}` : ''} inscrit{selectedMapEvent.nb_inscrits !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                    {selectedMapEvent.payant ? (
+                      <View style={styles.eventModalRow}>
+                        <Ionicons name="cash-outline" size={14} color={colors.textMuted} />
+                        <Text style={styles.eventModalText}>{selectedMapEvent.prix ? `${selectedMapEvent.prix} €` : 'Payant'}</Text>
+                      </View>
+                    ) : null}
+                    {selectedMapEvent.profils?.username ? (
+                      <View style={styles.eventModalRow}>
+                        <Ionicons name="person-outline" size={14} color={colors.textMuted} />
+                        <Text style={styles.eventModalText}>@{selectedMapEvent.profils.username}</Text>
+                      </View>
+                    ) : null}
+
+                    {userId ? (
+                      isFull ? (
+                        <View style={styles.eventModalFull}>
+                          <Text style={styles.eventModalFullText}>Complet — plus de places</Text>
+                        </View>
+                      ) : selectedMapEvent.je_suis_inscrit ? (
+                        <TouchableOpacity style={styles.eventModalCancel} disabled={mapEventInscLoading}
+                          onPress={() => toggleMapEventInscription(selectedMapEvent.id, false)}>
+                          {mapEventInscLoading
+                            ? <ActivityIndicator size="small" color="#e65100" />
+                            : <>
+                                <Ionicons name="checkmark-circle" size={16} color="#e65100" />
+                                <Text style={styles.eventModalCancelText}>Inscrit · Annuler</Text>
+                              </>
+                          }
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity style={styles.eventModalJoin} disabled={mapEventInscLoading}
+                          onPress={() => toggleMapEventInscription(selectedMapEvent.id, true)}>
+                          {mapEventInscLoading
+                            ? <ActivityIndicator color={colors.ivory} size="small" />
+                            : <Text style={styles.eventModalJoinText}>
+                                S'inscrire{selectedMapEvent.payant && selectedMapEvent.prix ? ` — ${selectedMapEvent.prix} €` : ''}
+                              </Text>
+                          }
+                        </TouchableOpacity>
+                      )
+                    ) : (
+                      <TouchableOpacity style={styles.eventModalJoin} onPress={() => { setSelectedMapEvent(null); showLoginPrompt(); }}>
+                        <Text style={styles.eventModalJoinText}>Connecte-toi pour t'inscrire</Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Off-screen share card for image sharing */}
       <View ref={shareLieuCardRef} collapsable={false} style={styles.shareLieuCard}>
         {photos[0]?.url ? (
@@ -2440,4 +2618,34 @@ const styles = StyleSheet.create({
   proposeSuggestItemBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
   proposeSuggestName: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   proposeSuggestAddr: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  // Event markers
+  eventPin: { alignItems: 'center' },
+  eventBubble: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#4A7FA5',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.28, shadowRadius: 4, elevation: 5,
+  },
+  eventBubbleSelected: { width: 44, height: 44, borderRadius: 22 },
+  eventTail: {
+    width: 0, height: 0,
+    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 7,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent',
+    borderTopColor: '#4A7FA5', marginTop: -1,
+  },
+  // Event detail modal
+  eventModalIcon: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: '#4A7FA5',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  eventModalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, lineHeight: 23 },
+  eventModalRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  eventModalText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, flex: 1, lineHeight: 19 },
+  eventModalFull: { backgroundColor: colors.ivoryPale, borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 4 },
+  eventModalFullText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  eventModalJoin: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 14, alignItems: 'center', marginTop: 4, flexDirection: 'row', justifyContent: 'center' },
+  eventModalJoinText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
+  eventModalCancel: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff3e0', borderRadius: 14, padding: 13, marginTop: 4, borderWidth: 1, borderColor: '#ffcc80' },
+  eventModalCancelText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#e65100' },
 });

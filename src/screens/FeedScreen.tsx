@@ -251,56 +251,6 @@ export default function FeedScreen() {
     }
   }
 
-  async function loadEvenements() {
-    const now = new Date().toISOString();
-    const { data } = await supabase
-      .from('evenements')
-      .select('*, profils(username, avatar_url)')
-      .eq('valide', true).eq('actif', true)
-      .gte('date_heure', now)
-      .order('date_heure', { ascending: true });
-
-    const { data: { user } } = await supabase.auth.getUser();
-    const events = data || [];
-
-    if (user && events.length > 0) {
-      const { data: parts } = await supabase.from('participations')
-        .select('event_id').eq('user_id', user.id);
-      const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
-
-      const counts = await Promise.all(events.map(e =>
-        supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', e.id)
-      ));
-      setEvenements(events.map((e, i) => ({
-        ...e,
-        nb_inscrits: counts[i].count || 0,
-        je_suis_inscrit: inscritIds.has(e.id),
-      })));
-    } else {
-      setEvenements(events);
-    }
-  }
-
-  async function toggleEventInscription(eventId: string, join: boolean) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setEventInscription(true);
-    if (join) {
-      await supabase.from('participations').insert({ event_id: eventId, user_id: user.id });
-    } else {
-      await supabase.from('participations').delete().eq('event_id', eventId).eq('user_id', user.id);
-    }
-    setEventInscription(false);
-    const updated = evenements.map(e => {
-      if (e.id !== eventId) return e;
-      return { ...e, je_suis_inscrit: join, nb_inscrits: (e.nb_inscrits || 0) + (join ? 1 : -1) };
-    });
-    setEvenements(updated);
-    if (selectedEvent?.id === eventId) {
-      setSelectedEvent(prev => prev ? { ...prev, je_suis_inscrit: join, nb_inscrits: (prev.nb_inscrits || 0) + (join ? 1 : -1) } : prev);
-    }
-  }
-
   function timeAgo(dateStr: string) {
     const diff = Date.now() - new Date(dateStr).getTime();
     const h = Math.floor(diff / 3600000);

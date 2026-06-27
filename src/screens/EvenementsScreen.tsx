@@ -135,6 +135,19 @@ export default function EvenementsScreen() {
     }
     if (!myUserId) return;
     setSaving(true);
+
+    let eventLat: number | null = null;
+    let eventLng: number | null = null;
+    try {
+      const q = [adresse.trim(), ville.trim()].filter(Boolean).join(', ');
+      const geoResp = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+        { headers: { 'User-Agent': 'ThePackApp/1.0 (thepackclub.fr)' } }
+      );
+      const geoData = await geoResp.json();
+      if (geoData?.[0]) { eventLat = parseFloat(geoData[0].lat); eventLng = parseFloat(geoData[0].lon); }
+    } catch {}
+
     const { error } = await supabase.from('evenements').insert({
       titre: titre.trim(),
       description: description.trim() || null,
@@ -147,6 +160,8 @@ export default function EvenementsScreen() {
       created_by: myUserId,
       valide: false,
       actif: true,
+      lat: eventLat,
+      lng: eventLng,
     });
     setSaving(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -167,17 +182,17 @@ export default function EvenementsScreen() {
   return (
     <View style={styles.container}>
       {/* Filtres */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll} contentContainerStyle={styles.filtersContent}>
+      <View style={styles.tabsWrap}>
         {FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
-            style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
+            style={[styles.tab, filter === f.key && styles.tabActive]}
             onPress={() => setFilter(f.key)}
           >
-            <Text style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]}>{f.label}</Text>
+            <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       {/* Liste */}
       {loading ? (
@@ -411,15 +426,15 @@ export default function EvenementsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
-  filtersScroll: { borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
-  filtersContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, alignItems: 'center' },
-  filterChip: {
-    paddingVertical: 7, paddingHorizontal: 14,
-    borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white,
+  tabsWrap: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+    marginHorizontal: 16, marginVertical: 12,
   },
-  filterChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
-  filterChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
-  filterChipTextActive: { color: colors.ivory },
+  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
+  tabActive: { backgroundColor: colors.bordeaux },
+  tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  tabTextActive: { color: colors.ivory },
 
   list: { padding: 14, gap: 14, paddingBottom: 100 },
 
