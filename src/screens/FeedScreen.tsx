@@ -480,7 +480,7 @@ export default function FeedScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabs}>
+      <View style={styles.tabsWrap}>
         {([
           { key: 'activite', label: 'Activité' },
           { key: 'explorer', label: 'Explorer' },
@@ -488,10 +488,10 @@ export default function FeedScreen() {
           { key: 'evenements', label: 'Events' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       {loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
@@ -661,12 +661,16 @@ const styles = StyleSheet.create({
   header: { backgroundColor: colors.bordeaux, paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16 },
   title: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 24, color: colors.ivory },
   tabsScroll: { maxHeight: 56, marginHorizontal: 16, marginVertical: 12 },
+  tabsWrap: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+    marginHorizontal: 16, marginVertical: 12,
+  },
   tabs: {
     flexDirection: 'row', backgroundColor: colors.white,
     borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
-    alignSelf: 'flex-start', minWidth: '100%',
   },
-  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
+  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
   tabActive: { backgroundColor: colors.bordeaux },
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },

@@ -665,7 +665,7 @@ const styles = StyleSheet.create({
   },
   favFilterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+    paddingHorizontal: 12, height: 34, borderRadius: 20,
     borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white,
     flexShrink: 0,
   },
