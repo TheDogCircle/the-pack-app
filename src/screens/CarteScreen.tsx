@@ -12,7 +12,7 @@ import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
 import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
@@ -37,6 +37,11 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   bar:         { icon: 'wine-outline',       markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
   autre:       { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
+
+function CatIcon({ cat, name, size, color }: { cat?: string | null; name: IoniconsName; size: number; color: string }) {
+  if (cat === 'plage') return <MaterialCommunityIcons name="waves" size={size} color={color} />;
+  return <Ionicons name={name} size={size} color={color} />;
+}
 
 const CATEGORIES: { key: string | null; label: string; icon: IoniconsName }[] = [
   { key: null,         label: 'Tout',           icon: 'apps-outline' },
@@ -877,7 +882,7 @@ export default function CarteScreen() {
               </ScrollView>
             ) : (
               <View style={[styles.ficheHeaderPlaceholder, { backgroundColor: cfg.color }]}>
-                <Ionicons name={cfg.icon} size={72} color="rgba(245,239,224,0.18)" />
+                <CatIcon cat={selectedLieu?.cat} name={cfg.icon} size={72} color="rgba(245,239,224,0.18)" />
               </View>
             )}
 
@@ -1146,7 +1151,7 @@ export default function CarteScreen() {
               <View style={styles.markerPin}>
                 <View style={[styles.markerBubble, { width: size, height: size, borderRadius: size / 2, backgroundColor: cfg.color }, isSelected && styles.markerBubbleSelected]}>
                   <View style={styles.markerShine} />
-                  <Ionicons name={cfg.markerIcon} size={iconSize} color="#fff" />
+                  <CatIcon cat={l.cat} name={cfg.markerIcon} size={iconSize} color="#fff" />
                 </View>
                 <View style={[styles.markerTail, { borderTopColor: cfg.color }, isSelected && { borderTopWidth: 9, borderLeftWidth: 6, borderRightWidth: 6 }]} />
               </View>
@@ -1294,7 +1299,7 @@ export default function CarteScreen() {
                 style={[styles.filterPill, active && styles.filterPillActive, active && (catCfg ? { backgroundColor: catCfg.color, borderColor: catCfg.color } : { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux })]}
                 onPress={() => onCatPress(c.key)}
               >
-                <Ionicons name={c.icon} size={13} color={active ? '#fff' : (catCfg?.color || colors.bordeaux)} />
+                <CatIcon cat={c.key} name={c.icon} size={13} color={active ? '#fff' : (catCfg?.color || colors.bordeaux)} />
                 <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>{c.label}</Text>
               </TouchableOpacity>
             );
@@ -1336,7 +1341,7 @@ export default function CarteScreen() {
                   style={[styles.autresItem, idx < AUTRES_CATS.length - 1 && styles.autresItemBorder, active && { backgroundColor: catCfg.color + '12' }]}
                   onPress={() => onAutresCatPress(key)}
                 >
-                  <Ionicons name={c.icon} size={16} color={active ? catCfg.color : colors.textMuted} />
+                  <CatIcon cat={key} name={c.icon} size={16} color={active ? catCfg.color : colors.textMuted} />
                   <Text style={[styles.autresItemText, active && { color: catCfg.color, fontFamily: 'DMSans_500Medium' }]}>{c.label}</Text>
                   {active && <Ionicons name="checkmark" size={14} color={catCfg.color} />}
                 </TouchableOpacity>
@@ -1546,7 +1551,7 @@ export default function CarteScreen() {
                     const active = proposeCat === c.key;
                     return (
                       <TouchableOpacity key={c.key!} style={[styles.catPill, active && { backgroundColor: catCfg.color, borderColor: catCfg.color }]} onPress={() => setProposeCat(c.key!)}>
-                        <Ionicons name={c.icon} size={13} color={active ? '#fff' : catCfg.color} />
+                        <CatIcon cat={c.key} name={c.icon} size={13} color={active ? '#fff' : catCfg.color} />
                         <Text style={[styles.catPillLabel, active && styles.catPillLabelActive]}>{c.label}</Text>
                       </TouchableOpacity>
                     );

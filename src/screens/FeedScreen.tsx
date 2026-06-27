@@ -48,7 +48,7 @@ type FeedItem = {
 
 const CAT_EMOJI: Record<string, string> = {
   restaurant: '🍽️', cafe: '☕', hotel: '🏨', parc: '🌳',
-  plage: '🏖️', veterinaire: '🏥', toiletteur: '✂️', boutique: '🛍️',
+  plage: '🌊', veto: '🩺', parc_chien: '🐾', toiletteur: '✂️', boutique: '🛍️',
   bar: '🍺', autre: '📍',
 };
 
