@@ -6,6 +6,13 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Compact category abbreviations to save tokens
+const CAT: Record<string, string> = {
+  restaurant: 'resto', cafe: 'café', parc: 'parc', parc_chien: 'canin',
+  plage: 'plage', veto: 'véto', toiletteur: 'toilett.', boutique: 'boutique',
+  hotel: 'hôtel', bar: 'bar', autre: 'lieu',
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -20,50 +27,39 @@ serve(async (req) => {
 
     let dbQuery = supabase
       .from('lieux')
-      .select('id,nom,cat,ville,adresse,description,lat,lng,eau,gamelles,chiens_salle,chiens_terrasse,espace_dedie,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,note_moyenne,nb_avis')
+      .select('id,nom,cat,ville,description,eau,chiens_salle,chiens_terrasse,chiens_laches,petits_chiens,moyens_chiens,grands_chiens,note_moyenne')
       .eq('actif', true);
 
     if (userLat && userLng) {
-      const delta = 0.2; // ~22km
+      const delta = 0.15; // ~16km
       dbQuery = dbQuery
         .gte('lat', userLat - delta).lte('lat', userLat + delta)
         .gte('lng', userLng - delta).lte('lng', userLng + delta);
     }
 
-    const { data: lieux } = await dbQuery.limit(100);
+    const { data: lieux } = await dbQuery.limit(40);
     if (!lieux?.length) return new Response(JSON.stringify({ results: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-    const CAT_LABELS: Record<string, string> = {
-      restaurant: 'Restaurant', cafe: 'Café', parc: 'Parc', parc_chien: 'Espace canin',
-      plage: 'Plage', veto: 'Vétérinaire', toiletteur: 'Toiletteur',
-      boutique: 'Boutique', hotel: 'Hôtel', bar: 'Bar', autre: 'Autre',
-    };
-
+    // Ultra-compact format: one line per lieu, only useful fields
     const lieuxText = lieux.map((l, i) => {
-      const tags = [
-        l.eau && 'eau',
-        l.gamelles && 'gamelles',
-        l.chiens_salle && 'en salle',
-        l.chiens_terrasse && 'en terrasse',
-        l.espace_dedie && 'espace dédié',
-        l.chiens_laches && 'lâchés OK',
-        l.chiens_laisse && 'laisse obligatoire',
-        l.petits_chiens && 'petits chiens',
-        l.moyens_chiens && 'moyens chiens',
-        l.grands_chiens && 'grands chiens',
-      ].filter(Boolean).join(', ');
-      return `${i + 1}. [${l.id}] ${l.nom} — ${CAT_LABELS[l.cat] || l.cat} — ${l.adresse ? l.adresse + ', ' : ''}${l.ville}${l.description ? ' — ' + l.description.slice(0, 120) : ''}${tags ? ' — ' + tags : ''}${l.note_moyenne ? ` — ${l.note_moyenne}/5` : ''}`;
+      const tags: string[] = [];
+      if (l.eau) tags.push('eau');
+      if (l.chiens_salle) tags.push('salle');
+      if (l.chiens_terrasse) tags.push('terrasse');
+      if (l.chiens_laches) tags.push('lâchés');
+      if (l.petits_chiens) tags.push('petits');
+      if (l.moyens_chiens) tags.push('moyens');
+      if (l.grands_chiens) tags.push('grands');
+      const desc = l.description ? l.description.slice(0, 60) : '';
+      const note = l.note_moyenne ? `★${l.note_moyenne}` : '';
+      return `${i + 1}|${l.id}|${l.nom}|${CAT[l.cat] || l.cat}|${l.ville}|${desc}|${tags.join(',')}|${note}`;
     }).join('\n');
 
-    const prompt = `Tu es un assistant pour une application dog-friendly française appelée The Pack. Un utilisateur cherche : "${query.trim()}"
-
-Voici les lieux dog-friendly disponibles à proximité :
+    const prompt = `App dog-friendly. Recherche: "${query.trim()}"
+Lieux (#|id|nom|type|ville|desc|tags|note):
 ${lieuxText}
-
-Sélectionne les 3 à 5 lieux qui correspondent le mieux à la recherche. Réponds UNIQUEMENT avec un JSON valide, sans aucun texte avant ou après :
-{"results":[{"id":"uuid-exact","raison":"explication courte en français (max 12 mots)"}]}
-
-Si aucun lieu ne correspond, réponds : {"results":[]}`;
+Réponds JSON uniquement: {"r":[{"i":"id","t":"raison 8 mots max"}]}
+3-4 résultats max. Si rien: {"r":[]}`;
 
     const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -74,24 +70,22 @@ Si aucun lieu ne correspond, réponds : {"results":[]}`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
+        max_tokens: 180,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
     const aiData = await aiResp.json();
-    const text = aiData.content?.[0]?.text?.trim() || '{"results":[]}';
+    const text = aiData.content?.[0]?.text?.trim() || '{"r":[]}';
 
-    let parsed: { results: { id: string; raison: string }[] } = { results: [] };
+    let parsed: { r: { i: string; t: string }[] } = { r: [] };
     try { parsed = JSON.parse(text); } catch { /* keep empty */ }
 
-    // Enrich with full lieu data
-    const idSet = new Set(parsed.results.map(r => r.id));
-    const enriched = parsed.results
+    const enriched = (parsed.r || [])
       .map(r => {
-        const lieu = lieux.find(l => l.id === r.id);
+        const lieu = lieux.find(l => l.id === r.i);
         if (!lieu) return null;
-        return { lieu, raison: r.raison };
+        return { lieu, raison: r.t };
       })
       .filter(Boolean);
 
