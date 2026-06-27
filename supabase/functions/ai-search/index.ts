@@ -79,12 +79,12 @@ Si aucun résultat: {"results":[]}`;
     });
 
     const aiData = await aiResp.json();
-    console.log('AI response:', JSON.stringify(aiData));
-    const text = aiData.content?.[0]?.text?.trim() || '{"results":[]}';
-    console.log('AI text:', text);
+    const rawText = aiData.content?.[0]?.text?.trim() || '{"results":[]}';
+    // Strip markdown code blocks that Claude sometimes adds
+    const text = rawText.replace(/^```(?:json)?\n?/, '').replace(/\n?```[\s\S]*$/, '').trim();
 
     let parsed: { results: { id: string; raison: string }[] } = { results: [] };
-    try { parsed = JSON.parse(text); } catch (e) { console.log('Parse error:', e); }
+    try { parsed = JSON.parse(text); } catch { parsed = { results: [] }; }
 
     const enriched = (parsed.results || [])
       .map(r => {
