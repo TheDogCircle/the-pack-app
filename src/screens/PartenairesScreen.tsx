@@ -30,14 +30,13 @@ type Partenaire = { id: string; nom: string; description: string | null; logo_ur
 
 function BrandChip({ p, selected, onPress }: { p: Partenaire; selected: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.chip} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.chipLogo, selected && styles.chipLogoSelected]}>
+    <TouchableOpacity style={[styles.chip, selected && styles.chipSelected]} onPress={onPress} activeOpacity={0.75}>
+      <View style={styles.chipLogo}>
         {p.logo_url
           ? <Image source={{ uri: p.logo_url }} style={styles.chipLogoImg} resizeMode="contain" />
-          : <View style={styles.chipLogoFallback}><Text style={styles.chipLogoFallbackText}>{p.nom[0]}</Text></View>}
-        {selected && <View style={styles.chipActiveDot} />}
+          : <Text style={styles.chipLogoFallbackText}>{p.nom[0]}</Text>}
       </View>
-      <Text style={[styles.chipName, selected && styles.chipNameSelected]} numberOfLines={2}>{p.nom}</Text>
+      <Text style={[styles.chipName, selected && styles.chipNameSelected]} numberOfLines={1}>{p.nom}</Text>
     </TouchableOpacity>
   );
 }
@@ -203,7 +202,6 @@ export default function PartenairesScreen() {
               <Text style={styles.brandBadgeText}>Partenaire officiel</Text>
             </View>
             <Text style={styles.brandNom}>{selected.nom}</Text>
-            {selected.description ? <Text style={styles.brandDesc}>{selected.description}</Text> : null}
             {selected.site_web ? (
               <TouchableOpacity style={styles.siteBtn} onPress={() => Linking.openURL(selected.site_web!)}>
                 <Ionicons name="globe-outline" size={13} color={colors.ivory} />
@@ -253,25 +251,24 @@ const styles = StyleSheet.create({
 
   // Bannière
   bannerWrap: { borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
-  bannerScroll: { paddingHorizontal: 16, paddingVertical: 18, gap: 8, flexDirection: 'row' },
+  bannerScroll: { paddingHorizontal: 16, paddingVertical: 14, gap: 8, flexDirection: 'row' },
 
-  chip: { alignItems: 'center', width: 76, gap: 6 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: colors.white,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 20, paddingVertical: 6, paddingLeft: 6, paddingRight: 12,
+  },
+  chipSelected: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
   chipLogo: {
-    width: 64, height: 64, borderRadius: 20, overflow: 'hidden',
+    width: 24, height: 24, borderRadius: 6, overflow: 'hidden',
     backgroundColor: colors.ivoryLight,
-    borderWidth: 2, borderColor: 'transparent',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 4, elevation: 2,
+    alignItems: 'center', justifyContent: 'center',
   },
-  chipLogoSelected: { borderColor: colors.terra },
-  chipLogoImg: { width: 60, height: 60, margin: 2 },
-  chipLogoFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bordeaux + '12' },
-  chipLogoFallbackText: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux },
-  chipActiveDot: {
-    position: 'absolute', bottom: -1, alignSelf: 'center',
-    width: 6, height: 6, borderRadius: 3, backgroundColor: colors.terra,
-  },
-  chipName: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', lineHeight: 14 },
-  chipNameSelected: { fontFamily: 'DMSans_500Medium', color: colors.bordeaux },
+  chipLogoImg: { width: 24, height: 24 },
+  chipLogoFallbackText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
+  chipName: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMid },
+  chipNameSelected: { color: colors.ivory },
 
   // Fiche marque
   brandCard: {
@@ -297,7 +294,6 @@ const styles = StyleSheet.create({
   },
   brandBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 9, color: colors.terra, letterSpacing: 0.8, textTransform: 'uppercase' },
   brandNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 19, color: colors.bordeaux, lineHeight: 24 },
-  brandDesc: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, lineHeight: 19 },
   siteBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     alignSelf: 'flex-start', marginTop: 4,
