@@ -496,7 +496,12 @@ export default function CarteScreen() {
     setAiResults([]);
     try {
       const { data, error } = await supabase.functions.invoke('ai-search', {
-        body: { query: searchQuery.trim(), userLat, userLng },
+        body: {
+          query: searchQuery.trim(),
+          userLat: region.latitude,
+          userLng: region.longitude,
+          delta: Math.max(region.latitudeDelta, 0.15),
+        },
       });
       if (!error && data?.results?.length) {
         setAiResults(data.results);

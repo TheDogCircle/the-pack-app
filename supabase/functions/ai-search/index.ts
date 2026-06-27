@@ -17,7 +17,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
   try {
-    const { query, userLat, userLng } = await req.json();
+    const { query, userLat, userLng, delta: rawDelta } = await req.json();
     if (!query?.trim()) return new Response(JSON.stringify({ results: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
 
     const supabase = createClient(
@@ -31,13 +31,13 @@ serve(async (req) => {
       .eq('actif', true);
 
     if (userLat && userLng) {
-      const delta = 0.15; // ~16km
+      const delta = Math.min(rawDelta || 0.2, 0.5); // cap à ~55km
       dbQuery = dbQuery
         .gte('lat', userLat - delta).lte('lat', userLat + delta)
         .gte('lng', userLng - delta).lte('lng', userLng + delta);
     }
 
-    const { data: lieux } = await dbQuery.limit(40);
+    const { data: lieux } = await dbQuery.limit(60);
     if (!lieux?.length) return new Response(JSON.stringify({ results: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
 
     // Ultra-compact format: one line per lieu, only useful fields
