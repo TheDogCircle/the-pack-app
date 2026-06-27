@@ -170,6 +170,7 @@ export default function CarteScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const regionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sheetAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetPanY = useRef(new Animated.Value(0)).current;
@@ -805,7 +806,8 @@ export default function CarteScreen() {
       region.longitude + region.longitudeDelta / 2,
       region.latitude + region.latitudeDelta / 2,
     ];
-    return clusterIndex.getClusters(bbox, zoom);
+    const all = clusterIndex.getClusters(bbox, zoom);
+    return all.slice(0, 80);
   }, [clusterIndex, region]);
 
   function sortLieux(items: Lieu[]): Lieu[] {
@@ -1089,7 +1091,11 @@ export default function CarteScreen() {
         ref={mapRef}
         style={styles.map}
         initialRegion={region}
-        onRegionChangeComplete={r => { setRegion(r); if (!favFilter) fetchLieux(r, activeCat); }}
+        onRegionChangeComplete={r => {
+          setRegion(r);
+          if (regionTimer.current) clearTimeout(regionTimer.current);
+          regionTimer.current = setTimeout(() => { if (!favFilter) fetchLieux(r, activeCat); }, 400);
+        }}
         onLongPress={handleMapLongPress}
         showsUserLocation
         showsMyLocationButton={false}
