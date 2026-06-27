@@ -174,7 +174,6 @@ export default function EvenementsScreen() {
             style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
             onPress={() => setFilter(f.key)}
           >
-            <Ionicons name={f.icon} size={13} color={filter === f.key ? colors.ivory : colors.textMuted} />
             <Text style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
@@ -415,8 +414,7 @@ const styles = StyleSheet.create({
   filtersScroll: { borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
   filtersContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
   filterChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 7, paddingHorizontal: 13,
+    paddingVertical: 7, paddingHorizontal: 14,
     borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white,
   },
   filterChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
