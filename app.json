@@ -11,13 +11,16 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#3D1A1A"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "fr.thepackclub.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute.",
+        "NSPhotoLibraryUsageDescription": "The Pack accède à ta galerie pour que tu puisses ajouter une photo de profil et partager des moments avec la meute.",
+        "NSPhotoLibraryAddUsageDescription": "The Pack peut enregistrer des photos dans ta galerie."
       }
     },
     "android": {
@@ -25,7 +28,13 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#3D1A1A"
-      }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -35,13 +44,26 @@
       "expo-font",
       "expo-web-browser",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The Pack accède à ta galerie pour que tu puisses ajouter une photo de profil et partager des moments avec la meute."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
           "color": "#3D1A1A",
           "sounds": []
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
