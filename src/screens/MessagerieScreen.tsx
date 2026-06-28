@@ -79,6 +79,7 @@ export default function MessagerieScreen() {
 
   useEffect(() => {
     if (selectedConv) {
+      const isCreator = selectedConv.created_by === myUserId;
       navigation.setOptions({
         title: convDisplayName(selectedConv),
         headerLeft: () => (
@@ -86,9 +87,49 @@ export default function MessagerieScreen() {
             <Ionicons name="chevron-back" size={26} color={colors.ivory} />
           </TouchableOpacity>
         ),
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() => {
+              const buttons: any[] = [
+                {
+                  text: 'Quitter la conversation',
+                  onPress: () =>
+                    Alert.alert(
+                      'Quitter la conversation ?',
+                      'Tu ne recevras plus les messages.',
+                      [
+                        { text: 'Annuler', style: 'cancel' },
+                        { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
+                      ]
+                    ),
+                },
+              ];
+              if (isCreator) {
+                buttons.push({
+                  text: 'Supprimer pour tout le monde',
+                  style: 'destructive',
+                  onPress: () =>
+                    Alert.alert(
+                      'Supprimer la conversation ?',
+                      'Elle sera supprimée définitivement pour tous les membres.',
+                      [
+                        { text: 'Annuler', style: 'cancel' },
+                        { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
+                      ]
+                    ),
+                });
+              }
+              buttons.push({ text: 'Annuler', style: 'cancel' });
+              Alert.alert(convDisplayName(selectedConv), undefined, buttons);
+            }}
+            style={{ marginRight: 12, padding: 4 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={22} color={colors.ivory} />
+          </TouchableOpacity>
+        ),
       });
     } else {
-      navigation.setOptions({ title: 'Messages', headerLeft: undefined });
+      navigation.setOptions({ title: 'Messages', headerLeft: undefined, headerRight: undefined });
     }
   }, [selectedConv]);
 
@@ -224,6 +265,24 @@ export default function MessagerieScreen() {
     }
 
     setSending(false);
+  }
+
+  async function leaveConversation() {
+    if (!myUserId || !selectedConv) return;
+    await supabase.from('conversation_members')
+      .delete()
+      .eq('conversation_id', selectedConv.id)
+      .eq('user_id', myUserId);
+    closeConversation();
+  }
+
+  async function deleteConversation() {
+    if (!myUserId || !selectedConv) return;
+    await supabase.from('conversations')
+      .update({ actif: false })
+      .eq('id', selectedConv.id)
+      .eq('created_by', myUserId);
+    closeConversation();
   }
 
   async function openCreateModal() {
