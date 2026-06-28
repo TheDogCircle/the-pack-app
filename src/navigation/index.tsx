@@ -15,7 +15,6 @@ import PartenairesScreen from '../screens/PartenairesScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
-import MessagerieScreen from '../screens/MessagerieScreen';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -34,9 +33,8 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }> = {
   Carte:       { active: 'map',             inactive: 'map-outline' },
   Evenements:  { active: 'calendar',        inactive: 'calendar-outline' },
-  Messagerie:  { active: 'chatbubbles',     inactive: 'chatbubbles-outline' },
   Meute:       { active: 'people',          inactive: 'people-outline' },
-  Partenaires: { active: 'pricetag',        inactive: 'pricetag-outline' },
+  Services:    { active: 'storefront',       inactive: 'storefront-outline' },
   Profil:      { active: 'person-circle',   inactive: 'person-circle-outline' },
 };
 
@@ -63,18 +61,35 @@ function MainTabs() {
       .eq('actif', true).gte('created_at', since7d);
     setPartBadge((partCount ?? 0) > 0);
 
-    // Meute : avis ou photos des gens suivis dans les 48h
+    // Meute : avis/photos des gens suivis dans les 48h + messages non lus
     const { data: follows } = await supabase
       .from('follows').select('following_id')
       .eq('follower_id', userId).eq('statut', 'accepte');
+    let meuteHasActivity = false;
     if (follows?.length) {
       const ids = follows.map((f: any) => f.following_id);
       const [{ count: a }, { count: p }] = await Promise.all([
         supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', ids).gte('created_at', since48h),
         supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', ids).eq('validee', true).gte('created_at', since48h),
       ]);
-      setMeuteBadge(((a ?? 0) + (p ?? 0)) > 0);
+      meuteHasActivity = ((a ?? 0) + (p ?? 0)) > 0;
     }
+
+    // Messages non lus : messages des autres dans mes conversations dans les 24h
+    const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data: myConvs } = await supabase
+      .from('conversation_members').select('conversation_id').eq('user_id', userId);
+    if (myConvs?.length) {
+      const convIds = myConvs.map((r: any) => r.conversation_id);
+      const { count: msgCount } = await supabase
+        .from('messages').select('id', { count: 'exact', head: true })
+        .in('conversation_id', convIds)
+        .neq('user_id', userId)
+        .gte('created_at', since24h);
+      if ((msgCount ?? 0) > 0) meuteHasActivity = true;
+    }
+
+    setMeuteBadge(meuteHasActivity);
   }
 
   return (
@@ -113,10 +128,9 @@ function MainTabs() {
     >
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
       <Tab.Screen name="Evenements" component={EvenementsScreen} options={{ title: 'Événements' }} />
-      <Tab.Screen name="Messagerie" component={MessagerieScreen} options={{ title: 'Messages' }} />
       <Tab.Screen
-        name="Partenaires" component={PartenairesScreen}
-        options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
+        name="Services" component={PartenairesScreen}
+        options={{ title: 'Services', tabBarBadge: partBadge ? ' ' : undefined }}
         listeners={{ focus: () => setPartBadge(false) }}
       />
       <Tab.Screen

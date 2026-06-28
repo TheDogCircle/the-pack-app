@@ -11,6 +11,7 @@ import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { mapNavigation } from '../lib/mapNavigation';
+import MessagerieScreen from './MessagerieScreen';
 
 type Evenement = {
   id: string;
@@ -58,7 +59,7 @@ export default function FeedScreen() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'activite' | 'explorer' | 'membres'>('activite');
+  const [tab, setTab] = useState<'activite' | 'explorer' | 'membres' | 'messages'>('activite');
   const [searchMembre, setSearchMembre] = useState('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [photoLikesCount, setPhotoLikesCount] = useState<Record<string, number>>({});
@@ -68,7 +69,14 @@ export default function FeedScreen() {
 
   useEffect(() => { load(); }, [tab, session?.user?.id]);
 
+  useEffect(() => {
+    if (tab !== 'messages') {
+      navigation.setOptions({ title: 'Meute', headerLeft: undefined });
+    }
+  }, [tab]);
+
   async function load() {
+    if (tab === 'messages') return;
     setLoading(true);
     if (tab === 'activite') await loadActivite();
     else if (tab === 'explorer') await loadExplorer();
@@ -448,6 +456,7 @@ export default function FeedScreen() {
           { key: 'activite', label: 'Activité' },
           { key: 'explorer', label: 'Explorer' },
           { key: 'membres',  label: 'Membres' },
+          { key: 'messages', label: 'Chat' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
@@ -455,7 +464,9 @@ export default function FeedScreen() {
         ))}
       </View>
 
-      {loading ? (
+      {tab === 'messages' ? (
+        <MessagerieScreen />
+      ) : loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
         <FlatList

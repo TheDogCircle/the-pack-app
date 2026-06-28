@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity,
+  View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
-  Modal, Image,
+  Modal, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
@@ -30,7 +31,7 @@ type Message = {
   avatar_url: string | null;
 };
 
-type Follow = { id: string; prenom: string; avatar_url: string | null };
+type Contact = { id: string; prenom: string; avatar_url: string | null; ville: string | null };
 
 function fmtTime(dateStr: string) {
   const d = new Date(dateStr);
@@ -42,6 +43,7 @@ function fmtTime(dateStr: string) {
 
 export default function MessagerieScreen() {
   const navigation = useNavigation<any>();
+  const headerHeight = useHeaderHeight();
   const { session, loading: sessionLoading } = useSession();
   const myUserId = session?.user?.id ?? null;
 
@@ -54,8 +56,9 @@ export default function MessagerieScreen() {
   const [sending, setSending] = useState(false);
 
   const [createModal, setCreateModal] = useState(false);
+  const [convMode, setConvMode] = useState<'direct' | 'groupe'>('direct');
   const [groupName, setGroupName] = useState('');
-  const [follows, setFollows] = useState<Follow[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
@@ -135,7 +138,7 @@ export default function MessagerieScreen() {
       id: c.id, nom: c.nom, created_by: c.created_by,
       members: membersByConv[c.id] || [],
       last_message: lastMessages[c.id] || null,
-    })).sort((a: Conversation, b: Conversation) => {
+    })).sort((a, b) => {
       const ta = a.last_message?.created_at || '0';
       const tb = b.last_message?.created_at || '0';
       return tb.localeCompare(ta);
@@ -160,7 +163,7 @@ export default function MessagerieScreen() {
         const m = payload.new as any;
         const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
         const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null };
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
       })
       .subscribe();
@@ -196,9 +199,30 @@ export default function MessagerieScreen() {
     const text = inputText.trim();
     setInputText('');
     setSending(true);
-    await supabase.from('messages').insert({
-      conversation_id: selectedConv.id, user_id: myUserId, contenu: text, actif: true,
-    });
+
+    const { data, error } = await supabase.from('messages').insert({
+      conversation_id: selectedConv.id, user_id: myUserId, contenu: text,
+    }).select('id,created_at').single();
+
+    if (!error) {
+      const optimistic: Message = {
+        id: data?.id ?? `tmp-${Date.now()}`,
+        user_id: myUserId,
+        contenu: text,
+        created_at: data?.created_at ?? new Date().toISOString(),
+        prenom: 'Moi',
+        avatar_url: null,
+      };
+      setMessages(prev => {
+        if (prev.some(m => m.id === optimistic.id)) return prev;
+        return [...prev, optimistic];
+      });
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
+    } else {
+      Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
+      setInputText(text);
+    }
+
     setSending(false);
   }
 
@@ -208,40 +232,100 @@ export default function MessagerieScreen() {
       .select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
     const ids = (followsData || []).map((f: any) => f.following_id);
     if (ids.length) {
-      const { data } = await supabase.from('profils').select('id,prenom,avatar_url').in('id', ids);
-      setFollows((data || []).map((p: any) => ({ id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url })));
+      const { data } = await supabase.from('profils').select('id,prenom,avatar_url,ville').in('id', ids);
+      setContacts((data || []).map((p: any) => ({
+        id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ville: p.ville || null,
+      })));
     } else {
-      setFollows([]);
+      setContacts([]);
     }
     setSelectedMembers([]);
     setGroupName('');
+    setConvMode('direct');
     setCreateModal(true);
   }
 
-  async function createGroup() {
+  async function findExistingDM(otherId: string): Promise<Conversation | null> {
+    const [{ data: mine }, { data: theirs }] = await Promise.all([
+      supabase.from('conversation_members').select('conversation_id').eq('user_id', myUserId!),
+      supabase.from('conversation_members').select('conversation_id').eq('user_id', otherId),
+    ]);
+    const mySet = new Set((mine || []).map((r: any) => r.conversation_id));
+    const shared = (theirs || []).map((r: any) => r.conversation_id).filter((id: string) => mySet.has(id));
+    for (const cid of shared) {
+      const { count } = await supabase.from('conversation_members')
+        .select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
+      if (count === 2) return conversations.find(c => c.id === cid) ?? null;
+    }
+    return null;
+  }
+
+  async function createConversation() {
     if (!myUserId || !selectedMembers.length) return;
     setCreating(true);
-    const { data: conv } = await supabase.from('conversations').insert({
-      nom: groupName.trim() || null, type: 'groupe', created_by: myUserId, actif: true,
+
+    if (convMode === 'direct') {
+      const otherId = selectedMembers[0];
+      const existing = await findExistingDM(otherId);
+      if (existing) {
+        setCreating(false);
+        setCreateModal(false);
+        openConversation(existing);
+        return;
+      }
+    }
+
+    const { data: conv, error } = await supabase.from('conversations').insert({
+      nom: convMode === 'groupe' ? (groupName.trim() || null) : null,
+      created_by: myUserId, actif: true,
     }).select().single();
-    if (!conv) { setCreating(false); return; }
+
+    if (error || !conv) {
+      Alert.alert('Erreur', `Impossible de créer la conversation.\n${error?.message || ''}`);
+      setCreating(false);
+      return;
+    }
+
     const memberIds = [...new Set([myUserId, ...selectedMembers])];
-    await supabase.from('conversation_members').insert(
+    const { error: membersError } = await supabase.from('conversation_members').insert(
       memberIds.map(uid => ({ conversation_id: conv.id, user_id: uid }))
     );
+
+    if (membersError) {
+      Alert.alert('Erreur', `Les membres n'ont pas pu être ajoutés.\n${membersError.message}`);
+    }
+
     setCreating(false);
     setCreateModal(false);
     await loadConversations();
+
+    const newConv: Conversation = {
+      id: conv.id, nom: conv.nom, created_by: myUserId,
+      members: memberIds.map(uid => {
+        const c = contacts.find(x => x.id === uid);
+        return { user_id: uid, prenom: c?.prenom || 'Moi', avatar_url: c?.avatar_url || null };
+      }),
+      last_message: null,
+    };
+    openConversation(newConv);
   }
 
-  function renderAvatar(conv: Conversation) {
+  function renderConvAvatar(conv: Conversation) {
     const others = conv.members.filter(m => m.user_id !== myUserId);
     const first = others[0];
-    if (first?.avatar_url) return <Image source={{ uri: first.avatar_url }} style={styles.convAvatar} />;
     const letter = (convDisplayName(conv)[0] || '?').toUpperCase();
     return (
-      <View style={[styles.convAvatar, styles.convAvatarFallback]}>
-        <Text style={styles.convAvatarLetter}>{letter}</Text>
+      <View style={styles.convAvatarWrap}>
+        {first?.avatar_url
+          ? <Image source={{ uri: first.avatar_url }} style={styles.convAvatar} />
+          : <View style={[styles.convAvatar, styles.convAvatarFallback]}>
+              <Text style={styles.convAvatarLetter}>{letter}</Text>
+            </View>}
+        {conv.members.length > 2 && (
+          <View style={styles.groupBadge}>
+            <Ionicons name="people" size={10} color={colors.ivory} />
+          </View>
+        )}
       </View>
     );
   }
@@ -252,7 +336,34 @@ export default function MessagerieScreen() {
   // ── CHAT VIEW ──
   if (selectedConv) {
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight + 70 : 0}
+      >
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.participantsBar}
+          style={styles.participantsScroll}
+        >
+          {selectedConv.members.map(m => (
+            <View key={m.user_id} style={styles.participantItem}>
+              {m.avatar_url
+                ? <Image source={{ uri: m.avatar_url }} style={styles.participantAvatar} />
+                : <View style={[styles.participantAvatar, styles.participantAvatarFallback]}>
+                    <Text style={styles.participantAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text>
+                  </View>}
+              {m.user_id === myUserId
+                ? <View style={styles.meeDot} />
+                : null}
+              <Text style={styles.participantName} numberOfLines={1}>
+                {m.user_id === myUserId ? 'Moi' : m.prenom}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+
         {msgLoading ? (
           <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
         ) : (
@@ -277,13 +388,11 @@ export default function MessagerieScreen() {
                 <View style={[styles.msgRow, isMe && styles.msgRowMe]}>
                   {!isMe && (
                     <View style={styles.msgAvatarWrap}>
-                      {showSender ? (
-                        m.avatar_url
-                          ? <Image source={{ uri: m.avatar_url }} style={styles.msgAvatar} />
-                          : <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
-                              <Text style={styles.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text>
-                            </View>
-                      ) : <View style={styles.msgAvatarSpacer} />}
+                      {m.avatar_url
+                        ? <Image source={{ uri: m.avatar_url }} style={styles.msgAvatar} />
+                        : <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
+                            <Text style={styles.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text>
+                          </View>}
                     </View>
                   )}
                   <View style={[styles.msgBubbleWrap, isMe && styles.msgBubbleWrapMe]}>
@@ -339,7 +448,7 @@ export default function MessagerieScreen() {
             <View style={styles.empty}>
               <Ionicons name="chatbubbles-outline" size={44} color={colors.border} />
               <Text style={styles.emptyTitle}>Aucune conversation</Text>
-              <Text style={styles.emptyText}>Crée un groupe pour organiser une balade avec la meute !</Text>
+              <Text style={styles.emptyText}>Envoie un message direct ou crée un groupe pour organiser une balade !</Text>
             </View>
           }
           renderItem={({ item: conv }) => {
@@ -350,7 +459,7 @@ export default function MessagerieScreen() {
               : 'Aucun message';
             return (
               <TouchableOpacity style={styles.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
-                {renderAvatar(conv)}
+                {renderConvAvatar(conv)}
                 <View style={styles.convInfo}>
                   <View style={styles.convTopRow}>
                     <Text style={styles.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
@@ -369,53 +478,88 @@ export default function MessagerieScreen() {
         <Ionicons name="add" size={26} color={colors.ivory} />
       </TouchableOpacity>
 
-      {/* Create group modal */}
       <Modal visible={createModal} animationType="slide" transparent onRequestClose={() => setCreateModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <View style={styles.createOverlay}>
             <View style={styles.createSheet}>
               <View style={styles.createHeader}>
-                <Text style={styles.createTitle}>Nouveau groupe</Text>
+                <Text style={styles.createTitle}>Nouvelle conversation</Text>
                 <TouchableOpacity onPress={() => setCreateModal(false)}>
                   <Ionicons name="close" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
 
-              <TextInput
-                style={styles.groupNameInput}
-                value={groupName}
-                onChangeText={setGroupName}
-                placeholder="Nom du groupe (optionnel)"
-                placeholderTextColor={colors.textMuted}
-              />
+              <View style={styles.modeToggle}>
+                <TouchableOpacity
+                  style={[styles.modeBtn, convMode === 'direct' && styles.modeBtnActive]}
+                  onPress={() => { setConvMode('direct'); setSelectedMembers([]); }}
+                >
+                  <Ionicons name="person" size={14} color={convMode === 'direct' ? colors.ivory : colors.textMuted} />
+                  <Text style={[styles.modeBtnText, convMode === 'direct' && styles.modeBtnTextActive]}>Message direct</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, convMode === 'groupe' && styles.modeBtnActive]}
+                  onPress={() => { setConvMode('groupe'); setSelectedMembers([]); }}
+                >
+                  <Ionicons name="people" size={14} color={convMode === 'groupe' ? colors.ivory : colors.textMuted} />
+                  <Text style={[styles.modeBtnText, convMode === 'groupe' && styles.modeBtnTextActive]}>Groupe</Text>
+                </TouchableOpacity>
+              </View>
 
-              <Text style={styles.membersLabel}>Ajouter des membres *</Text>
-              {follows.length === 0 ? (
+              {convMode === 'groupe' && (
+                <TextInput
+                  style={styles.groupNameInput}
+                  value={groupName}
+                  onChangeText={setGroupName}
+                  placeholder="Nom du groupe (ex: Balade Paris 15e)"
+                  placeholderTextColor={colors.textMuted}
+                />
+              )}
+
+              <Text style={styles.membersLabel}>
+                {convMode === 'direct' ? 'Choisir un membre' : 'Ajouter des membres'}
+              </Text>
+
+              {contacts.length === 0 ? (
                 <View style={styles.noFollowsWrap}>
                   <Ionicons name="people-outline" size={32} color={colors.border} />
-                  <Text style={styles.noFollowsText}>Suis des membres pour les ajouter à un groupe.</Text>
+                  <Text style={styles.noFollowsText}>Suis des membres pour leur envoyer un message.</Text>
                 </View>
               ) : (
                 <FlatList
-                  data={follows}
+                  data={contacts}
                   keyExtractor={f => f.id}
-                  style={{ maxHeight: 260 }}
+                  style={{ maxHeight: 280 }}
                   renderItem={({ item: f }) => {
                     const selected = selectedMembers.includes(f.id);
+                    const disabledDM = convMode === 'direct' && selectedMembers.length === 1 && !selected;
                     return (
                       <TouchableOpacity
-                        style={[styles.memberRow, selected && styles.memberRowSelected]}
-                        onPress={() => setSelectedMembers(prev =>
-                          selected ? prev.filter(id => id !== f.id) : [...prev, f.id]
-                        )}
+                        style={[
+                          styles.memberRow,
+                          selected && styles.memberRowSelected,
+                          disabledDM && styles.memberRowDisabled,
+                        ]}
+                        activeOpacity={disabledDM ? 1 : 0.7}
+                        onPress={() => {
+                          if (disabledDM) return;
+                          if (convMode === 'direct') {
+                            setSelectedMembers(selected ? [] : [f.id]);
+                          } else {
+                            setSelectedMembers(prev => selected ? prev.filter(id => id !== f.id) : [...prev, f.id]);
+                          }
+                        }}
                       >
                         {f.avatar_url
                           ? <Image source={{ uri: f.avatar_url }} style={styles.memberAvatar} />
                           : <View style={[styles.memberAvatar, styles.memberAvatarFallback]}>
                               <Text style={styles.memberAvatarLetter}>{(f.prenom[0] || '?').toUpperCase()}</Text>
                             </View>}
-                        <Text style={[styles.memberName, selected && styles.memberNameSelected]}>{f.prenom}</Text>
-                        {selected && <Ionicons name="checkmark-circle" size={20} color={colors.terra} style={{ marginLeft: 'auto' as any }} />}
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.memberName, selected && styles.memberNameSelected]}>{f.prenom}</Text>
+                          {f.ville ? <Text style={styles.memberVille}>{f.ville}</Text> : null}
+                        </View>
+                        {selected && <Ionicons name="checkmark-circle" size={20} color={colors.terra} />}
                       </TouchableOpacity>
                     );
                   }}
@@ -424,12 +568,14 @@ export default function MessagerieScreen() {
 
               <TouchableOpacity
                 style={[styles.createBtn, (!selectedMembers.length || creating) && styles.createBtnDisabled]}
-                onPress={createGroup}
+                onPress={createConversation}
                 disabled={!selectedMembers.length || creating}
               >
                 {creating
                   ? <ActivityIndicator color={colors.ivory} />
-                  : <Text style={styles.createBtnText}>Créer le groupe</Text>}
+                  : <Text style={styles.createBtnText}>
+                      {convMode === 'direct' ? 'Démarrer la conversation' : 'Créer le groupe'}
+                    </Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -453,9 +599,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border,
     backgroundColor: colors.white,
   },
+  convAvatarWrap: { position: 'relative' },
   convAvatar: { width: 48, height: 48, borderRadius: 24 },
   convAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   convAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.ivory },
+  groupBadge: {
+    position: 'absolute', bottom: -2, right: -2,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: colors.white,
+  },
   convInfo: { flex: 1 },
   convTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 },
   convName: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux, flex: 1, marginRight: 8 },
@@ -469,7 +622,6 @@ const styles = StyleSheet.create({
     shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
   },
 
-  // Chat
   messagesList: { padding: 12, paddingBottom: 16 },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 48 },
   emptyChatText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center' },
@@ -512,7 +664,6 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: colors.border },
 
-  // Create modal
   createOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   createSheet: {
     backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22,
@@ -520,6 +671,19 @@ const styles = StyleSheet.create({
   },
   createHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   createTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
+
+  modeToggle: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+  },
+  modeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 9, borderRadius: 8,
+  },
+  modeBtnActive: { backgroundColor: colors.bordeaux },
+  modeBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  modeBtnTextActive: { color: colors.ivory },
+
   groupNameInput: {
     borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12,
     fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.white,
@@ -533,12 +697,33 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, marginBottom: 6, borderWidth: 1, borderColor: colors.border,
   },
   memberRowSelected: { borderColor: colors.terra, backgroundColor: colors.terra + '10' },
+  memberRowDisabled: { opacity: 0.35 },
   memberAvatar: { width: 40, height: 40, borderRadius: 20 },
   memberAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   memberAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
   memberName: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
   memberNameSelected: { fontFamily: 'DMSans_500Medium', color: colors.terra },
+  memberVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   createBtn: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 4 },
   createBtnDisabled: { opacity: 0.45 },
   createBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+
+  participantsScroll: {
+    backgroundColor: colors.white,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexGrow: 0,
+  },
+  participantsBar: {
+    paddingHorizontal: 12, paddingVertical: 10, gap: 16, alignItems: 'flex-start',
+  },
+  participantItem: { alignItems: 'center', gap: 4, width: 52 },
+  participantAvatar: { width: 40, height: 40, borderRadius: 20 },
+  participantAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
+  participantAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
+  participantName: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, textAlign: 'center', width: 52 },
+  meeDot: {
+    position: 'absolute', top: 28, right: 4,
+    width: 10, height: 10, borderRadius: 5,
+    backgroundColor: colors.terra, borderWidth: 1.5, borderColor: colors.white,
+  },
 });
