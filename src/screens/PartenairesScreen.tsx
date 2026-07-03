@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   Image, Linking, ActivityIndicator, RefreshControl,
+  Modal, StatusBar, useWindowDimensions, Clipboard,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -11,32 +13,247 @@ import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 
-const TYPE_CFG: Record<string, { label: string; bg: string; icon: string }> = {
-  offre:     { label: 'Offre exclusive', bg: colors.terra,    icon: '✦' },
-  news:      { label: 'Actualité',       bg: colors.bordeaux, icon: '·' },
-  nouveaute: { label: 'Nouveauté',       bg: '#5A9E6F',       icon: '★' },
+const TYPE_LABEL: Record<string, string> = {
+  offre: 'Offre exclusive',
+  news: 'Actualité',
+  nouveaute: 'Nouveauté',
 };
 
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
 }
+function buildPeriode(post: Post) {
+  if (post.date_debut && post.date_expiration) return `Du ${fmtDate(post.date_debut)} au ${fmtDate(post.date_expiration)}`;
+  if (post.date_debut) return `À partir du ${fmtDate(post.date_debut)}`;
+  if (post.date_expiration) return `Jusqu'au ${fmtDate(post.date_expiration)}`;
+  return '';
+}
 
 type Post = {
   id: string; partenaire_id: string; titre: string; contenu: string | null; type: string;
-  image_url: string | null; lien: string | null;
+  image_url: string | null; lien: string | null; code_promo: string | null;
+  disponibilite: string | null;
   date_debut: string | null; date_expiration: string | null;
 };
-type Partenaire = { id: string; nom: string; description: string | null; logo_url: string | null; site_web: string | null };
+type Partenaire = {
+  id: string; nom: string; description: string | null;
+  logo_url: string | null; banniere_url: string | null; site_web: string | null;
+};
+
+// ── Brand detail modal ──────────────────────────────────────────────────────
+
+function BrandModal({
+  partenaire, posts, visible, onClose,
+}: {
+  partenaire: Partenaire | null; posts: Post[]; visible: boolean; onClose: () => void;
+}) {
+  const { width } = useWindowDimensions();
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+
+  useEffect(() => { if (!visible) setRevealed({}); }, [visible]);
+
+  if (!partenaire) return null;
+
+  const galleryImgs = [
+    ...posts.filter(p => p.image_url && p.type !== 'offre').map(p => p.image_url!),
+    ...posts.filter(p => p.image_url && p.type === 'offre').map(p => p.image_url!),
+  ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 3);
+
+  const otherPosts = posts.filter(p => p.type !== 'offre');
+  const offerPosts = posts.filter(p => p.type === 'offre');
+  const orderedPosts = [...otherPosts, ...offerPosts];
+
+  const imgW = width - 32;
+  const halfW = (imgW - 8) / 2;
+
+  function copyCode(code: string) {
+    Clipboard.setString(code);
+    Alert.alert('Copié !', `Code "${code}" copié dans le presse-papier.`);
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={s.modalContainer} contentContainerStyle={s.modalContent} bounces>
+
+        {/* Hero */}
+        <View style={s.hero}>
+          {partenaire.banniere_url
+            ? <Image source={{ uri: partenaire.banniere_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            : null}
+          <LinearGradient
+            colors={['rgba(0,0,0,0.08)', 'rgba(61,26,26,0.82)']}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <TouchableOpacity style={s.closeBtn} onPress={onClose}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+          <View style={s.heroInfo}>
+            <View style={s.heroLogo}>
+              {partenaire.logo_url
+                ? <Image source={{ uri: partenaire.logo_url }} style={s.heroLogoImg} resizeMode="contain" />
+                : <Text style={s.heroLogoFallback}>{partenaire.nom[0]}</Text>}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.heroName}>{partenaire.nom}</Text>
+              {partenaire.site_web
+                ? <Text style={s.heroSite}>{partenaire.site_web.replace(/^https?:\/\//, '').replace(/\/$/, '')}</Text>
+                : null}
+            </View>
+          </View>
+        </View>
+
+        {/* Body */}
+        <View style={s.body}>
+          {partenaire.site_web ? (
+            <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.site_web!)}>
+              <Ionicons name="globe-outline" size={14} color={colors.terra} />
+              <Text style={s.siteLinkText}>Visiter le site →</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {partenaire.description ? (
+            <Text style={s.story}>{partenaire.description}</Text>
+          ) : null}
+
+          {/* Gallery */}
+          {galleryImgs.length === 1 && (
+            <Image source={{ uri: galleryImgs[0] }} style={[s.galleryFull, { width: imgW }]} resizeMode="cover" />
+          )}
+          {galleryImgs.length === 2 && (
+            <View style={s.galleryRow}>
+              {galleryImgs.map(img => (
+                <Image key={img} source={{ uri: img }} style={[s.galleryHalf, { width: halfW }]} resizeMode="cover" />
+              ))}
+            </View>
+          )}
+          {galleryImgs.length >= 3 && (
+            <View style={s.galleryThree}>
+              <Image source={{ uri: galleryImgs[0] }} style={[s.galleryThreeMain, { width: imgW * 0.6 - 4 }]} resizeMode="cover" />
+              <View style={[s.galleryThreeSide, { width: imgW * 0.4 - 4 }]}>
+                <Image source={{ uri: galleryImgs[1] }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
+                <Image source={{ uri: galleryImgs[2] }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
+              </View>
+            </View>
+          )}
+
+          {/* Posts & offers */}
+          {orderedPosts.length > 0 ? (
+            <>
+              <Text style={s.sectionTitle}>À découvrir</Text>
+              {orderedPosts.map(post => {
+                const periode = buildPeriode(post);
+                const isRevealed = revealed[post.id];
+                return (
+                  <View key={post.id} style={s.postItem}>
+                    {post.image_url
+                      ? <Image source={{ uri: post.image_url }} style={s.postItemImg} resizeMode="cover" />
+                      : null}
+                    <View style={s.postItemBody}>
+                      <Text style={s.postItemType}>{TYPE_LABEL[post.type] || post.type}</Text>
+                      <Text style={s.postItemTitle}>{post.titre}</Text>
+                      {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
+
+                      {post.code_promo ? (
+                        isRevealed ? (
+                          <View style={s.codeBox}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.codeLabel}>Code promo</Text>
+                              <Text style={s.codeValue}>{post.code_promo}</Text>
+                            </View>
+                            <TouchableOpacity style={s.codeCopyBtn} onPress={() => copyCode(post.code_promo!)}>
+                              <Text style={s.codeCopyText}>Copier</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={s.revealBtn}
+                            onPress={() => setRevealed(r => ({ ...r, [post.id]: true }))}
+                          >
+                            <Ionicons name="lock-closed-outline" size={13} color={colors.ivory} />
+                            <Text style={s.revealBtnText}>Voir le code</Text>
+                          </TouchableOpacity>
+                        )
+                      ) : null}
+
+                      <View style={s.postItemFooter}>
+                        {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
+                        {post.lien ? (
+                          <TouchableOpacity style={s.ctaBtn} onPress={() => Linking.openURL(post.lien!)}>
+                            <Text style={s.ctaBtnText}>Découvrir</Text>
+                            <Ionicons name="arrow-forward" size={12} color={colors.ivory} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
+        </View>
+      </ScrollView>
+    </Modal>
+  );
+}
+
+// ── Brand card ──────────────────────────────────────────────────────────────
+
+function BrandCard({
+  partenaire, posts, onPress, cardWidth,
+}: {
+  partenaire: Partenaire; posts: Post[]; onPress: () => void; cardWidth: number;
+}) {
+  const hasOffer = posts.some(p => p.type === 'offre');
+  const coverImg = partenaire.banniere_url || posts.find(p => p.image_url)?.image_url || null;
+
+  return (
+    <TouchableOpacity style={[s.card, { width: cardWidth }]} onPress={onPress} activeOpacity={0.88}>
+      <View style={s.cardCover}>
+        {coverImg
+          ? <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          : null}
+        <LinearGradient
+          colors={['transparent', 'rgba(61,26,26,0.7)']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={s.cardLogo}>
+          {partenaire.logo_url
+            ? <Image source={{ uri: partenaire.logo_url }} style={s.cardLogoImg} resizeMode="contain" />
+            : <Text style={s.cardLogoFallback}>{partenaire.nom[0]}</Text>}
+        </View>
+        {hasOffer ? (
+          <View style={s.offerBadge}>
+            <Text style={s.offerBadgeText}>Offre dispo</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={s.cardBody}>
+        <Text style={s.cardName} numberOfLines={1}>{partenaire.nom}</Text>
+        {partenaire.description
+          ? <Text style={s.cardDesc} numberOfLines={2}>{partenaire.description}</Text>
+          : null}
+        <View style={s.cardArrow}>
+          <Text style={s.cardArrowText}>Découvrir</Text>
+          <Ionicons name="arrow-forward" size={12} color={colors.terra} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function PartenairesScreen() {
   const navigation = useNavigation<any>();
+  const { width } = useWindowDimensions();
   const { session, loading: sessionLoading } = useSession();
   const [partenaires, setPartenaires] = useState<Partenaire[]>([]);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
-  const [filterBrand, setFilterBrand] = useState<string | null>(null);
+  const [selectedBrand, setSelectedBrand] = useState<Partenaire | null>(null);
 
   useEffect(() => { init(); }, [session?.user?.id]);
 
@@ -60,181 +277,82 @@ export default function PartenairesScreen() {
     setLoading(false);
   }
 
+  const cardGap = 12;
+  const cardWidth = (width - 28 * 2 - cardGap) / 2;
+
+  const postsFor = useCallback((id: string) => allPosts.filter(p => p.partenaire_id === id), [allPosts]);
+
   if (sessionLoading || loading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder aux offres et actualités de nos partenaires dog-friendly." />;
 
   if (hasProfile === false) {
     return (
-      <View style={styles.gate}>
+      <View style={s.gate}>
         <Ionicons name="ribbon-outline" size={40} color={colors.border} />
-        <Text style={styles.gateTitle}>Espace partenaires</Text>
-        <Text style={styles.gateText}>Crée ton profil pour accéder aux offres exclusives de nos marques dog-friendly.</Text>
+        <Text style={s.gateTitle}>Espace partenaires</Text>
+        <Text style={s.gateText}>Crée ton profil pour accéder aux offres exclusives de nos marques dog-friendly.</Text>
       </View>
     );
   }
 
   if (!partenaires.length) {
     return (
-      <View style={styles.gate}>
+      <View style={s.gate}>
         <Ionicons name="time-outline" size={40} color={colors.border} />
-        <Text style={styles.gateTitle}>Arrive bientôt</Text>
-        <Text style={styles.gateText}>Nous sélectionnons des marques dog-friendly pour partager leurs actualités avec la communauté.</Text>
+        <Text style={s.gateTitle}>Arrive bientôt</Text>
+        <Text style={s.gateText}>Nous sélectionnons des marques dog-friendly pour partager leurs avantages exclusifs avec la communauté.</Text>
       </View>
     );
   }
 
-  const partMap: Record<string, Partenaire> = {};
-  partenaires.forEach(p => { partMap[p.id] = p; });
-
-  const filtered = filterBrand ? allPosts.filter(p => p.partenaire_id === filterBrand) : allPosts;
-  const activeBrand = filterBrand ? partMap[filterBrand] : null;
+  // Build 2-column rows
+  const rows: Partenaire[][] = [];
+  for (let i = 0; i < partenaires.length; i += 2) {
+    rows.push(partenaires.slice(i, i + 2));
+  }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.list}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.terra} />}
-    >
-      {/* Header compact */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Offres & actualités</Text>
-        <Text style={styles.headerSub}>Sélectionnées pour la communauté dog-friendly</Text>
-      </View>
+    <>
+      <ScrollView
+        style={s.container}
+        contentContainerStyle={s.list}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.terra} />
+        }
+      >
+        <View style={s.header}>
+          <Text style={s.headerTitle}>Nos partenaires</Text>
+          <Text style={s.headerSub}>Des marques dog-friendly sélectionnées pour la meute</Text>
+        </View>
 
-      {/* Filtres marques */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll} contentContainerStyle={styles.filtersContent}>
-        <TouchableOpacity style={[styles.chip, !filterBrand && styles.chipActive]} onPress={() => setFilterBrand(null)}>
-          <Text style={[styles.chipText, !filterBrand && styles.chipTextActive]}>Tout</Text>
-        </TouchableOpacity>
-        {partenaires.map(p => (
-          <TouchableOpacity
-            key={p.id}
-            style={[styles.chip, filterBrand === p.id && styles.chipActive]}
-            onPress={() => setFilterBrand(filterBrand === p.id ? null : p.id)}
-          >
-            {p.logo_url ? <Image source={{ uri: p.logo_url }} style={styles.chipLogo} resizeMode="contain" /> : null}
-            <Text style={[styles.chipText, filterBrand === p.id && styles.chipTextActive]} numberOfLines={1}>{p.nom}</Text>
-          </TouchableOpacity>
-        ))}
+        <View style={s.grid}>
+          {rows.map((row, ri) => (
+            <View key={ri} style={[s.row, { gap: cardGap }]}>
+              {row.map(p => (
+                <BrandCard
+                  key={p.id}
+                  partenaire={p}
+                  posts={postsFor(p.id)}
+                  cardWidth={cardWidth}
+                  onPress={() => setSelectedBrand(p)}
+                />
+              ))}
+            </View>
+          ))}
+        </View>
       </ScrollView>
 
-      {/* Bandeau marque (visible uniquement si filtre actif) */}
-      {activeBrand && (
-        <View style={styles.brandBanner}>
-          {activeBrand.logo_url
-            ? <Image source={{ uri: activeBrand.logo_url }} style={styles.brandBannerLogo} resizeMode="contain" />
-            : <View style={styles.brandBannerLogoFallback}><Text style={styles.brandBannerLogoFallbackText}>{activeBrand.nom[0]}</Text></View>}
-          <View style={styles.brandBannerInfo}>
-            <Text style={styles.brandBannerNom}>{activeBrand.nom}</Text>
-            {activeBrand.description ? <Text style={styles.brandBannerDesc} numberOfLines={2}>{activeBrand.description}</Text> : null}
-          </View>
-          {activeBrand.site_web ? (
-            <TouchableOpacity style={styles.brandBannerSiteBtn} onPress={() => Linking.openURL(activeBrand.site_web!)}>
-              <Ionicons name="globe-outline" size={14} color={colors.bordeaux} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      )}
-
-      {/* Liste des offres */}
-      {filtered.length === 0 ? (
-        <View style={styles.emptyWrap}>
-          <Ionicons name="sparkles-outline" size={28} color={colors.border} />
-          <Text style={styles.emptyText}>Aucune publication pour l'instant</Text>
-        </View>
-      ) : (
-        <View style={styles.postsWrap}>
-          {filtered.map(post => {
-            const brand = partMap[post.partenaire_id];
-            const cfg = TYPE_CFG[post.type] || TYPE_CFG.news;
-            let periode = '';
-            if (post.date_debut && post.date_expiration) periode = `${fmtDate(post.date_debut)} – ${fmtDate(post.date_expiration)}`;
-            else if (post.date_debut) periode = `Dès le ${fmtDate(post.date_debut)}`;
-            else if (post.date_expiration) periode = `Jusqu'au ${fmtDate(post.date_expiration)}`;
-
-            if (post.image_url) {
-              return (
-                <View key={post.id} style={styles.postCard}>
-                  <View style={styles.postImgWrap}>
-                    <Image source={{ uri: post.image_url }} style={styles.postImg} resizeMode="cover" />
-                    <LinearGradient colors={['rgba(0,0,0,0.04)', 'rgba(20,8,8,0.82)']} style={StyleSheet.absoluteFillObject} />
-
-                    {/* Top: brand badge gauche + type badge droit */}
-                    <View style={styles.postTopRow}>
-                      {brand && (
-                        <View style={styles.offerBrandBadge}>
-                          {brand.logo_url
-                            ? <Image source={{ uri: brand.logo_url }} style={styles.offerBrandLogo} resizeMode="contain" />
-                            : <Text style={styles.offerBrandLogoFallback}>{brand.nom[0]}</Text>}
-                          <Text style={styles.offerBrandName}>{brand.nom}</Text>
-                        </View>
-                      )}
-                      <View style={[styles.typeBadge, { backgroundColor: cfg.bg }]}>
-                        <Text style={styles.typeBadgeText}>{cfg.icon}  {cfg.label}</Text>
-                      </View>
-                    </View>
-
-                    {/* Bottom: période + titre + bouton */}
-                    <View style={styles.postImgBottom}>
-                      {periode ? (
-                        <View style={styles.periodeBadge}>
-                          <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.8)" />
-                          <Text style={styles.periodeText}>{periode}</Text>
-                        </View>
-                      ) : null}
-                      <Text style={styles.postTitreOverlay} numberOfLines={2}>{post.titre}</Text>
-                      {post.lien ? (
-                        <TouchableOpacity style={styles.postBtnSmall} onPress={() => Linking.openURL(post.lien!)}>
-                          <Text style={styles.postBtnSmallText}>Découvrir</Text>
-                          <Ionicons name="arrow-forward" size={11} color={colors.ivory} />
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  </View>
-                  {post.contenu ? (
-                    <View style={styles.postBodyMini}>
-                      <Text style={styles.postContenu}>{post.contenu}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              );
-            }
-
-            // Sans image
-            return (
-              <View key={post.id} style={styles.postCard}>
-                <View style={[styles.postNoImgTop, { backgroundColor: cfg.bg }]}>
-                  <View style={styles.postNoImgTopRow}>
-                    <Text style={styles.postNoImgTypeLabel}>{cfg.icon}  {cfg.label}</Text>
-                    {brand && <Text style={styles.postNoImgBrand}>{brand.nom}</Text>}
-                  </View>
-                  {periode ? (
-                    <View style={styles.periodeRow}>
-                      <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.75)" />
-                      <Text style={styles.periodeTextLight}>{periode}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <View style={styles.postBody}>
-                  <Text style={styles.postTitre}>{post.titre}</Text>
-                  {post.contenu ? <Text style={styles.postContenu}>{post.contenu}</Text> : null}
-                  {post.lien ? (
-                    <TouchableOpacity style={styles.postBtn} onPress={() => Linking.openURL(post.lien!)}>
-                      <Text style={styles.postBtnText}>Découvrir</Text>
-                      <Ionicons name="arrow-forward" size={13} color={colors.ivory} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
-    </ScrollView>
+      <BrandModal
+        partenaire={selectedBrand}
+        posts={selectedBrand ? postsFor(selectedBrand.id) : []}
+        visible={!!selectedBrand}
+        onClose={() => setSelectedBrand(null)}
+      />
+    </>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
   list: { paddingBottom: 56 },
 
@@ -242,109 +360,128 @@ const styles = StyleSheet.create({
   gateTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux, textAlign: 'center' },
   gateText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
 
-  // Header compact
-  header: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 14 },
-  headerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux, marginBottom: 2 },
+  header: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 16 },
+  headerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux, marginBottom: 3 },
   headerSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
 
-  // Filtres
-  filtersScroll: { borderBottomWidth: 1, borderBottomColor: colors.border },
-  filtersContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, flexDirection: 'row' },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 7, paddingLeft: 8, paddingRight: 13,
-    borderRadius: 20, borderWidth: 1, borderColor: colors.border,
-    backgroundColor: colors.white,
-  },
-  chipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
-  chipLogo: { width: 20, height: 20, borderRadius: 4 },
-  chipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMid },
-  chipTextActive: { color: colors.ivory },
+  // Grid
+  grid: { paddingHorizontal: 28, gap: 12 },
+  row: { flexDirection: 'row' },
 
-  // Bandeau marque (quand filtre actif)
-  brandBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginHorizontal: 14, marginTop: 14, marginBottom: 2,
-    backgroundColor: colors.white, borderRadius: 14,
-    padding: 12,
+  // Brand card
+  card: {
+    borderRadius: 18, overflow: 'hidden', backgroundColor: colors.white,
     borderWidth: 1, borderColor: colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2,
   },
-  brandBannerLogo: { width: 40, height: 40, borderRadius: 10 },
-  brandBannerLogoFallback: { width: 40, height: 40, borderRadius: 10, backgroundColor: colors.bordeaux + '12', alignItems: 'center', justifyContent: 'center' },
-  brandBannerLogoFallbackText: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
-  brandBannerInfo: { flex: 1, gap: 2 },
-  brandBannerNom: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
-  brandBannerDesc: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, lineHeight: 16 },
-  brandBannerSiteBtn: {
-    width: 32, height: 32, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ivoryLight,
+  cardCover: { width: '100%', height: 160, backgroundColor: colors.bordeaux, position: 'relative' },
+  cardLogo: {
+    position: 'absolute', bottom: 10, left: 10,
+    width: 42, height: 42, borderRadius: 10,
+    backgroundColor: colors.white, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: colors.white,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+  },
+  cardLogoImg: { width: '100%', height: '100%', padding: 4 },
+  cardLogoFallback: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  offerBadge: {
+    position: 'absolute', bottom: 14, right: 10,
+    backgroundColor: colors.terra, borderRadius: 20,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  offerBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 9, color: '#fff', letterSpacing: 0.5 },
+  cardBody: { padding: 11, gap: 3 },
+  cardName: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 14, color: colors.bordeaux },
+  cardDesc: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, lineHeight: 15 },
+  cardArrow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
+  cardArrowText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+
+  // Modal
+  modalContainer: { flex: 1, backgroundColor: colors.ivoryPale },
+  modalContent: { paddingBottom: 60 },
+
+  hero: { width: '100%', height: 280, backgroundColor: colors.bordeaux, position: 'relative' },
+  closeBtn: {
+    position: 'absolute', top: 50, right: 16, zIndex: 10,
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  heroInfo: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', alignItems: 'flex-end', gap: 14,
+    padding: 18,
+  },
+  heroLogo: {
+    width: 58, height: 58, borderRadius: 14, backgroundColor: colors.white,
+    overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2.5, borderColor: colors.white,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.22, shadowRadius: 8, elevation: 4,
+    flexShrink: 0,
+  },
+  heroLogoImg: { width: '100%', height: '100%', padding: 6 },
+  heroLogoFallback: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux },
+  heroName: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: '#fff', lineHeight: 28, flex: 1 },
+  heroSite: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.65)', marginTop: 3 },
+
+  body: { padding: 20 },
+  siteLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 },
+  siteLinkText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  story: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 24, marginBottom: 4 },
+
+  // Gallery
+  galleryFull: { height: 220, borderRadius: 12, marginVertical: 16 },
+  galleryRow: { flexDirection: 'row', gap: 8, marginVertical: 16 },
+  galleryHalf: { height: 160, borderRadius: 12 },
+  galleryThree: { flexDirection: 'row', gap: 8, marginVertical: 16 },
+  galleryThreeMain: { height: 210, borderRadius: 12 },
+  galleryThreeSide: { flex: 1, gap: 8 },
+  galleryThreeSmall: { height: 101, borderRadius: 12 },
+
+  // Section title
+  sectionTitle: {
+    fontFamily: 'DMSans_500Medium', fontSize: 10, letterSpacing: 1.2,
+    textTransform: 'uppercase', color: colors.textMuted,
+    marginTop: 24, marginBottom: 14,
+    paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.border,
   },
 
-  // Posts
-  emptyWrap: { alignItems: 'center', gap: 10, paddingVertical: 48 },
-  emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
-  postsWrap: { gap: 14, paddingHorizontal: 14, paddingTop: 16 },
-
-  postCard: {
-    borderRadius: 16, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.09, shadowRadius: 8, elevation: 3,
+  // Post item
+  postItem: {
+    backgroundColor: colors.white, borderRadius: 14, overflow: 'hidden',
+    borderWidth: 1, borderColor: colors.border, marginBottom: 12,
   },
+  postItemImg: { width: '100%', height: 140 },
+  postItemBody: { padding: 14, gap: 5 },
+  postItemType: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra, letterSpacing: 0.8, textTransform: 'uppercase' },
+  postItemTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux, lineHeight: 22 },
+  postItemDesc: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, lineHeight: 18 },
+  postItemFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, flexWrap: 'wrap', gap: 6 },
+  postItemMeta: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 
-  // Avec image
-  postImgWrap: { width: '100%', height: 220 },
-  postImg: { width: '100%', height: 220 },
-
-  postTopRow: {
-    position: 'absolute', top: 12, left: 12, right: 12,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-  },
-  offerBrandBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 20, paddingVertical: 4, paddingLeft: 4, paddingRight: 10,
-  },
-  offerBrandLogo: { width: 22, height: 22, borderRadius: 6 },
-  offerBrandLogoFallback: { width: 22, height: 22, borderRadius: 6, backgroundColor: colors.bordeaux + '15', textAlign: 'center', lineHeight: 22, fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
-  offerBrandName: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
-
-  typeBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4,
-  },
-  typeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff' },
-
-  postImgBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 14, gap: 5 },
-  periodeBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.32)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
-  },
-  periodeText: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.9)' },
-  postTitreOverlay: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: '#fff', lineHeight: 24 },
-  postBtnSmall: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.18)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.32)',
-    borderRadius: 18, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  postBtnSmallText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
-
-  postBodyMini: { backgroundColor: colors.white, paddingHorizontal: 14, paddingVertical: 10 },
-
-  // Sans image
-  postNoImgTop: { paddingHorizontal: 14, paddingVertical: 10 },
-  postNoImgTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  postNoImgTypeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#fff' },
-  postNoImgBrand: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.75)' },
-  periodeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  periodeTextLight: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
-
-  postBody: { backgroundColor: colors.white, padding: 14, gap: 8 },
-  postTitre: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, lineHeight: 24 },
-  postContenu: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, lineHeight: 19 },
-  postBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+  revealBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
     backgroundColor: colors.bordeaux, borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 9,
-    alignSelf: 'flex-start', marginTop: 2,
+    paddingHorizontal: 14, paddingVertical: 8, marginTop: 4,
   },
-  postBtnText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 13 },
+  revealBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+
+  codeBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(196,105,58,0.07)',
+    borderWidth: 1.5, borderColor: colors.terra, borderStyle: 'dashed',
+    borderRadius: 10, padding: 12, marginTop: 6,
+  },
+  codeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 9, color: colors.terra, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3 },
+  codeValue: { fontFamily: 'DMSans_500Medium', fontSize: 17, color: colors.bordeaux, letterSpacing: 1.5 },
+  codeCopyBtn: { backgroundColor: 'rgba(196,105,58,0.12)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  codeCopyText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+
+  ctaBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: colors.bordeaux, borderRadius: 18,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  ctaBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
 });
