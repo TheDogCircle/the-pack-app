@@ -15,10 +15,12 @@ import PartenairesScreen from '../screens/PartenairesScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
   Tabs: undefined;
+  Onboarding: undefined;
   Auth: undefined;
   ProfilPublic: { userId: string; prenom: string; avatarUrl?: string };
   Settings: undefined;
@@ -144,9 +146,25 @@ function MainTabs() {
 }
 
 export default function Navigation() {
-  const { loading } = useSession();
+  const { session, loading } = useSession();
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
-  if (loading) {
+  useEffect(() => {
+    if (!session) {
+      setNeedsOnboarding(false);
+      setOnboardingChecked(true);
+      return;
+    }
+    setOnboardingChecked(false);
+    supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        setNeedsOnboarding(!data?.prenom);
+        setOnboardingChecked(true);
+      });
+  }, [session?.user.id]);
+
+  if (loading || (session && !onboardingChecked)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={colors.terraPale} size="large" />
@@ -156,8 +174,12 @@ export default function Navigation() {
 
   return (
     <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator
+        screenOptions={{ headerShown: false }}
+        initialRouteName={session && needsOnboarding ? 'Onboarding' : 'Tabs'}
+      >
         <Stack.Screen name="Tabs" component={MainTabs} />
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ gestureEnabled: false }} />
         <Stack.Screen
           name="Auth"
           component={AuthScreen}
