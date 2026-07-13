@@ -487,7 +487,7 @@ export default function CarteScreen() {
     // Agréger les villes uniques avec la moyenne des coordonnées
     const villeMap: Record<string, { lat: number; lng: number; count: number }> = {};
     (villeData || []).forEach((l: any) => {
-      if (!l.ville) return;
+      if (!l.ville || !l.lat || !l.lng || isNaN(l.lat) || isNaN(l.lng)) return;
       if (!villeMap[l.ville]) villeMap[l.ville] = { lat: l.lat, lng: l.lng, count: 1 };
       else {
         const v = villeMap[l.ville];
@@ -496,7 +496,12 @@ export default function CarteScreen() {
         v.count++;
       }
     });
-    setCityResults(Object.entries(villeMap).slice(0, 3).map(([nom, { lat, lng }]) => ({ nom, lat, lng })));
+    setCityResults(
+      Object.entries(villeMap)
+        .filter(([, { lat, lng }]) => lat && lng && !isNaN(lat) && !isNaN(lng))
+        .slice(0, 3)
+        .map(([nom, { lat, lng }]) => ({ nom, lat, lng }))
+    );
     setSearchResults(lieuData || []);
     setShowResults(true);
   }
@@ -1143,10 +1148,13 @@ export default function CarteScreen() {
                 anchor={{ x: 0.5, y: 0.5 }}
                 onPress={() => {
                   const leaves = clusterIndex.getLeaves(cluster_id, Infinity);
-                  const lats = leaves.map((f: any) => f.geometry.coordinates[1]);
-                  const lngs = leaves.map((f: any) => f.geometry.coordinates[0]);
-                  const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
-                  const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs);
+                  const lats = leaves.map((f: any) => f.geometry.coordinates[1]).filter((v: number) => v && !isNaN(v));
+                  const lngs = leaves.map((f: any) => f.geometry.coordinates[0]).filter((v: number) => v && !isNaN(v));
+                  if (!lats.length || !lngs.length) return;
+                  const minLat = lats.reduce((a: number, b: number) => Math.min(a, b), lats[0]);
+                  const maxLat = lats.reduce((a: number, b: number) => Math.max(a, b), lats[0]);
+                  const minLng = lngs.reduce((a: number, b: number) => Math.min(a, b), lngs[0]);
+                  const maxLng = lngs.reduce((a: number, b: number) => Math.max(a, b), lngs[0]);
                   mapRef.current?.animateToRegion({
                     latitude: (minLat + maxLat) / 2,
                     longitude: (minLng + maxLng) / 2,
