@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "The Pack",
+    "name": "The Pack Club",
     "slug": "the-pack-app",
     "scheme": "thepack",
     "version": "1.0.0",
@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "fr.thepackclub.app",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute.",
@@ -63,7 +64,8 @@
           "sounds": []
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-apple-authentication"
     ],
     "extra": {
       "eas": {

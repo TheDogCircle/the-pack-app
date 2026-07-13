@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import { sendPushNotification } from '../lib/notifications';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +150,7 @@ export default function MessagerieScreen() {
   const [groupeForm, setGroupeForm] = useState({ nom: '', description: '', ville: '' });
   const [creatingGroupe, setCreatingGroupe] = useState(false);
   const [storyGroupe, setStoryGroupe] = useState<Groupe | null>(null);
+  const [myMuted, setMyMuted] = useState(false);
   const storyCardRef = useRef<View>(null);
 
   // ── Derived ──
@@ -195,6 +197,7 @@ export default function MessagerieScreen() {
                     { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
                   ]),
                 },
+                { text: myMuted ? 'Activer les notifications' : 'Désactiver les notifications', onPress: toggleMute },
                 { text: 'Annuler', style: 'cancel' },
               ];
               Alert.alert(convDisplayName(selectedConv), undefined, buttons);
@@ -208,7 +211,7 @@ export default function MessagerieScreen() {
     } else {
       navigation.setOptions({ title: 'Messagerie', headerLeft: undefined, headerRight: undefined });
     }
-  }, [selectedConv]);
+  }, [selectedConv, myMuted]);
 
   // ── Conversations ──
   async function loadConversations() {
@@ -267,6 +270,10 @@ export default function MessagerieScreen() {
           setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
         }).subscribe();
+    if (myUserId) {
+      const { data: memberRow } = await supabase.from('conversation_members').select('muted').eq('conversation_id', conv.id).eq('user_id', myUserId).maybeSingle();
+      setMyMuted(memberRow?.muted ?? false);
+    }
   }
 
   function closeConversation() {
@@ -275,6 +282,7 @@ export default function MessagerieScreen() {
     setSelectedConv(null);
     setMessages([]);
     setInputText('');
+    setMyMuted(false);
     loadConversations();
   }
 
@@ -303,6 +311,7 @@ export default function MessagerieScreen() {
       const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
+      notifyOtherMembers(text, selectedConv);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
       setInputText(text);
@@ -320,6 +329,31 @@ export default function MessagerieScreen() {
     if (!myUserId || !selectedConv) return;
     await supabase.from('conversations').update({ actif: false }).eq('id', selectedConv.id);
     closeConversation();
+  }
+
+  async function toggleMute() {
+    if (!myUserId || !selectedConv) return;
+    const newMuted = !myMuted;
+    setMyMuted(newMuted);
+    await supabase.from('conversation_members').update({ muted: newMuted }).eq('conversation_id', selectedConv.id).eq('user_id', myUserId);
+  }
+
+  async function notifyOtherMembers(text: string, conv: Conversation) {
+    const otherIds = conv.members.filter(m => m.user_id !== myUserId).map(m => m.user_id);
+    if (!otherIds.length) return;
+    const [{ data: prefs }, { data: mutedRows }] = await Promise.all([
+      supabase.from('profils').select('id,push_token,notif_messages').in('id', otherIds),
+      supabase.from('conversation_members').select('user_id').eq('conversation_id', conv.id).eq('muted', true).in('user_id', otherIds),
+    ]);
+    const mutedSet = new Set((mutedRows || []).map((r: any) => r.user_id));
+    const myPrenom = conv.members.find(m => m.user_id === myUserId)?.prenom || 'Quelqu\'un';
+    const convName = conv.nom || conv.members.filter(m => m.user_id !== myUserId).map(m => m.prenom).slice(0, 2).join(', ') || 'Message';
+    for (const p of (prefs || [])) {
+      if (!p.push_token) continue;
+      if (p.notif_messages === false) continue;
+      if (mutedSet.has(p.id)) continue;
+      sendPushNotification(p.push_token, convName, `${myPrenom} : ${text}`, { conversationId: conv.id });
+    }
   }
 
   async function openCreateModal() {

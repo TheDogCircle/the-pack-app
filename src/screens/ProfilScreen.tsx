@@ -56,7 +56,7 @@ type Profil = {
   id: string; prenom: string | null; username: string | null; ville: string | null;
   nom_chien: string | null; race_chien: string | null; avatar_url: string | null;
   bio: string | null; points: number;
-  notif_follow: boolean | null; notif_lieu_nearby: boolean | null;
+  notif_follow: boolean | null; notif_lieu_nearby: boolean | null; notif_messages: boolean | null;
 };
 type LieuMini = { id: string; nom: string; ville: string; cat: string };
 type FavItem = { id: string; lieu_id: string; liste: string; lieux: LieuMini | null };
@@ -81,6 +81,7 @@ export default function ProfilScreen() {
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [notifFollow, setNotifFollow] = useState(true);
   const [notifLieuNearby, setNotifLieuNearby] = useState(true);
+  const [notifMessages, setNotifMessages] = useState(true);
   const [favFilter, setFavFilter] = useState<'tous' | 'favori' | 'a_tester' | 'deja_teste'>('tous');
   const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
@@ -126,6 +127,7 @@ export default function ProfilScreen() {
       setBio(p.bio || '');
       setNotifFollow(p.notif_follow ?? true);
       setNotifLieuNearby(p.notif_lieu_nearby ?? true);
+      setNotifMessages(p.notif_messages ?? true);
     }
 
     const favLieuIds = [...new Set((favsRaw || []).map((f: any) => f.lieu_id).filter(Boolean))];
@@ -226,11 +228,12 @@ export default function ProfilScreen() {
     setFollowListLoading(false);
   }
 
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby', value: boolean) {
+  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages', value: boolean) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     if (key === 'notif_follow') setNotifFollow(value);
-    else setNotifLieuNearby(value);
+    else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
+    else setNotifMessages(value);
     await supabase.from('profils').update({ [key]: value }).eq('id', session.user.id);
   }
 
@@ -402,7 +405,7 @@ export default function ProfilScreen() {
                 thumbColor={colors.ivory}
               />
             </View>
-            <View style={[styles.notifRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.notifRow}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={styles.notifLabel}>Nouveau lieu près de moi</Text>
                 <Text style={styles.notifSub}>Quand un lieu dog-friendly est ajouté près de chez toi</Text>
@@ -410,6 +413,18 @@ export default function ProfilScreen() {
               <Switch
                 value={notifLieuNearby}
                 onValueChange={v => toggleNotif('notif_lieu_nearby', v)}
+                trackColor={{ false: colors.border, true: colors.terra }}
+                thumbColor={colors.ivory}
+              />
+            </View>
+            <View style={[styles.notifRow, { borderBottomWidth: 0 }]}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.notifLabel}>Messages</Text>
+                <Text style={styles.notifSub}>Nouveaux messages reçus dans tes conversations</Text>
+              </View>
+              <Switch
+                value={notifMessages}
+                onValueChange={v => toggleNotif('notif_messages', v)}
                 trackColor={{ false: colors.border, true: colors.terra }}
                 thumbColor={colors.ivory}
               />
