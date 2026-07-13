@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
-  Modal, Image, Alert,
+  Modal, Image, Alert, Share, Linking,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
@@ -12,26 +14,21 @@ import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 
-type ConvMember = { user_id: string; prenom: string; avatar_url: string | null };
+// ── Types ───────────────────────────────────────────────────────────────────
 
+type ConvMember = { user_id: string; prenom: string; avatar_url: string | null };
 type Conversation = {
-  id: string;
-  nom: string | null;
-  created_by: string;
+  id: string; nom: string | null; created_by: string;
   members: ConvMember[];
   last_message: { contenu: string; created_at: string; user_id: string } | null;
 };
-
-type Message = {
-  id: string;
-  user_id: string;
-  contenu: string;
-  created_at: string;
-  prenom: string;
-  avatar_url: string | null;
-};
-
+type Message = { id: string; user_id: string; contenu: string; created_at: string; prenom: string; avatar_url: string | null };
 type Contact = { id: string; prenom: string; avatar_url: string | null; ville: string | null };
+type Groupe = {
+  id: string; nom: string; description: string | null; ville: string | null;
+  image_url: string | null; created_by: string; conversation_id: string;
+  membre_count?: number;
+};
 
 function fmtTime(dateStr: string) {
   const d = new Date(dateStr);
@@ -41,12 +38,92 @@ function fmtTime(dateStr: string) {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
+// ── Groupe card ──────────────────────────────────────────────────────────────
+
+function GroupeCard({
+  groupe, joined, onJoin, onOpen, onWhatsApp, onStory,
+}: {
+  groupe: Groupe; joined: boolean;
+  onJoin: () => void; onOpen: () => void; onWhatsApp: () => void; onStory: () => void;
+}) {
+  return (
+    <TouchableOpacity style={g.card} onPress={joined ? onOpen : undefined} activeOpacity={joined ? 0.7 : 1}>
+      {groupe.image_url ? (
+        <View style={g.cardCover}>
+          <Image source={{ uri: groupe.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <View style={g.cardCoverGrad} />
+          {groupe.ville ? (
+            <View style={g.villeBadge}>
+              <Ionicons name="location" size={10} color={colors.ivory} />
+              <Text style={g.villeBadgeText}>{groupe.ville}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+      <View style={g.cardBody}>
+        <View style={g.cardTopRow}>
+          <View style={g.cardIcon}>
+            <Ionicons name="people" size={20} color={colors.ivory} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={g.cardNom} numberOfLines={1}>{groupe.nom}</Text>
+            {groupe.ville ? (
+              <View style={g.villeInline}>
+                <Ionicons name="location-outline" size={11} color={colors.textMuted} />
+                <Text style={g.villeInlineText}>{groupe.ville}</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+        {groupe.description ? <Text style={g.cardDesc} numberOfLines={2}>{groupe.description}</Text> : null}
+        <View style={g.cardFooter}>
+          {groupe.membre_count != null ? (
+            <View style={g.memberCount}>
+              <Ionicons name="people-outline" size={13} color={colors.textMuted} />
+              <Text style={g.memberCountText}>{groupe.membre_count} membre{groupe.membre_count > 1 ? 's' : ''}</Text>
+            </View>
+          ) : null}
+          <View style={g.cardActions}>
+            <TouchableOpacity style={g.shareBtn} onPress={() => Alert.alert(
+              'Partager le groupe',
+              undefined,
+              [
+                { text: 'Story / Image', onPress: onStory },
+                { text: 'WhatsApp', onPress: onWhatsApp },
+                { text: 'Annuler', style: 'cancel' },
+              ]
+            )}>
+              <Ionicons name="share-social-outline" size={15} color={colors.ivory} />
+              <Text style={g.shareBtnText}>Partager</Text>
+            </TouchableOpacity>
+            {joined ? (
+              <TouchableOpacity style={g.joinedBtn} onPress={onOpen}>
+                <Ionicons name="chatbubble-outline" size={13} color={colors.terra} />
+                <Text style={g.joinedBtnText}>Ouvrir</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={g.joinBtn} onPress={onJoin}>
+                <Text style={g.joinBtnText}>Rejoindre</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ── Main screen ──────────────────────────────────────────────────────────────
+
 export default function MessagerieScreen() {
   const navigation = useNavigation<any>();
   const headerHeight = useHeaderHeight();
   const { session, loading: sessionLoading } = useSession();
   const myUserId = session?.user?.id ?? null;
 
+  const [activeTab, setActiveTab] = useState<'messages' | 'groupes'>('messages');
+
+  // ── Messages state ──
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
@@ -54,17 +131,27 @@ export default function MessagerieScreen() {
   const [msgLoading, setMsgLoading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-
   const [createModal, setCreateModal] = useState(false);
   const [convMode, setConvMode] = useState<'direct' | 'groupe'>('direct');
   const [groupName, setGroupName] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
-
   const flatListRef = useRef<FlatList>(null);
   const channelRef = useRef<any>(null);
 
+  // ── Groupes state ──
+  const [groupes, setGroupes] = useState<Groupe[]>([]);
+  const [myConvIds, setMyConvIds] = useState<Set<string>>(new Set());
+  const [villeFilter, setVilleFilter] = useState<string | null>(null);
+  const [groupesLoading, setGroupesLoading] = useState(false);
+  const [createGroupeModal, setCreateGroupeModal] = useState(false);
+  const [groupeForm, setGroupeForm] = useState({ nom: '', description: '', ville: '' });
+  const [creatingGroupe, setCreatingGroupe] = useState(false);
+  const [storyGroupe, setStoryGroupe] = useState<Groupe | null>(null);
+  const storyCardRef = useRef<View>(null);
+
+  // ── Derived ──
   function convDisplayName(conv: Conversation): string {
     if (conv.nom) return conv.nom;
     const others = conv.members.filter(m => m.user_id !== myUserId);
@@ -73,13 +160,14 @@ export default function MessagerieScreen() {
     return `${others.slice(0, 2).map(m => m.prenom).join(', ')} +${others.length - 2}`;
   }
 
-  useEffect(() => {
-    if (myUserId) loadConversations();
-  }, [myUserId]);
+  const villes = [...new Set(groupes.map(g => g.ville).filter(Boolean) as string[])].sort();
+  const filteredGroupes = villeFilter ? groupes.filter(g => g.ville === villeFilter) : groupes;
+
+  // ── Effects ──
+  useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
 
   useEffect(() => {
     if (selectedConv) {
-      const isCreator = selectedConv.created_by === myUserId;
       navigation.setOptions({
         title: convDisplayName(selectedConv),
         headerLeft: () => (
@@ -90,36 +178,25 @@ export default function MessagerieScreen() {
         headerRight: () => (
           <TouchableOpacity
             onPress={() => {
+              const isCreator = selectedConv.created_by === myUserId;
               const buttons: any[] = [
                 {
                   text: 'Quitter la conversation',
-                  onPress: () =>
-                    Alert.alert(
-                      'Quitter la conversation ?',
-                      'Tu ne recevras plus les messages.',
-                      [
-                        { text: 'Annuler', style: 'cancel' },
-                        { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
-                      ]
-                    ),
+                  onPress: () => Alert.alert('Quitter ?', 'Tu ne recevras plus les messages.', [
+                    { text: 'Annuler', style: 'cancel' },
+                    { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
+                  ]),
                 },
-              ];
-              if (isCreator) {
-                buttons.push({
+                {
                   text: 'Supprimer pour tout le monde',
                   style: 'destructive',
-                  onPress: () =>
-                    Alert.alert(
-                      'Supprimer la conversation ?',
-                      'Elle sera supprimée définitivement pour tous les membres.',
-                      [
-                        { text: 'Annuler', style: 'cancel' },
-                        { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
-                      ]
-                    ),
-                });
-              }
-              buttons.push({ text: 'Annuler', style: 'cancel' });
+                  onPress: () => Alert.alert('Supprimer ?', 'Supprimée définitivement pour tous.', [
+                    { text: 'Annuler', style: 'cancel' },
+                    { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
+                  ]),
+                },
+                { text: 'Annuler', style: 'cancel' },
+              ];
               Alert.alert(convDisplayName(selectedConv), undefined, buttons);
             }}
             style={{ marginRight: 12, padding: 4 }}
@@ -129,40 +206,34 @@ export default function MessagerieScreen() {
         ),
       });
     } else {
-      navigation.setOptions({ title: 'Messages', headerLeft: undefined, headerRight: undefined });
+      navigation.setOptions({ title: 'Messagerie', headerLeft: undefined, headerRight: undefined });
     }
   }, [selectedConv]);
 
+  // ── Conversations ──
   async function loadConversations() {
     if (!myUserId) return;
     setLoading(true);
     const { data: memberRows } = await supabase
       .from('conversation_members').select('conversation_id').eq('user_id', myUserId);
-
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }
     const convIds = memberRows.map((r: any) => r.conversation_id);
-
     const [{ data: convData }, { data: allMembers }] = await Promise.all([
       supabase.from('conversations').select('id,nom,created_by').in('id', convIds).eq('actif', true),
       supabase.from('conversation_members').select('conversation_id,user_id').in('conversation_id', convIds),
     ]);
     if (!convData?.length) { setConversations([]); setLoading(false); return; }
-
     const allUserIds = [...new Set((allMembers || []).map((m: any) => m.user_id))];
     const { data: profils } = await supabase.from('profils').select('id,prenom,avatar_url').in('id', allUserIds);
     const pm: Record<string, any> = {};
     (profils || []).forEach((p: any) => { pm[p.id] = p; });
-
     const membersByConv: Record<string, ConvMember[]> = {};
     (allMembers || []).forEach((m: any) => {
       if (!membersByConv[m.conversation_id]) membersByConv[m.conversation_id] = [];
       membersByConv[m.conversation_id].push({
-        user_id: m.user_id,
-        prenom: pm[m.user_id]?.prenom || 'Membre',
-        avatar_url: pm[m.user_id]?.avatar_url || null,
+        user_id: m.user_id, prenom: pm[m.user_id]?.prenom || 'Membre', avatar_url: pm[m.user_id]?.avatar_url || null,
       });
     });
-
     const lastMsgResults = await Promise.all(
       convIds.map((cid: string) =>
         supabase.from('messages').select('contenu,created_at,user_id')
@@ -171,20 +242,12 @@ export default function MessagerieScreen() {
       )
     );
     const lastMessages: Record<string, any> = {};
-    convIds.forEach((cid: string, i: number) => {
-      if (lastMsgResults[i].data?.[0]) lastMessages[cid] = lastMsgResults[i].data![0];
-    });
-
+    convIds.forEach((cid: string, i: number) => { if (lastMsgResults[i].data?.[0]) lastMessages[cid] = lastMsgResults[i].data![0]; });
     const list: Conversation[] = (convData || []).map((c: any) => ({
       id: c.id, nom: c.nom, created_by: c.created_by,
       members: membersByConv[c.id] || [],
       last_message: lastMessages[c.id] || null,
-    })).sort((a, b) => {
-      const ta = a.last_message?.created_at || '0';
-      const tb = b.last_message?.created_at || '0';
-      return tb.localeCompare(ta);
-    });
-
+    })).sort((a, b) => (b.last_message?.created_at || '0').localeCompare(a.last_message?.created_at || '0'));
     setConversations(list);
     setLoading(false);
   }
@@ -194,20 +257,16 @@ export default function MessagerieScreen() {
     setMsgLoading(true);
     await loadMessages(conv.id);
     setMsgLoading(false);
-
     if (channelRef.current) channelRef.current.unsubscribe();
     channelRef.current = supabase.channel(`conv:${conv.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'messages',
-        filter: `conversation_id=eq.${conv.id}`,
-      }, async (payload) => {
-        const m = payload.new as any;
-        const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
-        const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null };
-        setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
-      })
-      .subscribe();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
+        async (payload) => {
+          const m = payload.new as any;
+          const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
+          const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null };
+          setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+        }).subscribe();
   }
 
   function closeConversation() {
@@ -221,17 +280,14 @@ export default function MessagerieScreen() {
 
   async function loadMessages(convId: string) {
     const { data } = await supabase.from('messages')
-      .select('id,user_id,contenu,created_at')
-      .eq('conversation_id', convId).eq('actif', true)
+      .select('id,user_id,contenu,created_at').eq('conversation_id', convId).eq('actif', true)
       .order('created_at', { ascending: true }).limit(100);
     if (!data?.length) { setMessages([]); return; }
     const userIds = [...new Set(data.map((m: any) => m.user_id))];
     const { data: profils } = await supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds);
     const pm: Record<string, any> = {};
     (profils || []).forEach((p: any) => { pm[p.id] = p; });
-    setMessages(data.map((m: any) => ({
-      ...m, prenom: pm[m.user_id]?.prenom || 'Membre', avatar_url: pm[m.user_id]?.avatar_url || null,
-    })));
+    setMessages(data.map((m: any) => ({ ...m, prenom: pm[m.user_id]?.prenom || 'Membre', avatar_url: pm[m.user_id]?.avatar_url || null })));
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 60);
   }
 
@@ -240,67 +296,41 @@ export default function MessagerieScreen() {
     const text = inputText.trim();
     setInputText('');
     setSending(true);
-
     const { data, error } = await supabase.from('messages').insert({
       conversation_id: selectedConv.id, user_id: myUserId, contenu: text,
     }).select('id,created_at').single();
-
     if (!error) {
-      const optimistic: Message = {
-        id: data?.id ?? `tmp-${Date.now()}`,
-        user_id: myUserId,
-        contenu: text,
-        created_at: data?.created_at ?? new Date().toISOString(),
-        prenom: 'Moi',
-        avatar_url: null,
-      };
-      setMessages(prev => {
-        if (prev.some(m => m.id === optimistic.id)) return prev;
-        return [...prev, optimistic];
-      });
+      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null };
+      setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
       setInputText(text);
     }
-
     setSending(false);
   }
 
   async function leaveConversation() {
     if (!myUserId || !selectedConv) return;
-    await supabase.from('conversation_members')
-      .delete()
-      .eq('conversation_id', selectedConv.id)
-      .eq('user_id', myUserId);
+    await supabase.from('conversation_members').delete().eq('conversation_id', selectedConv.id).eq('user_id', myUserId);
     closeConversation();
   }
 
   async function deleteConversation() {
     if (!myUserId || !selectedConv) return;
-    await supabase.from('conversations')
-      .update({ actif: false })
-      .eq('id', selectedConv.id)
-      .eq('created_by', myUserId);
+    await supabase.from('conversations').update({ actif: false }).eq('id', selectedConv.id);
     closeConversation();
   }
 
   async function openCreateModal() {
     if (!myUserId) return;
-    const { data: followsData } = await supabase.from('follows')
-      .select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
+    const { data: followsData } = await supabase.from('follows').select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
     const ids = (followsData || []).map((f: any) => f.following_id);
     if (ids.length) {
       const { data } = await supabase.from('profils').select('id,prenom,avatar_url,ville').in('id', ids);
-      setContacts((data || []).map((p: any) => ({
-        id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ville: p.ville || null,
-      })));
-    } else {
-      setContacts([]);
-    }
-    setSelectedMembers([]);
-    setGroupName('');
-    setConvMode('direct');
+      setContacts((data || []).map((p: any) => ({ id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ville: p.ville || null })));
+    } else { setContacts([]); }
+    setSelectedMembers([]); setGroupName(''); setConvMode('direct');
     setCreateModal(true);
   }
 
@@ -312,8 +342,7 @@ export default function MessagerieScreen() {
     const mySet = new Set((mine || []).map((r: any) => r.conversation_id));
     const shared = (theirs || []).map((r: any) => r.conversation_id).filter((id: string) => mySet.has(id));
     for (const cid of shared) {
-      const { count } = await supabase.from('conversation_members')
-        .select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
+      const { count } = await supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
       if (count === 2) return conversations.find(c => c.id === cid) ?? null;
     }
     return null;
@@ -322,69 +351,110 @@ export default function MessagerieScreen() {
   async function createConversation() {
     if (!myUserId || !selectedMembers.length) return;
     setCreating(true);
-
     if (convMode === 'direct') {
-      const otherId = selectedMembers[0];
-      const existing = await findExistingDM(otherId);
-      if (existing) {
-        setCreating(false);
-        setCreateModal(false);
-        openConversation(existing);
-        return;
-      }
+      const existing = await findExistingDM(selectedMembers[0]);
+      if (existing) { setCreating(false); setCreateModal(false); openConversation(existing); return; }
     }
-
     const { data: conv, error } = await supabase.from('conversations').insert({
-      nom: convMode === 'groupe' ? (groupName.trim() || null) : null,
-      created_by: myUserId, actif: true,
+      nom: convMode === 'groupe' ? (groupName.trim() || null) : null, created_by: myUserId, actif: true,
     }).select().single();
-
-    if (error || !conv) {
-      Alert.alert('Erreur', `Impossible de créer la conversation.\n${error?.message || ''}`);
-      setCreating(false);
-      return;
-    }
-
-    const memberIds = [...new Set([myUserId, ...selectedMembers])];
-    const { error: membersError } = await supabase.from('conversation_members').insert(
-      memberIds.map(uid => ({ conversation_id: conv.id, user_id: uid }))
-    );
-
-    if (membersError) {
-      Alert.alert('Erreur', `Les membres n'ont pas pu être ajoutés.\n${membersError.message}`);
-    }
-
-    setCreating(false);
-    setCreateModal(false);
+    if (error || !conv) { Alert.alert('Erreur', error?.message || ''); setCreating(false); return; }
+    await supabase.from('conversation_members').insert([...new Set([myUserId, ...selectedMembers])].map(uid => ({ conversation_id: conv.id, user_id: uid })));
+    setCreating(false); setCreateModal(false);
     await loadConversations();
-
-    const newConv: Conversation = {
-      id: conv.id, nom: conv.nom, created_by: myUserId,
-      members: memberIds.map(uid => {
-        const c = contacts.find(x => x.id === uid);
-        return { user_id: uid, prenom: c?.prenom || 'Moi', avatar_url: c?.avatar_url || null };
-      }),
-      last_message: null,
-    };
-    openConversation(newConv);
+    openConversation({ id: conv.id, nom: conv.nom, created_by: myUserId, members: [...new Set([myUserId, ...selectedMembers])].map(uid => { const c = contacts.find(x => x.id === uid); return { user_id: uid, prenom: c?.prenom || 'Moi', avatar_url: c?.avatar_url || null }; }), last_message: null });
   }
 
+  // ── Groupes ──
+  async function loadGroupes() {
+    if (!myUserId) return;
+    setGroupesLoading(true);
+    const { data: gData } = await supabase.from('groupes').select('*').eq('actif', true).order('created_at', { ascending: false });
+    const { data: memberRows } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', myUserId);
+    setMyConvIds(new Set((memberRows || []).map((m: any) => m.conversation_id)));
+
+    if (gData?.length) {
+      const counts = await Promise.all(gData.map((gr: any) =>
+        supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', gr.conversation_id)
+      ));
+      setGroupes(gData.map((gr: any, i: number) => ({ ...gr, membre_count: counts[i].count ?? 0 })));
+    } else { setGroupes([]); }
+    setGroupesLoading(false);
+  }
+
+  async function joinGroupe(groupe: Groupe) {
+    if (!myUserId) return;
+    const { error } = await supabase.from('conversation_members').insert({ conversation_id: groupe.conversation_id, user_id: myUserId });
+    if (error) { Alert.alert('Erreur', error.message); return; }
+    setMyConvIds(prev => new Set([...prev, groupe.conversation_id]));
+    setGroupes(prev => prev.map(g => g.id === groupe.id ? { ...g, membre_count: (g.membre_count ?? 0) + 1 } : g));
+    Alert.alert('Bienvenue !', `Tu as rejoint le groupe "${groupe.nom}".`);
+  }
+
+  async function openGroupeChat(groupe: Groupe) {
+    const { data: convData } = await supabase.from('conversations').select('id,nom,created_by').eq('id', groupe.conversation_id).single();
+    if (!convData) return;
+    const { data: members } = await supabase.from('conversation_members').select('user_id').eq('conversation_id', groupe.conversation_id);
+    const userIds = (members || []).map((m: any) => m.user_id);
+    const { data: profils } = await supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds);
+    const pm: Record<string, any> = {};
+    (profils || []).forEach((p: any) => { pm[p.id] = p; });
+    openConversation({
+      id: convData.id, nom: groupe.nom, created_by: convData.created_by,
+      members: userIds.map(uid => ({ user_id: uid, prenom: pm[uid]?.prenom || 'Membre', avatar_url: pm[uid]?.avatar_url || null })),
+      last_message: null,
+    });
+  }
+
+  async function createGroupe() {
+    if (!myUserId || !groupeForm.nom.trim()) { Alert.alert('Donne un nom au groupe'); return; }
+    setCreatingGroupe(true);
+    const { data: conv, error: convErr } = await supabase.from('conversations').insert({ nom: groupeForm.nom.trim(), type: 'groupe', created_by: myUserId, actif: true }).select().single();
+    if (convErr || !conv) { Alert.alert('Erreur', convErr?.message || ''); setCreatingGroupe(false); return; }
+    await supabase.from('groupes').insert({ nom: groupeForm.nom.trim(), description: groupeForm.description.trim() || null, ville: groupeForm.ville.trim() || null, conversation_id: conv.id, created_by: myUserId });
+    await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
+    setCreatingGroupe(false);
+    setCreateGroupeModal(false);
+    setGroupeForm({ nom: '', description: '', ville: '' });
+    await loadGroupes();
+  }
+
+  function shareWhatsApp(groupe: Groupe) {
+    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 thepackclub.fr`;
+    Linking.openURL(`whatsapp://send?text=${encodeURIComponent(text)}`).catch(() => {
+      Share.share({ message: text });
+    });
+  }
+
+  function shareStory(groupe: Groupe) {
+    setStoryGroupe(groupe);
+    setTimeout(async () => {
+      try {
+        const uri = await captureRef(storyCardRef, { format: 'png', quality: 0.95 });
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `Groupe ${groupe.nom}` });
+        } else {
+          await Share.share({ url: uri, title: groupe.nom });
+        }
+      } catch {
+        Alert.alert('Erreur', 'Impossible de créer l\'image.');
+      }
+      setStoryGroupe(null);
+    }, 500);
+  }
+
+  // ── Render helpers ──
   function renderConvAvatar(conv: Conversation) {
     const others = conv.members.filter(m => m.user_id !== myUserId);
     const first = others[0];
     const letter = (convDisplayName(conv)[0] || '?').toUpperCase();
     return (
-      <View style={styles.convAvatarWrap}>
+      <View style={s.convAvatarWrap}>
         {first?.avatar_url
-          ? <Image source={{ uri: first.avatar_url }} style={styles.convAvatar} />
-          : <View style={[styles.convAvatar, styles.convAvatarFallback]}>
-              <Text style={styles.convAvatarLetter}>{letter}</Text>
-            </View>}
-        {conv.members.length > 2 && (
-          <View style={styles.groupBadge}>
-            <Ionicons name="people" size={10} color={colors.ivory} />
-          </View>
-        )}
+          ? <Image source={{ uri: first.avatar_url }} style={s.convAvatar} />
+          : <View style={[s.convAvatar, s.convAvatarFallback]}><Text style={s.convAvatarLetter}>{letter}</Text></View>}
+        {conv.members.length > 2 && <View style={s.groupBadge}><Ionicons name="people" size={10} color={colors.ivory} /></View>}
       </View>
     );
   }
@@ -392,231 +462,206 @@ export default function MessagerieScreen() {
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder à la messagerie et organiser des balades avec la meute." />;
 
-  // ── CHAT VIEW ──
+  // ── Chat view ──
   if (selectedConv) {
     return (
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight + 70 : 0}
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.participantsBar}
-          style={styles.participantsScroll}
-        >
+      <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight + 70 : 0}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.participantsBar} style={s.participantsScroll}>
           {selectedConv.members.map(m => (
-            <View key={m.user_id} style={styles.participantItem}>
-              {m.avatar_url
-                ? <Image source={{ uri: m.avatar_url }} style={styles.participantAvatar} />
-                : <View style={[styles.participantAvatar, styles.participantAvatarFallback]}>
-                    <Text style={styles.participantAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text>
-                  </View>}
-              {m.user_id === myUserId
-                ? <View style={styles.meeDot} />
-                : null}
-              <Text style={styles.participantName} numberOfLines={1}>
-                {m.user_id === myUserId ? 'Moi' : m.prenom}
-              </Text>
+            <View key={m.user_id} style={s.participantItem}>
+              {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.participantAvatar} /> : <View style={[s.participantAvatar, s.participantAvatarFallback]}><Text style={s.participantAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
+              {m.user_id === myUserId ? <View style={s.meeDot} /> : null}
+              <Text style={s.participantName} numberOfLines={1}>{m.user_id === myUserId ? 'Moi' : m.prenom}</Text>
             </View>
           ))}
         </ScrollView>
-
-        {msgLoading ? (
-          <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
-        ) : (
+        {msgLoading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
           <FlatList
             ref={flatListRef}
             data={messages}
             keyExtractor={m => m.id}
-            contentContainerStyle={[styles.messagesList, messages.length === 0 && { flex: 1 }]}
-            ListEmptyComponent={
-              <View style={styles.emptyChat}>
-                <Ionicons name="chatbubbles-outline" size={44} color={colors.border} />
-                <Text style={styles.emptyChatText}>Commencez la conversation !</Text>
-              </View>
-            }
+            contentContainerStyle={[s.messagesList, messages.length === 0 && { flex: 1 }]}
+            ListEmptyComponent={<View style={s.emptyChat}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
             renderItem={({ item: m, index }) => {
               const isMe = m.user_id === myUserId;
-              const prevMsg = messages[index - 1];
-              const showSender = !isMe && m.user_id !== prevMsg?.user_id;
-              const nextMsg = messages[index + 1];
-              const showTime = !nextMsg || new Date(nextMsg.created_at).getTime() - new Date(m.created_at).getTime() > 300000;
+              const showSender = !isMe && m.user_id !== messages[index - 1]?.user_id;
+              const showTime = !messages[index + 1] || new Date(messages[index + 1].created_at).getTime() - new Date(m.created_at).getTime() > 300000;
               return (
-                <View style={[styles.msgRow, isMe && styles.msgRowMe]}>
+                <View style={[s.msgRow, isMe && s.msgRowMe]}>
                   {!isMe && (
-                    <View style={styles.msgAvatarWrap}>
-                      {m.avatar_url
-                        ? <Image source={{ uri: m.avatar_url }} style={styles.msgAvatar} />
-                        : <View style={[styles.msgAvatar, styles.msgAvatarFallback]}>
-                            <Text style={styles.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text>
-                          </View>}
+                    <View style={s.msgAvatarWrap}>
+                      {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.msgAvatar} /> : <View style={[s.msgAvatar, s.msgAvatarFallback]}><Text style={s.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
                     </View>
                   )}
-                  <View style={[styles.msgBubbleWrap, isMe && styles.msgBubbleWrapMe]}>
-                    {showSender && <Text style={styles.msgSender}>{m.prenom}</Text>}
-                    <View style={[styles.msgBubble, isMe ? styles.msgBubbleMe : styles.msgBubbleThem]}>
-                      <Text style={[styles.msgText, isMe && styles.msgTextMe]}>{m.contenu}</Text>
+                  <View style={[s.msgBubbleWrap, isMe && s.msgBubbleWrapMe]}>
+                    {showSender && <Text style={s.msgSender}>{m.prenom}</Text>}
+                    <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
+                      <Text style={[s.msgText, isMe && s.msgTextMe]}>{m.contenu}</Text>
                     </View>
-                    {showTime && <Text style={[styles.msgTime, isMe && styles.msgTimeMe]}>{fmtTime(m.created_at)}</Text>}
+                    {showTime && <Text style={[s.msgTime, isMe && s.msgTimeMe]}>{fmtTime(m.created_at)}</Text>}
                   </View>
                 </View>
               );
             }}
           />
         )}
-        <View style={styles.inputBar}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder="Message…"
-            placeholderTextColor={colors.textMuted}
-            multiline
-            maxLength={1000}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            onSubmitEditing={sendMessage}
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, (!inputText.trim() || sending) && styles.sendBtnDisabled]}
-            onPress={sendMessage}
-            disabled={!inputText.trim() || sending}
-          >
-            {sending
-              ? <ActivityIndicator size="small" color={colors.ivory} />
-              : <Ionicons name="send" size={18} color={colors.ivory} />}
+        <View style={s.inputBar}>
+          <TextInput style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
+          <TouchableOpacity style={[s.sendBtn, (!inputText.trim() || sending) && s.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim() || sending}>
+            {sending ? <ActivityIndicator size="small" color={colors.ivory} /> : <Ionicons name="send" size={18} color={colors.ivory} />}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     );
   }
 
-  // ── LIST VIEW ──
+  // ── List view ──
   return (
-    <View style={styles.container}>
-      {loading ? (
-        <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
-      ) : (
-        <FlatList
-          data={conversations}
-          keyExtractor={c => c.id}
-          contentContainerStyle={[styles.list, conversations.length === 0 && { flex: 1 }]}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="chatbubbles-outline" size={44} color={colors.border} />
-              <Text style={styles.emptyTitle}>Aucune conversation</Text>
-              <Text style={styles.emptyText}>Envoie un message direct ou crée un groupe pour organiser une balade !</Text>
-            </View>
-          }
-          renderItem={({ item: conv }) => {
-            const lastMsg = conv.last_message;
-            const sender = lastMsg ? conv.members.find(m => m.user_id === lastMsg.user_id) : null;
-            const preview = lastMsg
-              ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.contenu}`
-              : 'Aucun message';
-            return (
-              <TouchableOpacity style={styles.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
-                {renderConvAvatar(conv)}
-                <View style={styles.convInfo}>
-                  <View style={styles.convTopRow}>
-                    <Text style={styles.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
-                    {lastMsg && <Text style={styles.convTime}>{fmtTime(lastMsg.created_at)}</Text>}
-                  </View>
-                  <Text style={styles.convPreview} numberOfLines={1}>{preview}</Text>
+    <View style={s.container}>
+
+      {/* Tabs */}
+      <View style={s.tabs}>
+        <TouchableOpacity style={[s.tab, activeTab === 'messages' && s.tabActive]} onPress={() => setActiveTab('messages')}>
+          <Ionicons name="chatbubbles-outline" size={15} color={activeTab === 'messages' ? colors.bordeaux : colors.textMuted} />
+          <Text style={[s.tabText, activeTab === 'messages' && s.tabTextActive]}>Messages</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.tab, activeTab === 'groupes' && s.tabActive]} onPress={() => { setActiveTab('groupes'); if (!groupes.length) loadGroupes(); }}>
+          <Ionicons name="people-outline" size={15} color={activeTab === 'groupes' ? colors.bordeaux : colors.textMuted} />
+          <Text style={[s.tabText, activeTab === 'groupes' && s.tabTextActive]}>Groupes de balades</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Messages tab ── */}
+      {activeTab === 'messages' && (
+        <>
+          {loading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
+            <FlatList
+              data={conversations}
+              keyExtractor={c => c.id}
+              contentContainerStyle={[s.list, conversations.length === 0 && { flex: 1 }]}
+              onRefresh={loadConversations}
+              refreshing={loading}
+              ListEmptyComponent={
+                <View style={s.empty}>
+                  <Ionicons name="chatbubbles-outline" size={44} color={colors.border} />
+                  <Text style={s.emptyTitle}>Aucune conversation</Text>
+                  <Text style={s.emptyText}>Envoie un message direct ou crée un groupe !</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.border} />
-              </TouchableOpacity>
-            );
-          }}
-        />
+              }
+              renderItem={({ item: conv }) => {
+                const lastMsg = conv.last_message;
+                const sender = lastMsg ? conv.members.find(m => m.user_id === lastMsg.user_id) : null;
+                const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.contenu}` : 'Aucun message';
+                return (
+                  <TouchableOpacity style={s.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
+                    {renderConvAvatar(conv)}
+                    <View style={s.convInfo}>
+                      <View style={s.convTopRow}>
+                        <Text style={s.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
+                        {lastMsg && <Text style={s.convTime}>{fmtTime(lastMsg.created_at)}</Text>}
+                      </View>
+                      <Text style={s.convPreview} numberOfLines={1}>{preview}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.border} />
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          )}
+          <TouchableOpacity style={s.fab} onPress={openCreateModal} activeOpacity={0.85}>
+            <Ionicons name="add" size={26} color={colors.ivory} />
+          </TouchableOpacity>
+        </>
       )}
 
-      <TouchableOpacity style={styles.fab} onPress={openCreateModal} activeOpacity={0.85}>
-        <Ionicons name="add" size={26} color={colors.ivory} />
-      </TouchableOpacity>
-
-      <Modal visible={createModal} animationType="slide" transparent onRequestClose={() => setCreateModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={styles.createOverlay}>
-            <View style={styles.createSheet}>
-              <View style={styles.createHeader}>
-                <Text style={styles.createTitle}>Nouvelle conversation</Text>
-                <TouchableOpacity onPress={() => setCreateModal(false)}>
-                  <Ionicons name="close" size={22} color={colors.textMuted} />
+      {/* ── Groupes tab ── */}
+      {activeTab === 'groupes' && (
+        <>
+          {/* Ville filter chips */}
+          {villes.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.villeScroll} contentContainerStyle={s.villeScrollContent}>
+              <TouchableOpacity style={[s.villeChip, !villeFilter && s.villeChipActive]} onPress={() => setVilleFilter(null)}>
+                <Text style={[s.villeChipText, !villeFilter && s.villeChipTextActive]}>Toutes</Text>
+              </TouchableOpacity>
+              {villes.map(v => (
+                <TouchableOpacity key={v} style={[s.villeChip, villeFilter === v && s.villeChipActive]} onPress={() => setVilleFilter(villeFilter === v ? null : v)}>
+                  <Ionicons name="location-outline" size={11} color={villeFilter === v ? colors.ivory : colors.textMuted} />
+                  <Text style={[s.villeChipText, villeFilter === v && s.villeChipTextActive]}>{v}</Text>
                 </TouchableOpacity>
-              </View>
+              ))}
+            </ScrollView>
+          )}
 
-              <View style={styles.modeToggle}>
-                <TouchableOpacity
-                  style={[styles.modeBtn, convMode === 'direct' && styles.modeBtnActive]}
-                  onPress={() => { setConvMode('direct'); setSelectedMembers([]); }}
-                >
-                  <Ionicons name="person" size={14} color={convMode === 'direct' ? colors.ivory : colors.textMuted} />
-                  <Text style={[styles.modeBtnText, convMode === 'direct' && styles.modeBtnTextActive]}>Message direct</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeBtn, convMode === 'groupe' && styles.modeBtnActive]}
-                  onPress={() => { setConvMode('groupe'); setSelectedMembers([]); }}
-                >
-                  <Ionicons name="people" size={14} color={convMode === 'groupe' ? colors.ivory : colors.textMuted} />
-                  <Text style={[styles.modeBtnText, convMode === 'groupe' && styles.modeBtnTextActive]}>Groupe</Text>
-                </TouchableOpacity>
-              </View>
-
-              {convMode === 'groupe' && (
-                <TextInput
-                  style={styles.groupNameInput}
-                  value={groupName}
-                  onChangeText={setGroupName}
-                  placeholder="Nom du groupe (ex: Balade Paris 15e)"
-                  placeholderTextColor={colors.textMuted}
+          {groupesLoading ? <ActivityIndicator style={{ flex: 1, marginTop: 40 }} color={colors.terra} /> : (
+            <FlatList
+              data={filteredGroupes}
+              keyExtractor={g => g.id}
+              contentContainerStyle={[s.groupesList, filteredGroupes.length === 0 && { flex: 1 }]}
+              onRefresh={loadGroupes}
+              refreshing={groupesLoading}
+              ListEmptyComponent={
+                <View style={s.empty}>
+                  <Ionicons name="people-outline" size={44} color={colors.border} />
+                  <Text style={s.emptyTitle}>Pas encore de groupe</Text>
+                  <Text style={s.emptyText}>Crée le premier groupe de balade pour ta ville !</Text>
+                </View>
+              }
+              renderItem={({ item: groupe }) => (
+                <GroupeCard
+                  groupe={groupe}
+                  joined={myConvIds.has(groupe.conversation_id)}
+                  onJoin={() => joinGroupe(groupe)}
+                  onOpen={() => openGroupeChat(groupe)}
+                  onWhatsApp={() => shareWhatsApp(groupe)}
+                  onStory={() => shareStory(groupe)}
                 />
               )}
+            />
+          )}
 
-              <Text style={styles.membersLabel}>
-                {convMode === 'direct' ? 'Choisir un membre' : 'Ajouter des membres'}
-              </Text>
+          <TouchableOpacity style={s.fab} onPress={() => setCreateGroupeModal(true)} activeOpacity={0.85}>
+            <Ionicons name="add" size={26} color={colors.ivory} />
+          </TouchableOpacity>
+        </>
+      )}
 
+      {/* ── Modal nouvelle conv (messages) ── */}
+      <Modal visible={createModal} animationType="slide" transparent onRequestClose={() => setCreateModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={s.createOverlay}>
+            <View style={s.createSheet}>
+              <View style={s.createHeader}>
+                <Text style={s.createTitle}>Nouvelle conversation</Text>
+                <TouchableOpacity onPress={() => setCreateModal(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
+              </View>
+              <View style={s.modeToggle}>
+                <TouchableOpacity style={[s.modeBtn, convMode === 'direct' && s.modeBtnActive]} onPress={() => { setConvMode('direct'); setSelectedMembers([]); }}>
+                  <Ionicons name="person" size={14} color={convMode === 'direct' ? colors.ivory : colors.textMuted} />
+                  <Text style={[s.modeBtnText, convMode === 'direct' && s.modeBtnTextActive]}>Message direct</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.modeBtn, convMode === 'groupe' && s.modeBtnActive]} onPress={() => { setConvMode('groupe'); setSelectedMembers([]); }}>
+                  <Ionicons name="people" size={14} color={convMode === 'groupe' ? colors.ivory : colors.textMuted} />
+                  <Text style={[s.modeBtnText, convMode === 'groupe' && s.modeBtnTextActive]}>Groupe privé</Text>
+                </TouchableOpacity>
+              </View>
+              {convMode === 'groupe' && (
+                <TextInput style={s.groupNameInput} value={groupName} onChangeText={setGroupName} placeholder="Nom du groupe" placeholderTextColor={colors.textMuted} />
+              )}
+              <Text style={s.membersLabel}>{convMode === 'direct' ? 'Choisir un membre' : 'Ajouter des membres'}</Text>
               {contacts.length === 0 ? (
-                <View style={styles.noFollowsWrap}>
-                  <Ionicons name="people-outline" size={32} color={colors.border} />
-                  <Text style={styles.noFollowsText}>Suis des membres pour leur envoyer un message.</Text>
-                </View>
+                <View style={s.noFollowsWrap}><Ionicons name="people-outline" size={32} color={colors.border} /><Text style={s.noFollowsText}>Suis des membres pour leur envoyer un message.</Text></View>
               ) : (
                 <FlatList
-                  data={contacts}
-                  keyExtractor={f => f.id}
-                  style={{ maxHeight: 280 }}
+                  data={contacts} keyExtractor={f => f.id} style={{ maxHeight: 260 }}
                   renderItem={({ item: f }) => {
                     const selected = selectedMembers.includes(f.id);
                     const disabledDM = convMode === 'direct' && selectedMembers.length === 1 && !selected;
                     return (
-                      <TouchableOpacity
-                        style={[
-                          styles.memberRow,
-                          selected && styles.memberRowSelected,
-                          disabledDM && styles.memberRowDisabled,
-                        ]}
-                        activeOpacity={disabledDM ? 1 : 0.7}
-                        onPress={() => {
-                          if (disabledDM) return;
-                          if (convMode === 'direct') {
-                            setSelectedMembers(selected ? [] : [f.id]);
-                          } else {
-                            setSelectedMembers(prev => selected ? prev.filter(id => id !== f.id) : [...prev, f.id]);
-                          }
-                        }}
-                      >
-                        {f.avatar_url
-                          ? <Image source={{ uri: f.avatar_url }} style={styles.memberAvatar} />
-                          : <View style={[styles.memberAvatar, styles.memberAvatarFallback]}>
-                              <Text style={styles.memberAvatarLetter}>{(f.prenom[0] || '?').toUpperCase()}</Text>
-                            </View>}
+                      <TouchableOpacity style={[s.memberRow, selected && s.memberRowSelected, disabledDM && s.memberRowDisabled]} activeOpacity={disabledDM ? 1 : 0.7} onPress={() => { if (disabledDM) return; setSelectedMembers(convMode === 'direct' ? (selected ? [] : [f.id]) : (selected ? selectedMembers.filter(id => id !== f.id) : [...selectedMembers, f.id])); }}>
+                        {f.avatar_url ? <Image source={{ uri: f.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(f.prenom[0] || '?').toUpperCase()}</Text></View>}
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.memberName, selected && styles.memberNameSelected]}>{f.prenom}</Text>
-                          {f.ville ? <Text style={styles.memberVille}>{f.ville}</Text> : null}
+                          <Text style={[s.memberName, selected && s.memberNameSelected]}>{f.prenom}</Text>
+                          {f.ville ? <Text style={s.memberVille}>{f.ville}</Text> : null}
                         </View>
                         {selected && <Ionicons name="checkmark-circle" size={20} color={colors.terra} />}
                       </TouchableOpacity>
@@ -624,74 +669,114 @@ export default function MessagerieScreen() {
                   }}
                 />
               )}
-
-              <TouchableOpacity
-                style={[styles.createBtn, (!selectedMembers.length || creating) && styles.createBtnDisabled]}
-                onPress={createConversation}
-                disabled={!selectedMembers.length || creating}
-              >
-                {creating
-                  ? <ActivityIndicator color={colors.ivory} />
-                  : <Text style={styles.createBtnText}>
-                      {convMode === 'direct' ? 'Démarrer la conversation' : 'Créer le groupe'}
-                    </Text>}
+              <TouchableOpacity style={[s.createBtn, (!selectedMembers.length || creating) && s.createBtnDisabled]} onPress={createConversation} disabled={!selectedMembers.length || creating}>
+                {creating ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>{convMode === 'direct' ? 'Démarrer la conversation' : 'Créer le groupe privé'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Story card (off-screen, pour capture) ── */}
+      {storyGroupe && (
+        <View ref={storyCardRef} collapsable={false} style={sc.card}>
+          {storyGroupe.image_url
+            ? <Image source={{ uri: storyGroupe.image_url }} style={sc.bgImage} resizeMode="cover" />
+            : <View style={sc.bgFallback} />}
+          <View style={sc.overlay} />
+          <View style={sc.topBrand}>
+            <Ionicons name="paw" size={22} color={colors.terra} />
+            <Text style={sc.brandName}>The Pack Club</Text>
+          </View>
+          <View style={sc.content}>
+            {storyGroupe.ville ? (
+              <View style={sc.villePill}>
+                <Ionicons name="location" size={12} color={colors.terra} />
+                <Text style={sc.villeText}>{storyGroupe.ville}</Text>
+              </View>
+            ) : null}
+            <Text style={sc.nom}>{storyGroupe.nom}</Text>
+            {storyGroupe.description ? <Text style={sc.desc}>{storyGroupe.description}</Text> : null}
+            <View style={sc.cta}>
+              <Text style={sc.ctaText}>Rejoins le groupe sur</Text>
+              <Text style={sc.ctaUrl}>thepackclub.fr</Text>
+            </View>
+          </View>
+          <View style={sc.bottomBar} />
+        </View>
+      )}
+
+      {/* ── Modal créer groupe de balade ── */}
+      <Modal visible={createGroupeModal} animationType="slide" transparent onRequestClose={() => setCreateGroupeModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={s.createOverlay}>
+            <View style={s.createSheet}>
+              <View style={s.createHeader}>
+                <Text style={s.createTitle}>Créer un groupe</Text>
+                <TouchableOpacity onPress={() => setCreateGroupeModal(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
+              </View>
+              <TextInput style={s.groupNameInput} value={groupeForm.nom} onChangeText={t => setGroupeForm(f => ({ ...f, nom: t }))} placeholder="Nom du groupe (ex: Balade Paris 15e)" placeholderTextColor={colors.textMuted} />
+              <TextInput style={[s.groupNameInput, { minHeight: 80, textAlignVertical: 'top' }]} value={groupeForm.description} onChangeText={t => setGroupeForm(f => ({ ...f, description: t }))} placeholder="Description (optionnel)" placeholderTextColor={colors.textMuted} multiline />
+              <TextInput style={s.groupNameInput} value={groupeForm.ville} onChangeText={t => setGroupeForm(f => ({ ...f, ville: t }))} placeholder="Ville (ex: Paris, Lyon…)" placeholderTextColor={colors.textMuted} />
+              <TouchableOpacity style={[s.createBtn, (!groupeForm.nom.trim() || creatingGroupe) && s.createBtnDisabled]} onPress={createGroupe} disabled={!groupeForm.nom.trim() || creatingGroupe}>
+                {creatingGroupe ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>Créer le groupe</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+// ── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
+  tabs: { flexDirection: 'row', backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActive: { borderBottomColor: colors.bordeaux },
+  tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  tabTextActive: { color: colors.bordeaux },
+
   list: { paddingBottom: 100 },
+  groupesList: { padding: 14, paddingBottom: 100, gap: 14 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 48 },
   emptyTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
 
-  convRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-    backgroundColor: colors.white,
-  },
+  villeScroll: { flexGrow: 0, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
+  villeScrollContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, flexDirection: 'row' },
+  villeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  villeChipTextActive: { color: colors.ivory },
+
+  convRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
   convAvatarWrap: { position: 'relative' },
   convAvatar: { width: 48, height: 48, borderRadius: 24 },
   convAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   convAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.ivory },
-  groupBadge: {
-    position: 'absolute', bottom: -2, right: -2,
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: colors.white,
-  },
+  groupBadge: { position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9, backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.white },
   convInfo: { flex: 1 },
   convTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 },
   convName: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux, flex: 1, marginRight: 8 },
   convTime: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   convPreview: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
 
-  fab: {
-    position: 'absolute', bottom: 28, right: 20,
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center',
-    shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
-  },
+  fab: { position: 'absolute', bottom: 28, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8 },
 
   messagesList: { padding: 12, paddingBottom: 16 },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 48 },
   emptyChatText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center' },
-
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginVertical: 2 },
   msgRowMe: { flexDirection: 'row-reverse' },
   msgAvatarWrap: { width: 28, flexShrink: 0 },
   msgAvatar: { width: 28, height: 28, borderRadius: 14 },
   msgAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   msgAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory },
-  msgAvatarSpacer: { width: 28, height: 28 },
   msgBubbleWrap: { maxWidth: '72%', gap: 2 },
   msgBubbleWrapMe: { alignItems: 'flex-end' },
   msgSender: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, marginLeft: 12, marginBottom: 1 },
@@ -702,59 +787,25 @@ const styles = StyleSheet.create({
   msgTextMe: { color: colors.ivory },
   msgTime: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginLeft: 12, marginTop: 2 },
   msgTimeMe: { marginLeft: 0, marginRight: 12 },
-
-  inputBar: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-    backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  input: {
-    flex: 1, minHeight: 40, maxHeight: 110,
-    borderWidth: 1, borderColor: colors.border, borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 10,
-    fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,
-    backgroundColor: colors.ivoryPale,
-  },
-  sendBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0,
-  },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
+  input: { flex: 1, minHeight: 40, maxHeight: 110, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.ivoryPale },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   sendBtnDisabled: { backgroundColor: colors.border },
 
   createOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  createSheet: {
-    backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    padding: 20, paddingBottom: 40, gap: 14,
-  },
+  createSheet: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 40, gap: 14 },
   createHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   createTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
-
-  modeToggle: {
-    flexDirection: 'row', backgroundColor: colors.white,
-    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
-  },
-  modeBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 9, borderRadius: 8,
-  },
+  modeToggle: { flexDirection: 'row', backgroundColor: colors.white, borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 8 },
   modeBtnActive: { backgroundColor: colors.bordeaux },
   modeBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   modeBtnTextActive: { color: colors.ivory },
-
-  groupNameInput: {
-    borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12,
-    fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.white,
-  },
+  groupNameInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.white },
   membersLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
   noFollowsWrap: { alignItems: 'center', gap: 8, paddingVertical: 20 },
   noFollowsText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },
-  memberRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
-    backgroundColor: colors.white, marginBottom: 6, borderWidth: 1, borderColor: colors.border,
-  },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.white, marginBottom: 6, borderWidth: 1, borderColor: colors.border },
   memberRowSelected: { borderColor: colors.terra, backgroundColor: colors.terra + '10' },
   memberRowDisabled: { opacity: 0.35 },
   memberAvatar: { width: 40, height: 40, borderRadius: 20 },
@@ -767,22 +818,59 @@ const styles = StyleSheet.create({
   createBtnDisabled: { opacity: 0.45 },
   createBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
 
-  participantsScroll: {
-    backgroundColor: colors.white,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-    flexGrow: 0,
-  },
-  participantsBar: {
-    paddingHorizontal: 12, paddingVertical: 10, gap: 16, alignItems: 'flex-start',
-  },
+  participantsScroll: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, flexGrow: 0 },
+  participantsBar: { paddingHorizontal: 12, paddingVertical: 10, gap: 16, alignItems: 'flex-start' },
   participantItem: { alignItems: 'center', gap: 4, width: 52 },
   participantAvatar: { width: 40, height: 40, borderRadius: 20 },
   participantAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   participantAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
   participantName: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, textAlign: 'center', width: 52 },
-  meeDot: {
-    position: 'absolute', top: 28, right: 4,
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: colors.terra, borderWidth: 1.5, borderColor: colors.white,
-  },
+  meeDot: { position: 'absolute', top: 28, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.terra, borderWidth: 1.5, borderColor: colors.white },
+});
+
+// ── Groupe card styles ───────────────────────────────────────────────────────
+
+const g = StyleSheet.create({
+  card: { backgroundColor: colors.white, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2 },
+  cardCover: { width: '100%', height: 160, position: 'relative' },
+  cardCoverGrad: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(61,26,26,0.35)' },
+  villeBadge: { position: 'absolute', bottom: 12, left: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  villeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory },
+  cardBody: { padding: 14, gap: 6 },
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cardIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  cardNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
+  villeInline: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  villeInlineText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  cardDesc: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, lineHeight: 17 },
+  cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, flexWrap: 'wrap', gap: 8 },
+  memberCount: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  memberCountText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.bordeaux },
+  shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+  joinBtn: { backgroundColor: colors.bordeaux, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
+  joinBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  joinedBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: colors.terra, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  joinedBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+});
+
+// ── Story card styles (9:16, off-screen capture) ─────────────────────────────
+
+const sc = StyleSheet.create({
+  card: { position: 'absolute', left: -1000, top: 0, width: 360, height: 640, backgroundColor: colors.bordeaux, overflow: 'hidden' },
+  bgImage: { ...StyleSheet.absoluteFillObject as any, width: '100%', height: '100%' },
+  bgFallback: { ...StyleSheet.absoluteFillObject as any, backgroundColor: colors.bordeaux },
+  overlay: { ...StyleSheet.absoluteFillObject as any, backgroundColor: 'rgba(30,10,10,0.65)' },
+  topBrand: { position: 'absolute', top: 44, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  brandName: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory, letterSpacing: 1 },
+  content: { position: 'absolute', bottom: 80, left: 36, right: 36, gap: 14 },
+  villePill: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  villeText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  nom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 36, color: colors.ivory, lineHeight: 44 },
+  desc: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: 'rgba(245,239,224,0.8)', lineHeight: 22 },
+  cta: { marginTop: 8, gap: 2 },
+  ctaText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: 'rgba(245,239,224,0.6)' },
+  ctaUrl: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.terra },
+  bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: colors.terra },
 });

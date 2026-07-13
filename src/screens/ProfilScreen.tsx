@@ -93,11 +93,16 @@ export default function ProfilScreen() {
   const [raceChien, setRaceChien] = useState('');
   const [bio, setBio] = useState('');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [session?.user.id]);
 
   async function load() {
+    setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { setLoading(false); return; }
+    if (!session) {
+      setProfil(null); setFavoris([]); setAvis([]); setMyPhotos([]);
+      setFollowersCount(0); setFollowingCount(0);
+      setLoading(false); return;
+    }
 
     savePushToken(session.user.id);
 

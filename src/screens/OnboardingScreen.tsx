@@ -47,13 +47,15 @@ export default function OnboardingScreen() {
   async function finish() {
     if (!session) return;
     setSaving(true);
-    await supabase.from('profils').upsert({
-      id: session.user.id,
-      prenom: prenom.trim() || null,
-      ville: ville.trim() || null,
-      nom_chien: nomChien.trim() || null,
-      race_chien: raceChien || null,
-    });
+    try {
+      await supabase.from('profils').upsert({
+        id: session.user.id,
+        prenom: prenom.trim() || null,
+        ville: ville.trim() || null,
+        nom_chien: nomChien.trim() || null,
+        race_chien: raceChien || null,
+      });
+    } catch {}
     setSaving(false);
     navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
   }

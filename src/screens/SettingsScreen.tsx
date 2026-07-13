@@ -64,7 +64,8 @@ export default function SettingsScreen() {
         { text: 'Annuler', style: 'cancel' },
         { text: 'Supprimer', style: 'destructive', onPress: async () => {
           if (!userId) return;
-          await supabase.from('profils').delete().eq('id', userId);
+          const { error } = await supabase.from('profils').delete().eq('id', userId);
+          if (error) { Alert.alert('Erreur', 'Impossible de supprimer le compte. Réessaie ou contacte le support.'); return; }
           await supabase.auth.signOut();
         }},
       ]

@@ -80,26 +80,30 @@ export default function EvenementsScreen() {
     const { data } = await q;
     const events = data || [];
 
-    if (session?.user?.id && events.length > 0) {
-      const ids = events.map((e: any) => e.id);
-      const [{ data: parts }, ...counts] = await Promise.all([
-        supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
-        ...ids.map((id: string) =>
-          supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
-        ),
-      ]);
-      const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
-      const mapped: Evenement[] = events.map((e: any, i: number) => ({
-        ...e,
-        nb_inscrits: (counts[i] as any).count || 0,
-        je_suis_inscrit: inscritIds.has(e.id),
-      }));
-      if (filter === 'inscrits') {
-        setEvenements(mapped.filter(e => e.je_suis_inscrit));
+    try {
+      if (session?.user?.id && events.length > 0) {
+        const ids = events.map((e: any) => e.id);
+        const [{ data: parts }, ...counts] = await Promise.all([
+          supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
+          ...ids.map((id: string) =>
+            supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
+          ),
+        ]);
+        const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
+        const mapped: Evenement[] = events.map((e: any, i: number) => ({
+          ...e,
+          nb_inscrits: (counts[i] as any).count || 0,
+          je_suis_inscrit: inscritIds.has(e.id),
+        }));
+        if (filter === 'inscrits') {
+          setEvenements(mapped.filter(e => e.je_suis_inscrit));
+        } else {
+          setEvenements(mapped);
+        }
       } else {
-        setEvenements(mapped);
+        setEvenements(filter === 'inscrits' ? [] : events);
       }
-    } else {
+    } catch {
       setEvenements(filter === 'inscrits' ? [] : events);
     }
     setLoading(false);

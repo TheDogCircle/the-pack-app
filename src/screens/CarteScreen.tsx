@@ -464,12 +464,14 @@ export default function CarteScreen() {
 
   async function togglePhotoLike(photoId: string) {
     if (!userId) { showLoginPrompt(); return; }
+    const current = photos.find(p => p.id === photoId);
+    if (!current) return;
+    const wasLiked = current.likedByMe;
     setPhotos(prev => prev.map(p => {
       if (p.id !== photoId) return p;
-      return { ...p, likedByMe: !p.likedByMe, likeCount: p.likedByMe ? p.likeCount - 1 : p.likeCount + 1 };
+      return { ...p, likedByMe: !wasLiked, likeCount: wasLiked ? p.likeCount - 1 : p.likeCount + 1 };
     }));
-    const isLiked = !photos.find(p => p.id === photoId)?.likedByMe; // read PRE-update state (toggled already above)
-    if (isLiked) {
+    if (wasLiked) {
       await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId);
     } else {
       await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });

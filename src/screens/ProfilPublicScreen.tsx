@@ -44,7 +44,7 @@ type PhotoItem = { id: string; url: string; lieu_id: string | null };
 export default function ProfilPublicScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const { userId } = route.params as { userId: string };
+  const { userId } = (route.params as { userId: string }) ?? {};
 
   const [profil, setProfil] = useState<Profil | null>(null);
   const [avis, setAvis] = useState<AvisItem[]>([]);
@@ -60,7 +60,7 @@ export default function ProfilPublicScreen() {
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
 
-  useEffect(() => { init(); }, []);
+  useEffect(() => { if (userId) init(); }, [userId]);
 
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -105,7 +105,7 @@ export default function ProfilPublicScreen() {
     })));
 
     setStats({ avis: (avisCount as any).count || 0, favoris: (favCount as any).count || 0, followers: (followCount as any).count || 0 });
-    setIsFollowing(!!(followStatus as any).data);
+    setIsFollowing(!!((followStatus as any)?.data));
     setLoading(false);
   }
 
