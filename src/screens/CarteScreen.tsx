@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -105,6 +106,7 @@ type EventMarker = {
 };
 
 export default function CarteScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const mapRef = useRef<MapView>(null);
   const shareLieuCardRef = useRef<View>(null);
@@ -931,12 +933,12 @@ export default function CarteScreen() {
             </TouchableOpacity>
 
             {/* Bouton fermer (haut droite) */}
-            <TouchableOpacity style={styles.ficheBtnClose} onPress={closeFiche}>
+            <TouchableOpacity style={[styles.ficheBtnClose, { top: insets.top + 12 }]} onPress={closeFiche}>
               <Ionicons name="close" size={18} color="#fff" />
             </TouchableOpacity>
 
             {/* Bouton favori (2e depuis la droite) */}
-            <TouchableOpacity style={styles.ficheBtnFav} onPress={() => setFavModal(v => !v)} disabled={favLoading}>
+            <TouchableOpacity style={[styles.ficheBtnFav, { top: insets.top + 12 }]} onPress={() => setFavModal(v => !v)} disabled={favLoading}>
               {favLoading
                 ? <ActivityIndicator size="small" color="#fff" />
                 : <Ionicons name={favIcon()} size={18} color={favColor()} />
@@ -2258,14 +2260,13 @@ const styles = StyleSheet.create({
   },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent' },
   sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: colors.ivoryPale,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: SCREEN_H * 0.45, maxHeight: SCREEN_H * 0.82,
+    position: 'absolute', bottom: 0, left: 0, right: 0, top: 0, backgroundColor: colors.ivoryPale,
     shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 12,
   },
   handleArea: { position: 'absolute', top: 0, left: (SCREEN_W - 100) / 2, width: 100, paddingTop: 10, paddingBottom: 14, alignItems: 'center', zIndex: 30 },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.55)' },
+  handle: { width: 0, height: 0 },
   // Header photo zone
-  ficheHeader: { width: '100%', overflow: 'hidden', backgroundColor: colors.bordeaux, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  ficheHeader: { width: '100%', overflow: 'hidden', backgroundColor: colors.bordeaux },
   ficheHeaderPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   ficheHeaderGradient: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
