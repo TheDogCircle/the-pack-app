@@ -92,6 +92,7 @@ type LieuFull = Lieu & {
   chiens_salle: boolean | null; chiens_terrasse: boolean | null; espace_dedie: boolean | null;
   eau: boolean | null; gamelles: boolean | null; chiens_laches: boolean | null; chiens_laisse: boolean | null;
   petits_chiens: boolean | null; moyens_chiens: boolean | null; grands_chiens: boolean | null;
+  manager_user_id: string | null;
 };
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null };
@@ -975,7 +976,14 @@ export default function CarteScreen() {
                   <Ionicons name={cfg.icon} size={11} color="#fff" />
                   <Text style={[styles.catLabel, { color: '#fff' }]}>{cfg.label}</Text>
                 </View>
-                <Text style={styles.ficheHeaderNom} numberOfLines={1}>{selectedLieu.nom}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.ficheHeaderNom} numberOfLines={1}>{selectedLieu.nom}</Text>
+                  {(selectedLieu as any).manager_user_id && (
+                    <View style={styles.certBadgeIcon}>
+                      <Ionicons name="checkmark" size={10} color="#fff" />
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.ficheHeaderLoc} numberOfLines={1}>
                   {[selectedLieu.adresse, selectedLieu.ville].filter(Boolean).join(' · ')}
                 </Text>
@@ -1023,8 +1031,16 @@ export default function CarteScreen() {
                   </View>
                 ) : null}
 
-                {badges.length > 0 && (
+                {(badges.length > 0 || (selectedLieu as any).manager_user_id) && (
                   <View style={styles.badgesWrap}>
+                    {(selectedLieu as any).manager_user_id && (
+                      <View style={[styles.badge, styles.badgeCertified]}>
+                        <View style={styles.certChipIcon}>
+                          <Ionicons name="checkmark" size={9} color="#fff" />
+                        </View>
+                        <Text style={[styles.badgeText, styles.badgeCertifiedText]}>Certifié The Pack Club</Text>
+                      </View>
+                    )}
                     {badges.map(b => (
                       <View key={b.label} style={styles.badge}>
                         <Ionicons name={b.icon} size={12} color={colors.terra} />
@@ -2324,6 +2340,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.white,
     borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: colors.border,
   },
+  badgeCertified: { borderColor: 'rgba(34,139,70,0.3)', backgroundColor: 'rgba(34,139,70,0.06)' },
+  badgeCertifiedText: { color: '#1a6b35', fontFamily: 'DMSans_500Medium' },
+  certChipIcon: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#22a855', alignItems: 'center', justifyContent: 'center' },
+  certBadgeIcon: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#22a855', alignItems: 'center', justifyContent: 'center' },
   badgeText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMid },
   description: { fontFamily: 'DMSans_300Light', fontSize: 13, color: colors.textMid, lineHeight: 20, fontStyle: 'italic' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' },
