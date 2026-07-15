@@ -95,7 +95,7 @@ type LieuFull = Lieu & {
   manager_user_id: string | null;
 };
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
-type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null };
+type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null };
 type CityResult = { nom: string; lat: number; lng: number };
 type EventMarker = {
   id: string; titre: string; date_heure: string;
@@ -353,7 +353,7 @@ export default function CarteScreen() {
         userId ? supabase.from('favoris').select('id,liste').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         userId ? supabase.from('avis').select('id,note,commentaire').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).eq('validee', true).order('created_at', { ascending: true }).limit(20),
-        supabase.from('avis').select('id,note,commentaire,created_at,user_id').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
+        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
       ]);
       lieuData = results[0].data;
       favData = results[1];
@@ -406,6 +406,7 @@ export default function CarteScreen() {
         id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
         prenom: profilMap[a.user_id]?.prenom || 'Membre',
         username: profilMap[a.user_id]?.username || null,
+        reponse_pro: a.reponse_pro || null,
       })));
     }
 
@@ -618,13 +619,13 @@ export default function CarteScreen() {
     const { data } = await supabase.from('lieux').select('*').eq('id', selectedLieu.id).single();
     if (data) setSelectedLieu(data);
     // Rafraîchir la liste des avis
-    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
+    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
     if ((avisRaw || []).length > 0) {
       const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
       const { data: profils } = await supabase.from('profils').select('id,prenom,username').in('id', uids);
       const pm: Record<string, any> = {};
       (profils || []).forEach((p: any) => { pm[p.id] = p; });
-      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: pm[a.user_id]?.prenom || 'Membre', username: pm[a.user_id]?.username || null })));
+      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: pm[a.user_id]?.prenom || 'Membre', username: pm[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null })));
     }
     Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
   }
@@ -1031,16 +1032,19 @@ export default function CarteScreen() {
                   </View>
                 ) : null}
 
-                {(badges.length > 0 || (selectedLieu as any).manager_user_id) && (
+                {(selectedLieu as any).manager_user_id && (
+                  <View style={styles.certBanner}>
+                    <View style={styles.certBannerIcon}>
+                      <Ionicons name="checkmark" size={14} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.certBannerTitle}>Dog Friendly vérifié</Text>
+                      <Text style={styles.certBannerSub}>Établissement certifié par The Pack Club</Text>
+                    </View>
+                  </View>
+                )}
+                {badges.length > 0 && (
                   <View style={styles.badgesWrap}>
-                    {(selectedLieu as any).manager_user_id && (
-                      <View style={[styles.badge, styles.badgeCertified]}>
-                        <View style={styles.certChipIcon}>
-                          <Ionicons name="checkmark" size={9} color="#fff" />
-                        </View>
-                        <Text style={[styles.badgeText, styles.badgeCertifiedText]}>Certifié The Pack Club</Text>
-                      </View>
-                    )}
                     {badges.map(b => (
                       <View key={b.label} style={styles.badge}>
                         <Ionicons name={b.icon} size={12} color={colors.terra} />
@@ -1125,6 +1129,12 @@ export default function CarteScreen() {
                         </View>
                         {a.commentaire ? <Text style={styles.ficheAvisComment}>{a.commentaire}</Text> : null}
                         <Text style={styles.ficheAvisDate}>{new Date(a.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</Text>
+                        {a.reponse_pro ? (
+                          <View style={styles.ficheAvisReponse}>
+                            <Text style={styles.ficheAvisReponseLabel}>Réponse de l'établissement</Text>
+                            <Text style={styles.ficheAvisReponseText}>{a.reponse_pro}</Text>
+                          </View>
+                        ) : null}
                       </View>
                     ))}
                   </>
@@ -2367,6 +2377,13 @@ const styles = StyleSheet.create({
   ficheAvisStars: { flexDirection: 'row', gap: 2 },
   ficheAvisComment: { fontFamily: 'DMSans_300Light', fontSize: 12, color: colors.textMid, lineHeight: 18, fontStyle: 'italic' },
   ficheAvisDate: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted },
+  ficheAvisReponse: { marginTop: 6, padding: 10, backgroundColor: 'rgba(196,105,58,0.06)', borderLeftWidth: 2, borderLeftColor: colors.terra, borderRadius: 4 },
+  ficheAvisReponseLabel: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
+  ficheAvisReponseText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 17 },
+  certBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: 'rgba(34,139,70,0.07)', borderWidth: 1, borderColor: 'rgba(34,139,70,0.2)', borderRadius: 10 },
+  certBannerIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#22a855', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  certBannerTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#1a6b35' },
+  certBannerSub: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(26,107,53,0.7)', marginTop: 1 },
   favDropdown: {
     position: 'absolute', top: 52, right: 48, zIndex: 50, minWidth: 168,
     backgroundColor: colors.white, borderRadius: 12,
