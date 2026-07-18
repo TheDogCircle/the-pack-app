@@ -67,6 +67,20 @@ const SORT_OPTS: { key: SortKey; label: string; icon: IoniconsName }[] = [
   { key: 'note',      label: 'Mieux notés', icon: 'star-outline' },
 ];
 
+function parseOpenStatus(horaires: string | null): 'open' | 'closed' | null {
+  if (!horaires) return null;
+  const h = new Date().getHours() + new Date().getMinutes() / 60;
+  const pattern = /(\d{1,2})[h:H](\d{0,2})\s*[-–à]\s*(\d{1,2})[h:H](\d{0,2})/g;
+  const matches = [...horaires.matchAll(pattern)];
+  if (!matches.length) return null;
+  for (const m of matches) {
+    const open = parseInt(m[1]) + (m[2] ? parseInt(m[2]) / 60 : 0);
+    const close = parseInt(m[3]) + (m[4] ? parseInt(m[4]) / 60 : 0);
+    if (h >= open && h < close) return 'open';
+  }
+  return 'closed';
+}
+
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -148,6 +162,8 @@ export default function CarteScreen() {
   const [proposeLng, setProposeLng] = useState<number | null>(null);
   const [proposeGeoLoading, setProposeGeoLoading] = useState(false);
   const [proposeLoading, setProposeLoading] = useState(false);
+  const [proposePhotos, setProposePhotos] = useState<string[]>([]);
+  const [proposeVideo, setProposeVideo] = useState<string | null>(null);
   const [proposeAmenities, setProposeAmenities] = useState({
     chiens_salle: false, chiens_terrasse: false, espace_dedie: false,
     eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false,
@@ -188,6 +204,8 @@ export default function CarteScreen() {
   const [filterModal, setFilterModal] = useState(false);
   const [filterMinNote, setFilterMinNote] = useState(0);
   const [filterEquipements, setFilterEquipements] = useState<string[]>([]);
+  const [filterCat, setFilterCat] = useState<string | null>(null);
+  const [filterDistance, setFilterDistance] = useState<number | null>(null);
   const filterAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
@@ -765,11 +783,32 @@ export default function CarteScreen() {
     });
   }
 
+  async function pickProposePhotos() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], quality: 0.8,
+      allowsMultipleSelection: true, selectionLimit: 5 - proposePhotos.length,
+    });
+    if (result.canceled) return;
+    setProposePhotos(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, 5));
+  }
+
+  async function pickProposeVideo() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['videos'], videoMaxDuration: 60,
+    });
+    if (result.canceled) return;
+    setProposeVideo(result.assets[0].uri);
+  }
+
   async function submitPropose() {
     if (!userId) { showLoginPrompt(); return; }
     if (!proposeNom.trim() || !proposeVille.trim()) return;
     setProposeLoading(true);
-    const { error } = await supabase.from('lieux').insert({
+    const { data: insertedLieu, error } = await supabase.from('lieux').insert({
       nom: proposeNom.trim(), adresse: proposeAdresse.trim() || null, ville: proposeVille.trim(),
       cat: proposeCat, tel: proposeTel.trim() || null, site_web: proposeSite.trim() || null,
       description: proposeDesc.trim() || null,
@@ -778,12 +817,40 @@ export default function CarteScreen() {
       actif: false,
       submitted_by: userId,
       ...proposeAmenities,
-    });
+    }).select('id').single();
     if (!error && userId) {
       const { data: profilData } = await supabase.from('profils').select('points').eq('id', userId).single();
       if (profilData) {
         await supabase.from('profils').update({ points: (profilData.points || 0) + 5 }).eq('id', userId);
       }
+    }
+    // Upload photos
+    if (!error && insertedLieu?.id && proposePhotos.length) {
+      for (const uri of proposePhotos) {
+        try {
+          const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+          const path = `${userId}/${insertedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          const { data: up } = await supabase.storage.from('lieu-photos').upload(path, decode(b64), { contentType: ext === 'png' ? 'image/png' : 'image/jpeg' });
+          if (up) {
+            const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+            await supabase.from('photos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: false });
+          }
+        } catch {}
+      }
+    }
+    // Upload vidéo
+    if (!error && insertedLieu?.id && proposeVideo) {
+      try {
+        const ext = proposeVideo.split('.').pop()?.toLowerCase() || 'mp4';
+        const path = `${userId}/${insertedLieu.id}-${Date.now()}.${ext}`;
+        const b64 = await FileSystem.readAsStringAsync(proposeVideo, { encoding: FileSystem.EncodingType.Base64 });
+        const { data: up } = await supabase.storage.from('lieu-videos').upload(path, decode(b64), { contentType: `video/${ext}` });
+        if (up) {
+          const { data: { publicUrl } } = supabase.storage.from('lieu-videos').getPublicUrl(path);
+          await supabase.from('videos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: false });
+        }
+      } catch {}
     }
     setProposeLoading(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -792,6 +859,8 @@ export default function CarteScreen() {
     setProposeCat('restaurant'); setProposeTel(''); setProposeSite(''); setProposeDesc('');
     setProposeLat(null); setProposeLng(null);
     setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
+    setProposePhotos([]);
+    setProposeVideo(null);
     triggerPointsAnim();
   }
 
@@ -826,43 +895,13 @@ export default function CarteScreen() {
     });
   }
 
-  const FICHE_HEADER_H = 210;
+  const FICHE_HEADER_H = Math.round(SCREEN_H * 0.42);
 
   const FAV_LISTS: { key: string; label: string; icon: IoniconsName; color: string }[] = [
     { key: 'favori',      label: 'Mes favoris',  icon: 'heart',           color: '#E05070' },
     { key: 'a_tester',   label: 'À tester',      icon: 'bookmark',        color: colors.bordeaux },
     { key: 'deja_teste', label: 'Déjà testé',    icon: 'checkmark-circle', color: '#5A9E6F' },
   ];
-
-  const clusterIndex = useMemo(() => {
-    const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 14 });
-    index.load(lieux.map(l => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: [l.lng, l.lat] },
-      properties: { lieu: l },
-    })));
-    return index;
-  }, [lieux]);
-
-  const clusters = useMemo(() => {
-    if (!region.latitudeDelta || !region.longitudeDelta ||
-        region.latitudeDelta <= 0 || region.longitudeDelta <= 0 ||
-        isNaN(region.latitude) || isNaN(region.longitude)) return [];
-    const rawZoom = Math.round(Math.log(360 / region.latitudeDelta) / Math.LN2);
-    const zoom = isFinite(rawZoom) ? Math.min(20, Math.max(0, rawZoom)) : 10;
-    const bbox: [number, number, number, number] = [
-      region.longitude - region.longitudeDelta / 2,
-      region.latitude - region.latitudeDelta / 2,
-      region.longitude + region.longitudeDelta / 2,
-      region.latitude + region.latitudeDelta / 2,
-    ];
-    try {
-      const all = clusterIndex.getClusters(bbox, zoom);
-      return all.slice(0, 80);
-    } catch {
-      return [];
-    }
-  }, [clusterIndex, region]);
 
   function sortLieux(items: Lieu[]): Lieu[] {
     return [...items].sort((a, b) => {
@@ -886,15 +925,49 @@ export default function CarteScreen() {
   const filteredLieux = useMemo(() => {
     return lieux.filter(l => {
       if (filterMinNote > 0 && (l.note_moyenne ?? 0) < filterMinNote) return false;
+      if (filterCat && l.cat !== filterCat) return false;
+      if (filterDistance && userLat !== null && userLng !== null && l.lat && l.lng) {
+        if (haversine(userLat, userLng, l.lat, l.lng) > filterDistance) return false;
+      }
       for (const eq of filterEquipements) {
         const col = EQUIP_MAP[eq];
         if (col && !l[col]) return false;
       }
       return true;
     });
-  }, [lieux, filterMinNote, filterEquipements]);
+  }, [lieux, filterMinNote, filterEquipements, filterCat, filterDistance, userLat, userLng]);
 
-  const filterActive = filterMinNote > 0 || filterEquipements.length > 0;
+  const clusterIndex = useMemo(() => {
+    const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 14 });
+    index.load(filteredLieux.map(l => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [l.lng, l.lat] },
+      properties: { lieu: l },
+    })));
+    return index;
+  }, [filteredLieux]);
+
+  const clusters = useMemo(() => {
+    if (!region.latitudeDelta || !region.longitudeDelta ||
+        region.latitudeDelta <= 0 || region.longitudeDelta <= 0 ||
+        isNaN(region.latitude) || isNaN(region.longitude)) return [];
+    const rawZoom = Math.round(Math.log(360 / region.latitudeDelta) / Math.LN2);
+    const zoom = isFinite(rawZoom) ? Math.min(20, Math.max(0, rawZoom)) : 10;
+    const bbox: [number, number, number, number] = [
+      region.longitude - region.longitudeDelta / 2,
+      region.latitude - region.latitudeDelta / 2,
+      region.longitude + region.longitudeDelta / 2,
+      region.latitude + region.latitudeDelta / 2,
+    ];
+    try {
+      const all = clusterIndex.getClusters(bbox, zoom);
+      return all.slice(0, 80);
+    } catch {
+      return [];
+    }
+  }, [clusterIndex, region]);
+
+  const filterActive = filterMinNote > 0 || filterEquipements.length > 0 || filterCat !== null || filterDistance !== null;
 
   function openFilterModal() {
     setFilterModal(true);
@@ -906,7 +979,7 @@ export default function CarteScreen() {
   function toggleEquip(key: string) {
     setFilterEquipements(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   }
-  function resetFilters() { setFilterMinNote(0); setFilterEquipements([]); }
+  function resetFilters() { setFilterMinNote(0); setFilterEquipements([]); setFilterCat(null); setFilterDistance(null); }
 
   function renderFilterModal() {
     if (!filterModal) return null;
@@ -937,6 +1010,54 @@ export default function CarteScreen() {
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+            {/* Catégorie */}
+            <Text style={styles.filterSectionLabel}>CATÉGORIE</Text>
+            <View style={styles.filterChipsGrid}>
+              {[
+                { key: 'parc',       label: 'Parcs',          icon: 'leaf-outline' },
+                { key: 'parc_chien', label: 'Espaces canins', icon: 'paw-outline' },
+                { key: 'restaurant', label: 'Restos',         icon: 'restaurant-outline' },
+                { key: 'cafe',       label: 'Cafés',          icon: 'cafe-outline' },
+                { key: 'veto',       label: 'Vétos',          icon: 'medical-outline' },
+                { key: 'toiletteur', label: 'Toilettage',     icon: 'cut-outline' },
+                { key: 'plage',      label: 'Plages',         icon: 'water-outline' },
+                { key: 'boutique',   label: 'Boutiques',      icon: 'bag-outline' },
+              ].map(c => {
+                const active = filterCat === c.key;
+                return (
+                  <TouchableOpacity
+                    key={c.key}
+                    style={[styles.filterEquipChip, active && styles.filterEquipChipActive]}
+                    onPress={() => setFilterCat(filterCat === c.key ? null : c.key)}
+                  >
+                    <Ionicons name={c.icon as any} size={15} color={active ? colors.ivory : colors.bordeaux} />
+                    <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{c.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {/* Distance */}
+            <Text style={[styles.filterSectionLabel, { marginTop: 20 }]}>RAYON DE RECHERCHE</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+              {[
+                { label: '500 m', val: 0.5 },
+                { label: '1 km',  val: 1 },
+                { label: '2 km',  val: 2 },
+                { label: '5 km',  val: 5 },
+                { label: '10 km', val: 10 },
+              ].map(d => {
+                const active = filterDistance === d.val;
+                return (
+                  <TouchableOpacity
+                    key={d.val}
+                    style={[styles.filterEquipChip, active && styles.filterEquipChipActive]}
+                    onPress={() => setFilterDistance(active ? null : d.val)}
+                  >
+                    <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{d.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             {/* Note minimum */}
             <Text style={styles.filterSectionLabel}>NOTE MINIMUM</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginBottom: 24 }}>
@@ -1091,49 +1212,74 @@ export default function CarteScreen() {
               </View>
             )}
 
-            {/* Gradient bas : badge catégorie + nom + localisation | auteur + like */}
-            <View style={styles.ficheHeaderGradient}>
-              <View style={{ flex: 1 }}>
-                <View style={[styles.catBadge, { backgroundColor: cfg.color + '55', alignSelf: 'flex-start', marginBottom: 4 }]}>
-                  <Ionicons name={cfg.icon} size={11} color="#fff" />
-                  <Text style={[styles.catLabel, { color: '#fff' }]}>{cfg.label}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.ficheHeaderNom} numberOfLines={1}>{selectedLieu.nom}</Text>
-                  {(selectedLieu as any).manager_user_id && (
-                    <View style={styles.certBadgeIcon}>
-                      <Ionicons name="checkmark" size={10} color="#fff" />
-                    </View>
+            {/* Crédits photo (bas droite) */}
+            {currentPhoto && (
+              <View style={styles.fichePhotoCredits}>
+                {currentPhoto.nomChien && (
+                  <View style={styles.dogTagBadge}>
+                    <Text style={styles.dogTagText}>🐾 {currentPhoto.nomChien}</Text>
+                  </View>
+                )}
+                {currentPhoto.authorUsername && (
+                  <Text style={styles.fichePhotoAuthor}>@{currentPhoto.authorUsername}</Text>
+                )}
+                <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
+                  <Ionicons
+                    name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
+                    size={14}
+                    color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
+                  />
+                  {currentPhoto.likeCount > 0 && (
+                    <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
+                      {currentPhoto.likeCount}
+                    </Text>
                   )}
-                </View>
-                <Text style={styles.ficheHeaderLoc} numberOfLines={1}>
-                  {[selectedLieu.adresse, selectedLieu.ville].filter(Boolean).join(' · ')}
-                </Text>
+                </TouchableOpacity>
               </View>
-              {currentPhoto && (
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  {currentPhoto.nomChien && (
-                    <View style={styles.dogTagBadge}>
-                      <Text style={styles.dogTagText}>🐾 {currentPhoto.nomChien}</Text>
-                    </View>
-                  )}
-                  {currentPhoto.authorUsername && (
-                    <Text style={styles.fichePhotoAuthor}>@{currentPhoto.authorUsername}</Text>
-                  )}
-                  <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
-                    <Ionicons
-                      name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
-                      size={14}
-                      color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
-                    />
-                    {currentPhoto.likeCount > 0 && (
-                      <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
-                        {currentPhoto.likeCount}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
+            )}
+          </View>
+
+          {/* ====== INFO BLOC ====== */}
+          <View style={styles.ficheInfoBlock}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <View style={[styles.catBadge, { backgroundColor: cfg.color + '18' }]}>
+                <Ionicons name={cfg.icon} size={11} color={cfg.color} />
+                <Text style={[styles.catLabel, { color: cfg.color }]}>{cfg.label}</Text>
+              </View>
+              {(selectedLieu as any).manager_user_id && (
+                <View style={styles.certBadgeIcon}>
+                  <Ionicons name="checkmark" size={10} color="#fff" />
                 </View>
               )}
+            </View>
+            <Text style={styles.ficheInfoNom} numberOfLines={2}>{selectedLieu.nom}</Text>
+            {(selectedLieu.adresse || selectedLieu.ville) ? (
+              <Text style={styles.ficheInfoAdresse} numberOfLines={1}>
+                {[selectedLieu.adresse, selectedLieu.ville].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+              {selectedLieu.note_moyenne ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  {[1,2,3,4,5].map(i => (
+                    <Ionicons key={i} name={i <= Math.round(selectedLieu.note_moyenne!) ? 'star' : 'star-outline'} size={13} color={colors.terra} />
+                  ))}
+                  <Text style={styles.ficheInfoScore}>{selectedLieu.note_moyenne.toFixed(1)}</Text>
+                  <Text style={styles.ficheInfoAvis}>({selectedLieu.nb_avis || 0} avis)</Text>
+                </View>
+              ) : null}
+              {(() => {
+                const status = parseOpenStatus(selectedLieu.horaires);
+                if (!status) return null;
+                return (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'open' ? '#3a9e5f' : '#c04040' }} />
+                    <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 12, color: status === 'open' ? '#3a9e5f' : '#c04040' }}>
+                      {status === 'open' ? 'Ouvert' : 'Fermé'}
+                    </Text>
+                  </View>
+                );
+              })()}
             </View>
           </View>
 
@@ -1143,16 +1289,6 @@ export default function CarteScreen() {
               <ActivityIndicator color={colors.terra} style={{ marginVertical: 24 }} />
             ) : (
               <>
-                {selectedLieu.note_moyenne ? (
-                  <View style={styles.ratingRow}>
-                    {[1,2,3,4,5].map(i => (
-                      <Ionicons key={i} name={i <= Math.round(selectedLieu.note_moyenne!) ? 'star' : 'star-outline'} size={14} color={colors.terra} />
-                    ))}
-                    <Text style={styles.ratingScore}>{selectedLieu.note_moyenne.toFixed(1)}</Text>
-                    <Text style={styles.ratingCount}>({selectedLieu.nb_avis || 0} avis)</Text>
-                  </View>
-                ) : null}
-
                 {(selectedLieu as any).manager_user_id && (
                   <View style={styles.certBanner}>
                     <View style={styles.certBannerIcon}>
@@ -1863,6 +1999,50 @@ export default function CarteScreen() {
                 </View>
               </View>
 
+              {/* Photos */}
+              <View style={styles.proposeField}>
+                <Text style={styles.proposeLabel}>Photos (max 5)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                  {proposePhotos.map((uri, idx) => (
+                    <View key={idx} style={styles.proposeMediaThumb}>
+                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <TouchableOpacity style={styles.proposeMediaRemove} onPress={() => setProposePhotos(p => p.filter((_, i) => i !== idx))}>
+                        <Ionicons name="close-circle" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  {proposePhotos.length < 5 && (
+                    <TouchableOpacity style={[styles.proposeMediaThumb, styles.proposeMediaAdd]} onPress={pickProposePhotos}>
+                      <Ionicons name="camera-outline" size={24} color={colors.bordeaux} />
+                      <Text style={styles.proposeMediaAddLabel}>Ajouter</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+              </View>
+
+              {/* Vidéo */}
+              <View style={styles.proposeField}>
+                <Text style={styles.proposeLabel}>Vidéo (max 60 sec)</Text>
+                {proposeVideo ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={[styles.proposeMediaThumb, { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Ionicons name="videocam" size={28} color={colors.terraPale} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.proposeLabel, { marginBottom: 0 }]}>Vidéo sélectionnée ✓</Text>
+                      <TouchableOpacity onPress={() => setProposeVideo(null)}>
+                        <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 12, color: '#c04040', marginTop: 4 }}>Supprimer</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={[styles.proposeMediaThumb, styles.proposeMediaAdd, { width: '100%', height: 56, flexDirection: 'row', gap: 10 }]} onPress={pickProposeVideo}>
+                    <Ionicons name="videocam-outline" size={22} color={colors.bordeaux} />
+                    <Text style={styles.proposeMediaAddLabel}>Choisir une vidéo</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || proposeLoading}>
                 {proposeLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Soumettre le lieu</Text>}
               </TouchableOpacity>
@@ -2440,13 +2620,17 @@ const styles = StyleSheet.create({
   // Header photo zone
   ficheHeader: { width: '100%', overflow: 'hidden', backgroundColor: colors.bordeaux },
   ficheHeaderPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  ficheHeaderGradient: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(20,8,8,0.50)',
-    paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+  fichePhotoCredits: {
+    position: 'absolute', bottom: 12, right: 12, alignItems: 'flex-end', gap: 4,
   },
-  ficheHeaderNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: '#fff', lineHeight: 22 },
-  ficheHeaderLoc: { fontFamily: 'DMSans_300Light', fontSize: 11, color: 'rgba(245,239,224,0.65)', marginTop: 1 },
+  ficheInfoBlock: {
+    backgroundColor: '#fff', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 14,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  ficheInfoNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux, lineHeight: 26, marginBottom: 3 },
+  ficheInfoAdresse: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  ficheInfoScore: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux, marginLeft: 4 },
+  ficheInfoAvis: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   fichePhotoAuthor: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.7)' },
   fichePhotoLikeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fichePhotoLikeCount: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
@@ -2474,6 +2658,19 @@ const styles = StyleSheet.create({
   catLabel: { fontSize: 12, fontFamily: 'DMSans_500Medium' },
   sheetScroll: { flex: 1 },
   sheetContent: { padding: 16, paddingTop: 12, paddingBottom: 40, gap: 10 },
+  proposeMediaThumb: {
+    width: 80, height: 80, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border,
+  },
+  proposeMediaAdd: {
+    alignItems: 'center', justifyContent: 'center', gap: 4,
+    borderWidth: 1.5, borderColor: colors.bordeaux, borderStyle: 'dashed',
+    backgroundColor: 'transparent',
+  },
+  proposeMediaAddLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.bordeaux },
+  proposeMediaRemove: {
+    position: 'absolute', top: 3, right: 3,
+    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 10,
+  },
   enrichLink: {
     fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.terra,
     textDecorationLine: 'underline', textAlign: 'center',

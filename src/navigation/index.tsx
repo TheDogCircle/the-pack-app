@@ -12,6 +12,7 @@ import CarteScreen from '../screens/CarteScreen';
 import FeedScreen from '../screens/FeedScreen';
 import PartenairesScreen from '../screens/PartenairesScreen';
 import ExplorerScreen from '../screens/ExplorerScreen';
+import EvenementsScreen from '../screens/EvenementsScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -35,7 +36,7 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }> = {
   Explorer:    { active: 'compass',         inactive: 'compass-outline' },
   Carte:       { active: 'map',             inactive: 'map-outline' },
-  Evenements:  { active: 'calendar',        inactive: 'calendar-outline' },
+  Events:      { active: 'calendar',        inactive: 'calendar-outline' },
   Meute:       { active: 'people',          inactive: 'people-outline' },
   Services:    { active: 'ribbon',          inactive: 'ribbon-outline' },
   Profil:      { active: 'person-circle',   inactive: 'person-circle-outline' },
@@ -136,9 +137,10 @@ function MainTabs() {
         options={{ title: 'Meute', tabBarBadge: meuteBadge ? ' ' : undefined }}
         listeners={{ focus: () => setMeuteBadge(false) }}
       />
+      <Tab.Screen name="Events" component={EvenementsScreen} options={{ title: 'Events' }} />
       <Tab.Screen
         name="Services" component={PartenairesScreen}
-        options={{ title: 'Marques', tabBarBadge: partBadge ? ' ' : undefined }}
+        options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
         listeners={{ focus: () => setPartBadge(false) }}
       />
       <Tab.Screen name="Profil" component={ProfilScreen} options={{ title: 'Mon profil' }} />

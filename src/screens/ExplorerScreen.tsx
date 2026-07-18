@@ -18,16 +18,16 @@ const FEATURED_H = 200;
 
 const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 
-const CAT_CHIPS: { key: string | null; label: string; emoji: string }[] = [
-  { key: null,         label: 'Tous',          emoji: '✨' },
-  { key: 'parc',       label: 'Parcs',         emoji: '🌿' },
-  { key: 'parc_chien', label: 'Espaces canins',emoji: '🐾' },
-  { key: 'restaurant', label: 'Restos',        emoji: '🍽️' },
-  { key: 'cafe',       label: 'Cafés',         emoji: '☕' },
-  { key: 'veto',       label: 'Vétos',         emoji: '🏥' },
-  { key: 'toiletteur', label: 'Toilettage',    emoji: '✂️' },
-  { key: 'plage',      label: 'Plages',        emoji: '🏖️' },
-  { key: 'boutique',   label: 'Boutiques',     emoji: '🛍️' },
+const CAT_CHIPS: { key: string | null; label: string; icon: string }[] = [
+  { key: null,         label: 'Tous',          icon: 'apps-outline' },
+  { key: 'parc',       label: 'Parcs',         icon: 'leaf-outline' },
+  { key: 'parc_chien', label: 'Espaces canins',icon: 'paw-outline' },
+  { key: 'restaurant', label: 'Restos',        icon: 'restaurant-outline' },
+  { key: 'cafe',       label: 'Cafés',         icon: 'cafe-outline' },
+  { key: 'veto',       label: 'Vétos',         icon: 'medical-outline' },
+  { key: 'toiletteur', label: 'Toilettage',    icon: 'cut-outline' },
+  { key: 'plage',      label: 'Plages',        icon: 'water-outline' },
+  { key: 'boutique',   label: 'Boutiques',     icon: 'bag-outline' },
 ];
 
 const CAT_COLOR: Record<string, string> = {
@@ -378,7 +378,7 @@ export default function ExplorerScreen() {
   const [nomChien, setNomChien] = useState<string | null>(null);
   const [activeCat, setActiveCat] = useState<string | null>(null);
 
-  const [favorisLieux, setFavorisLieux] = useState<LieuCard[]>([]);
+  const [adressesDuMoment, setAdressesDuMoment] = useState<LieuCard[]>([]);
   const [nearbyLieux, setNearbyLieux] = useState<LieuCard[]>([]);
   const [topLieux, setTopLieux] = useState<LieuCard[]>([]);
   const [featuredLieu, setFeaturedLieu] = useState<LieuCard | null>(null);
@@ -430,7 +430,7 @@ export default function ExplorerScreen() {
       loadNearby(),
       loadTopLieux(),
       loadExplorateurs(),
-      userId ? loadFavoris() : Promise.resolve(),
+      loadAdressesDuMoment(),
     ]);
     setLoading(false);
   }
@@ -465,21 +465,17 @@ export default function ExplorerScreen() {
     setSelectedExplorateur({ ...exp, lieux });
   }
 
-  async function loadFavoris() {
-    if (!userId) return;
-    const { data: favs } = await supabase
-      .from('favoris').select('lieu_id').eq('user_id', userId).eq('liste', 'favori').limit(10);
-    const ids = (favs || []).map((f: any) => f.lieu_id);
-    if (!ids.length) { setFavorisLieux([]); return; }
-    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url').in('id', ids).eq('actif', true);
+  async function loadAdressesDuMoment() {
+    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
+      .eq('actif', true).eq('mise_en_avant', true).order('updated_at', { ascending: false }).limit(10);
     if (activeCat) q = (q as any).eq('cat', activeCat);
     const { data } = await q;
     const lieux = data || [];
     const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
     const mapped = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
-    setFavorisLieux(mapped);
+    setAdressesDuMoment(mapped);
     mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
-      fetchGooglePhoto(l).then(url => { if (url) setFavorisLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
+      fetchGooglePhoto(l).then(url => { if (url) setAdressesDuMoment(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
     );
   }
 
@@ -538,7 +534,6 @@ export default function ExplorerScreen() {
 
   const greeting = prenom ? `Bonjour, ${prenom} 🐾` : 'Bonjour 🐾';
   const nearbyTitle = nomChien ? `Près de ${nomChien}` : 'Près de toi';
-  const favorisTitle = prenom ? `Les coups de cœur de ${prenom}` : 'Mes coups de cœur';
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -574,7 +569,7 @@ export default function ExplorerScreen() {
                 style={[styles.chip, active && styles.chipActive]}
                 onPress={() => setActiveCat(activeCat === c.key ? null : c.key)}
               >
-                <Text style={styles.chipEmoji}>{c.emoji}</Text>
+                <Ionicons name={c.icon as any} size={14} color={active ? colors.ivory : colors.bordeaux} />
                 <Text style={[styles.chipLabel, active && styles.chipLabelActive]}>{c.label}</Text>
               </TouchableOpacity>
             );
@@ -639,12 +634,12 @@ export default function ExplorerScreen() {
               </View>
             )}
 
-            {/* Favoris */}
-            {userId && favorisLieux.length > 0 && (
+            {/* Adresses du moment */}
+            {adressesDuMoment.length > 0 && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>{favorisTitle}</Text>
+                <Text style={styles.sectionTitle}>Adresses du moment</Text>
                 <FlatList
-                  data={favorisLieux}
+                  data={adressesDuMoment}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   keyExtractor={i => i.id}
@@ -715,7 +710,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
   },
   chipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
-  chipEmoji: { fontSize: 13 },
   chipLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   chipLabelActive: { color: colors.ivory },
 

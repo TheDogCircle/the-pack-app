@@ -58,6 +58,173 @@ type Profil = {
   bio: string | null; points: number; ambassadeur?: boolean | null;
   notif_follow: boolean | null; notif_lieu_nearby: boolean | null; notif_messages: boolean | null; notif_suggestion_validee: boolean | null;
 };
+
+type ExplorateurData = {
+  id: string; nom: string; handle: string | null; bio: string | null;
+  photo_profil_url: string | null; photo_banniere_url: string | null;
+  instagram_url: string | null; tiktok_url: string | null;
+  youtube_url: string | null; site_web: string | null;
+};
+
+function ExplorateurEditModal({ explorateur, userId, onClose, onSaved }: {
+  explorateur: ExplorateurData; userId: string;
+  onClose: () => void; onSaved: (e: ExplorateurData) => void;
+}) {
+  const [handle, setHandle] = useState(explorateur.handle || '');
+  const [bio, setBio] = useState(explorateur.bio || '');
+  const [instagram, setInstagram] = useState(explorateur.instagram_url || '');
+  const [tiktok, setTiktok] = useState(explorateur.tiktok_url || '');
+  const [youtube, setYoutube] = useState(explorateur.youtube_url || '');
+  const [site, setSite] = useState(explorateur.site_web || '');
+  const [profilUrl, setProfilUrl] = useState(explorateur.photo_profil_url || '');
+  const [banniereUrl, setBanniereUrl] = useState(explorateur.photo_banniere_url || '');
+  const [saving, setSaving] = useState(false);
+  const [uploadingProfil, setUploadingProfil] = useState(false);
+  const [uploadingBanniere, setUploadingBanniere] = useState(false);
+
+  async function pickAndUpload(type: 'profil' | 'banniere') {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const aspect: [number, number] = type === 'profil' ? [1, 1] : [16, 9];
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect, quality: 0.85 });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    const ext = asset.uri.split('.').pop() || 'jpg';
+    const path = `explorateurs/${type}_${userId}.${ext}`;
+    const formData = new FormData();
+    formData.append('file', { uri: asset.uri, name: `${type}.${ext}`, type: `image/${ext}` } as any);
+    if (type === 'profil') setUploadingProfil(true); else setUploadingBanniere(true);
+    const { error } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
+    if (error) { Alert.alert('Erreur', error.message); }
+    else {
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+      if (type === 'profil') setProfilUrl(data.publicUrl); else setBanniereUrl(data.publicUrl);
+    }
+    if (type === 'profil') setUploadingProfil(false); else setUploadingBanniere(false);
+  }
+
+  async function save() {
+    setSaving(true);
+    const update = {
+      handle: handle.trim() || null,
+      bio: bio.trim() || null,
+      photo_profil_url: profilUrl || null,
+      photo_banniere_url: banniereUrl || null,
+      instagram_url: instagram.trim() || null,
+      tiktok_url: tiktok.trim() || null,
+      youtube_url: youtube.trim() || null,
+      site_web: site.trim() || null,
+    };
+    const { error } = await supabase.from('explorateurs').update(update).eq('id', explorateur.id);
+    setSaving(false);
+    if (error) { Alert.alert('Erreur', error.message); return; }
+    onSaved({ ...explorateur, ...update });
+    onClose();
+  }
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={xStyles.container}>
+        <View style={xStyles.header}>
+          <Text style={xStyles.title}>Ma fiche Explorateur</Text>
+          <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={colors.bordeaux} /></TouchableOpacity>
+        </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 50 }}>
+
+          {/* Bannière */}
+          <Text style={xStyles.sectionLabel}>PHOTO DE BANNIÈRE</Text>
+          <TouchableOpacity style={xStyles.banniereBox} onPress={() => pickAndUpload('banniere')} activeOpacity={0.85}>
+            {banniereUrl
+              ? <Image source={{ uri: banniereUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              : <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />}
+            <View style={xStyles.banniereOverlay}>
+              {uploadingBanniere
+                ? <ActivityIndicator color={colors.ivory} />
+                : <><Ionicons name="camera-outline" size={22} color={colors.ivory} /><Text style={xStyles.uploadLabel}>Changer la bannière</Text></>}
+            </View>
+          </TouchableOpacity>
+
+          {/* Photo profil */}
+          <Text style={xStyles.sectionLabel}>PHOTO DE PROFIL</Text>
+          <TouchableOpacity style={xStyles.profilRow} onPress={() => pickAndUpload('profil')} activeOpacity={0.85}>
+            {profilUrl
+              ? <Image source={{ uri: profilUrl }} style={xStyles.profilThumb} />
+              : <View style={[xStyles.profilThumb, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
+                  <Ionicons name="person" size={28} color={colors.ivory} />
+                </View>}
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={xStyles.profilChangeLabel}>{uploadingProfil ? 'Upload...' : 'Changer la photo de profil'}</Text>
+              <Text style={xStyles.profilChangeSub}>Carré recommandé</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          {/* Infos */}
+          <Text style={xStyles.sectionLabel}>MA FICHE</Text>
+          {[
+            { label: 'Handle / pseudo', value: handle, setter: setHandle, placeholder: '@moncompte', auto: 'none' as const },
+            { label: 'Bio', value: bio, setter: setBio, placeholder: 'Raconte-toi en quelques lignes...', multi: true },
+          ].map(f => (
+            <View key={f.label} style={xStyles.fieldWrap}>
+              <Text style={xStyles.fieldLabel}>{f.label}</Text>
+              <TextInput
+                style={[xStyles.input, f.multi && { height: 90, textAlignVertical: 'top', paddingTop: 10 }]}
+                value={f.value} onChangeText={f.setter} placeholder={f.placeholder}
+                placeholderTextColor={colors.textMuted} multiline={!!f.multi}
+                autoCapitalize={f.auto || 'sentences'}
+              />
+            </View>
+          ))}
+
+          {/* Liens */}
+          <Text style={xStyles.sectionLabel}>MES LIENS</Text>
+          {[
+            { label: 'Instagram', value: instagram, setter: setInstagram, placeholder: 'https://instagram.com/...', icon: 'logo-instagram' },
+            { label: 'TikTok', value: tiktok, setter: setTiktok, placeholder: 'https://tiktok.com/@...', icon: 'musical-notes-outline' },
+            { label: 'YouTube', value: youtube, setter: setYoutube, placeholder: 'https://youtube.com/...', icon: 'logo-youtube' },
+            { label: 'Site web', value: site, setter: setSite, placeholder: 'https://...', icon: 'globe-outline' },
+          ].map(f => (
+            <View key={f.label} style={xStyles.fieldWrap}>
+              <Text style={xStyles.fieldLabel}>{f.label}</Text>
+              <View style={xStyles.inputRow}>
+                <Ionicons name={f.icon as any} size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[xStyles.input, { flex: 1 }]}
+                  value={f.value} onChangeText={f.setter} placeholder={f.placeholder}
+                  placeholderTextColor={colors.textMuted} autoCapitalize="none" keyboardType="url"
+                />
+              </View>
+            </View>
+          ))}
+
+          <TouchableOpacity style={[xStyles.saveBtn, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
+            <Text style={xStyles.saveBtnLabel}>{saving ? 'Enregistrement...' : 'Enregistrer'}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const xStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.ivoryLight },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 24, paddingBottom: 12 },
+  title: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
+  sectionLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, letterSpacing: 1, paddingHorizontal: 20, marginTop: 24, marginBottom: 10 },
+  banniereBox: { marginHorizontal: 20, height: 140, borderRadius: 14, overflow: 'hidden', backgroundColor: colors.bordeaux },
+  banniereOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(61,26,26,0.35)' },
+  uploadLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  profilRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border },
+  profilThumb: { width: 56, height: 56, borderRadius: 28 },
+  profilChangeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  profilChangeSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  fieldWrap: { marginHorizontal: 20, marginBottom: 4 },
+  fieldLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginBottom: 6 },
+  input: { backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 11, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 11 },
+  saveBtn: { marginHorizontal: 20, marginTop: 28, backgroundColor: colors.bordeaux, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  saveBtnLabel: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+});
 type LieuMini = { id: string; nom: string; ville: string; cat: string };
 type FavItem = { id: string; lieu_id: string; liste: string; lieux: LieuMini | null };
 type AvisItem = { id: string; note: number; commentaire: string | null; created_at: string; lieu_id: string; lieux: LieuMini | null };
@@ -94,6 +261,8 @@ export default function ProfilScreen() {
   const [nomChien, setNomChien] = useState('');
   const [raceChien, setRaceChien] = useState('');
   const [bio, setBio] = useState('');
+  const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
+  const [showExplorEdit, setShowExplorEdit] = useState(false);
 
   useEffect(() => { load(); }, [session?.user.id]);
 
@@ -108,14 +277,16 @@ export default function ProfilScreen() {
 
     savePushToken(session.user.id);
 
-    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes] = await Promise.all([
+    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }] = await Promise.all([
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('photos').select('id,url,validee,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(40),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', session.user.id).eq('statut', 'accepte'),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', session.user.id).eq('statut', 'accepte'),
+      supabase.from('explorateurs').select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web').eq('user_id', session.user.id).maybeSingle(),
     ]);
+    setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
     setFollowingCount(followingRes.count ?? 0);
 
@@ -332,6 +503,23 @@ export default function ProfilScreen() {
 
       {activeTab === 'profil' && (
         <ScrollView contentContainerStyle={styles.tabContent}>
+
+          {/* Espace Explorateur */}
+          {explorateur && (
+            <TouchableOpacity style={styles.explorateurCard} onPress={() => setShowExplorEdit(true)} activeOpacity={0.88}>
+              {explorateur.photo_banniere_url
+                ? <Image source={{ uri: explorateur.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                : <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />}
+              <View style={styles.explorateurCardOverlay}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="star" size={13} color={colors.terraPale} />
+                  <Text style={styles.explorateurCardTitle}>Espace Explorateur</Text>
+                </View>
+                <Text style={styles.explorateurCardSub}>Gérer ma fiche →</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.accordionWrap}>
             <TouchableOpacity style={styles.accordionHeader} onPress={() => setAccordionOpen(o => !o)} activeOpacity={0.8}>
               <Ionicons name="person-outline" size={15} color={colors.bordeaux} />
@@ -713,6 +901,15 @@ export default function ProfilScreen() {
           </View>
         </View>
       </Modal>
+
+      {showExplorEdit && explorateur && session && (
+        <ExplorateurEditModal
+          explorateur={explorateur}
+          userId={session.user.id}
+          onClose={() => setShowExplorEdit(false)}
+          onSaved={e => setExplorateur(e)}
+        />
+      )}
     </View>
   );
 }
@@ -769,6 +966,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
   },
   shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  explorateurCard: {
+    marginHorizontal: 16, marginBottom: 16, height: 100, borderRadius: 16, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,
+  },
+  explorateurCardOverlay: {
+    flex: 1, justifyContent: 'flex-end', padding: 16,
+    backgroundColor: 'rgba(61,26,26,0.52)',
+  },
+  explorateurCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.ivory },
+  explorateurCardSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.7)', marginTop: 2 },
   accordionWrap: {
     backgroundColor: colors.white, borderRadius: 14,
     borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
