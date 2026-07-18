@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal, FlatList, Dimensions, Share,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
@@ -247,10 +247,6 @@ export default function ProfilScreen() {
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [accordionOpen, setAccordionOpen] = useState(false);
-  const [notifFollow, setNotifFollow] = useState(true);
-  const [notifLieuNearby, setNotifLieuNearby] = useState(true);
-  const [notifMessages, setNotifMessages] = useState(true);
-  const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
   const [favFilter, setFavFilter] = useState<'tous' | 'favori' | 'a_tester' | 'deja_teste'>('tous');
   const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
@@ -298,10 +294,6 @@ export default function ProfilScreen() {
       setNomChien(p.nom_chien || '');
       setRaceChien(p.race_chien || '');
       setBio(p.bio || '');
-      setNotifFollow(p.notif_follow ?? true);
-      setNotifLieuNearby(p.notif_lieu_nearby ?? true);
-      setNotifMessages(p.notif_messages ?? true);
-      setNotifSuggestionValidee(p.notif_suggestion_validee ?? true);
     }
 
     const favLieuIds = [...new Set((favsRaw || []).map((f: any) => f.lieu_id).filter(Boolean))];
@@ -400,16 +392,6 @@ export default function ProfilScreen() {
       setFollowList(profils || []);
     }
     setFollowListLoading(false);
-  }
-
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee', value: boolean) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-    if (key === 'notif_follow') setNotifFollow(value);
-    else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
-    else if (key === 'notif_messages') setNotifMessages(value);
-    else setNotifSuggestionValidee(value);
-    await supabase.from('profils').update({ [key]: value }).eq('id', session.user.id);
   }
 
   if (sessionLoading || loading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
@@ -582,61 +564,6 @@ export default function ProfilScreen() {
             )}
           </View>
 
-          {/* Notifications */}
-          <View style={styles.notifCard}>
-            <View style={styles.notifCardHeader}>
-              <Ionicons name="notifications-outline" size={15} color={colors.bordeaux} />
-              <Text style={styles.notifCardTitle}>Notifications</Text>
-            </View>
-            <View style={styles.notifRow}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.notifLabel}>Nouvel abonné</Text>
-                <Text style={styles.notifSub}>Quand quelqu'un commence à te suivre</Text>
-              </View>
-              <Switch
-                value={notifFollow}
-                onValueChange={v => toggleNotif('notif_follow', v)}
-                trackColor={{ false: colors.border, true: colors.terra }}
-                thumbColor={colors.ivory}
-              />
-            </View>
-            <View style={styles.notifRow}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.notifLabel}>Nouveau lieu près de moi</Text>
-                <Text style={styles.notifSub}>Quand un lieu dog-friendly est ajouté près de chez toi</Text>
-              </View>
-              <Switch
-                value={notifLieuNearby}
-                onValueChange={v => toggleNotif('notif_lieu_nearby', v)}
-                trackColor={{ false: colors.border, true: colors.terra }}
-                thumbColor={colors.ivory}
-              />
-            </View>
-            <View style={styles.notifRow}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.notifLabel}>Messages</Text>
-                <Text style={styles.notifSub}>Nouveaux messages reçus dans tes conversations</Text>
-              </View>
-              <Switch
-                value={notifMessages}
-                onValueChange={v => toggleNotif('notif_messages', v)}
-                trackColor={{ false: colors.border, true: colors.terra }}
-                thumbColor={colors.ivory}
-              />
-            </View>
-            <View style={[styles.notifRow, { borderBottomWidth: 0 }]}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.notifLabel}>Lieu suggéré validé</Text>
-                <Text style={styles.notifSub}>Quand un lieu que tu as proposé est publié sur la carte</Text>
-              </View>
-              <Switch
-                value={notifSuggestionValidee}
-                onValueChange={v => toggleNotif('notif_suggestion_validee', v)}
-                trackColor={{ false: colors.border, true: colors.terra }}
-                thumbColor={colors.ivory}
-              />
-            </View>
-          </View>
         </ScrollView>
       )}
 
@@ -1094,23 +1021,6 @@ const styles = StyleSheet.create({
   shareCardCta: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: '#F5EFE0' },
   shareCardUrl: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: 'rgba(196,105,58,0.85)', marginTop: 5 },
   shareCardUrlUser: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.35)', marginTop: 3 },
-  notifCard: {
-    backgroundColor: colors.white, borderRadius: 14,
-    borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
-  },
-  notifCardHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  notifCardTitle: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
-  notifRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  notifLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
-  notifSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, lineHeight: 16 },
-
   raceModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   raceModalCard: {
     backgroundColor: colors.ivoryPale, borderTopLeftRadius: 20, borderTopRightRadius: 20,

@@ -13,8 +13,10 @@ export default function SettingsScreen() {
   const [username, setUsername] = useState('');
   const [currentUsername, setCurrentUsername] = useState('');
   const [savingUsername, setSavingUsername] = useState(false);
-  const [notifsCommunaute, setNotifsCommunaute] = useState(true);
-  const [notifsActu, setNotifsActu] = useState(true);
+  const [notifFollow, setNotifFollow] = useState(true);
+  const [notifLieuNearby, setNotifLieuNearby] = useState(true);
+  const [notifMessages, setNotifMessages] = useState(true);
+  const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -24,9 +26,26 @@ export default function SettingsScreen() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setLoading(false); return; }
     setUserId(session.user.id);
-    const { data } = await supabase.from('profils').select('username').eq('id', session.user.id).single();
-    if (data?.username) { setUsername(data.username); setCurrentUsername(data.username); }
+    const { data } = await supabase.from('profils')
+      .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee')
+      .eq('id', session.user.id).single();
+    if (data) {
+      if (data.username) { setUsername(data.username); setCurrentUsername(data.username); }
+      setNotifFollow(data.notif_follow ?? true);
+      setNotifLieuNearby(data.notif_lieu_nearby ?? true);
+      setNotifMessages(data.notif_messages ?? true);
+      setNotifSuggestionValidee(data.notif_suggestion_validee ?? true);
+    }
     setLoading(false);
+  }
+
+  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee', value: boolean) {
+    if (!userId) return;
+    if (key === 'notif_follow') setNotifFollow(value);
+    else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
+    else if (key === 'notif_messages') setNotifMessages(value);
+    else setNotifSuggestionValidee(value);
+    await supabase.from('profils').update({ [key]: value }).eq('id', userId);
   }
 
   async function saveUsername() {
@@ -107,26 +126,50 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>Notifications</Text>
         <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Activité de la communauté</Text>
-            <Text style={styles.toggleSub}>Nouveaux abonnés, mentions</Text>
+            <Text style={styles.toggleLabel}>Nouvel abonné</Text>
+            <Text style={styles.toggleSub}>Quand quelqu'un commence à te suivre</Text>
           </View>
           <Switch
-            value={notifsCommunaute}
-            onValueChange={setNotifsCommunaute}
-            trackColor={{ false: colors.border, true: colors.terra + '88' }}
-            thumbColor={notifsCommunaute ? colors.terra : '#f4f4f4'}
+            value={notifFollow}
+            onValueChange={v => toggleNotif('notif_follow', v)}
+            trackColor={{ false: colors.border, true: colors.terra }}
+            thumbColor={colors.ivory}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Nouveau lieu près de moi</Text>
+            <Text style={styles.toggleSub}>Quand un lieu dog-friendly est ajouté près de chez toi</Text>
+          </View>
+          <Switch
+            value={notifLieuNearby}
+            onValueChange={v => toggleNotif('notif_lieu_nearby', v)}
+            trackColor={{ false: colors.border, true: colors.terra }}
+            thumbColor={colors.ivory}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Messages</Text>
+            <Text style={styles.toggleSub}>Nouveaux messages reçus dans tes conversations</Text>
+          </View>
+          <Switch
+            value={notifMessages}
+            onValueChange={v => toggleNotif('notif_messages', v)}
+            trackColor={{ false: colors.border, true: colors.terra }}
+            thumbColor={colors.ivory}
           />
         </View>
         <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
           <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Actualités partenaires</Text>
-            <Text style={styles.toggleSub}>Nouvelles offres et annonces</Text>
+            <Text style={styles.toggleLabel}>Lieu suggéré validé</Text>
+            <Text style={styles.toggleSub}>Quand un lieu que tu as proposé est publié sur la carte</Text>
           </View>
           <Switch
-            value={notifsActu}
-            onValueChange={setNotifsActu}
-            trackColor={{ false: colors.border, true: colors.terra + '88' }}
-            thumbColor={notifsActu ? colors.terra : '#f4f4f4'}
+            value={notifSuggestionValidee}
+            onValueChange={v => toggleNotif('notif_suggestion_validee', v)}
+            trackColor={{ false: colors.border, true: colors.terra }}
+            thumbColor={colors.ivory}
           />
         </View>
       </View>
