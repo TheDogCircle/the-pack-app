@@ -23,6 +23,7 @@ import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
+const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -109,7 +110,7 @@ type LieuFull = Lieu & {
   chiens_salle: boolean | null; chiens_terrasse: boolean | null; espace_dedie: boolean | null;
   eau: boolean | null; gamelles: boolean | null; chiens_laches: boolean | null; chiens_laisse: boolean | null;
   petits_chiens: boolean | null; moyens_chiens: boolean | null; grands_chiens: boolean | null;
-  manager_user_id: string | null;
+  manager_user_id: string | null; google_photo_url: string | null;
 };
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null; ambassadeur?: boolean | null };
@@ -149,6 +150,7 @@ export default function CarteScreen() {
   const [showResults, setShowResults] = useState(false);
   const [photos, setPhotos] = useState<PhotoFiche[]>([]);
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [googlePhotoUrl, setGooglePhotoUrl] = useState<string | null>(null);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [ficheAvis, setFicheAvis] = useState<FicheAvisItem[]>([]);
   const [proposeModal, setProposeModal] = useState(false);
@@ -224,7 +226,7 @@ export default function CarteScreen() {
       onPanResponderRelease: (_, g) => {
         if (g.dy > 100 || g.vy > 0.5) {
           Animated.timing(sheetAnim, { toValue: SCREEN_H, duration: 220, useNativeDriver: true }).start(() => {
-            setSelectedLieu(null); setPhotos([]); setFicheAvis([]); setFichePhotoIdx(0); setFavListe(null); setMyAvis(null); sheetPanY.setValue(0);
+            setSelectedLieu(null); setPhotos([]); setFicheAvis([]); setFichePhotoIdx(0); setFavListe(null); setMyAvis(null); setGooglePhotoUrl(null); sheetPanY.setValue(0);
           });
         } else {
           Animated.spring(sheetPanY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
@@ -419,6 +421,32 @@ export default function CarteScreen() {
       })));
     } else {
       setPhotos([]);
+      // Fallback photo Google pour les lieux sans photo communauté (sauf vétos)
+      if (lieuData && lieuData.cat !== 'veto') {
+        if (lieuData.google_photo_url) {
+          setGooglePhotoUrl(lieuData.google_photo_url);
+        } else {
+          setGooglePhotoUrl(null);
+          (async () => {
+            try {
+              const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
+                body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
+              });
+              const json = await res.json();
+              const photoName = json.places?.[0]?.photos?.[0]?.name;
+              if (photoName) {
+                const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
+                setGooglePhotoUrl(url);
+                supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuData.id);
+              }
+            } catch {}
+          })();
+        }
+      } else {
+        setGooglePhotoUrl(null);
+      }
     }
 
     // Avis + profils séparément (comme le site web)
@@ -451,6 +479,7 @@ export default function CarteScreen() {
       setFichePhotoIdx(0);
       setFavListe(null);
       setMyAvis(null);
+      setGooglePhotoUrl(null);
     });
   }
 
@@ -1157,6 +1186,8 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+            ) : googlePhotoUrl ? (
+              <Image source={{ uri: googlePhotoUrl }} style={[StyleSheet.absoluteFill, { width: SCREEN_W, height: FICHE_HEADER_H }]} resizeMode="cover" />
             ) : (
               <View style={[styles.ficheHeaderPlaceholder, { backgroundColor: cfg.color }]}>
                 <CatIcon cat={selectedLieu?.cat} name={cfg.icon} size={72} color="rgba(245,239,224,0.18)" />
