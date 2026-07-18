@@ -418,8 +418,8 @@ export default function FeedScreen() {
       <View style={styles.tabsWrap}>
         {([
           { key: 'activite', label: 'Activité' },
-          { key: 'membres',  label: 'Membres' },
           { key: 'messages', label: 'Chat' },
+          { key: 'membres',  label: 'Membres' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
