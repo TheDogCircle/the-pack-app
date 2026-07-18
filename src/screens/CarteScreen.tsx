@@ -1290,7 +1290,15 @@ export default function CarteScreen() {
                 </View>
               )}
             </View>
-            <Text style={styles.ficheInfoNom} numberOfLines={2}>{selectedLieu.nom}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={styles.ficheInfoNom} numberOfLines={2}>{selectedLieu.nom}</Text>
+              {(selectedLieu as any).manager_user_id && (
+                <View style={styles.certInlineBadge}>
+                  <Ionicons name="checkmark-circle" size={11} color="#22a855" />
+                  <Text style={styles.certInlineText}>Certifié The Pack</Text>
+                </View>
+              )}
+            </View>
             {(selectedLieu.adresse || selectedLieu.ville) ? (
               <Text style={styles.ficheInfoAdresse} numberOfLines={1}>
                 {[selectedLieu.adresse, selectedLieu.ville].filter(Boolean).join(' · ')}
@@ -1327,17 +1335,6 @@ export default function CarteScreen() {
               <ActivityIndicator color={colors.terra} style={{ marginVertical: 24 }} />
             ) : (
               <>
-                {(selectedLieu as any).manager_user_id && (
-                  <View style={styles.certBanner}>
-                    <View style={styles.certBannerIcon}>
-                      <Ionicons name="checkmark" size={14} color="#fff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.certBannerTitle}>Dog Friendly vérifié</Text>
-                      <Text style={styles.certBannerSub}>Établissement certifié par The Pack Club</Text>
-                    </View>
-                  </View>
-                )}
                 {badges.length > 0 && (
                   <View style={styles.badgesWrap}>
                     {badges.map(b => (
@@ -2764,10 +2761,8 @@ const styles = StyleSheet.create({
   ficheAvisReponse: { marginTop: 6, padding: 10, backgroundColor: 'rgba(196,105,58,0.06)', borderLeftWidth: 2, borderLeftColor: colors.terra, borderRadius: 4 },
   ficheAvisReponseLabel: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
   ficheAvisReponseText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 17 },
-  certBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: 'rgba(34,139,70,0.07)', borderWidth: 1, borderColor: 'rgba(34,139,70,0.2)', borderRadius: 10 },
-  certBannerIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#22a855', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  certBannerTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#1a6b35' },
-  certBannerSub: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(26,107,53,0.7)', marginTop: 1 },
+  certInlineBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(34,168,85,0.1)', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 3 },
+  certInlineText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#1a6b35' },
   favDropdown: {
     position: 'absolute', top: 52, right: 48, zIndex: 50, minWidth: 168,
     backgroundColor: colors.white, borderRadius: 12,
