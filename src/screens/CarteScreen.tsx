@@ -201,7 +201,8 @@ export default function CarteScreen() {
   const [myDogName, setMyDogName] = useState<string | null>(null);
   const [dogTagModal, setDogTagModal] = useState(false);
   const [dogTagInput, setDogTagInput] = useState('');
-  const [pendingPhotoUri, setPendingPhotoUri] = useState<string | null>(null);
+  const [pendingPhotoUris, setPendingPhotoUris] = useState<string[]>([]);
+  const [pendingVideoUri, setPendingVideoUri] = useState<string | null>(null);
   const [showEvents, setShowEvents] = useState(false);
   const [mapEvents, setMapEvents] = useState<EventMarker[]>([]);
   const [filterModal, setFilterModal] = useState(false);
@@ -652,35 +653,82 @@ export default function CarteScreen() {
         );
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
-      if (result.canceled || !result.assets?.[0]) return;
-      setPendingPhotoUri(result.assets[0].uri);
-      setDogTagInput(myDogName || '');
-      setDogTagModal(true);
+      const photoResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsMultipleSelection: true,
+        selectionLimit: 3,
+      });
+      if (photoResult.canceled || !photoResult.assets?.length) return;
+      const uris = photoResult.assets.map((a: any) => a.uri);
+
+      const proceed = (videoUri: string | null) => {
+        setPendingPhotoUris(uris);
+        setPendingVideoUri(videoUri);
+        setDogTagInput(myDogName || '');
+        setDogTagModal(true);
+      };
+
+      Alert.alert(
+        'Ajouter une vidéo ?',
+        'Tu peux joindre une courte vidéo en plus (optionnel).',
+        [
+          { text: 'Non, publier', onPress: () => proceed(null) },
+          { text: 'Ajouter une vidéo', onPress: async () => {
+            try {
+              const vid = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 });
+              proceed(!vid.canceled && vid.assets?.[0]?.uri ? vid.assets[0].uri : null);
+            } catch { proceed(null); }
+          }},
+        ]
+      );
     } catch (e: any) {
       Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la galerie.');
     }
   }
 
   async function doUploadPhoto(nomChien: string | null) {
-    if (!pendingPhotoUri || !userId || !selectedLieu) return;
+    if (!pendingPhotoUris.length || !userId || !selectedLieu) return;
     setDogTagModal(false);
     setPhotoUploading(true);
-    const uri = pendingPhotoUri;
-    setPendingPhotoUri(null);
+    const uris = pendingPhotoUris;
+    const videoUri = pendingVideoUri;
+    setPendingPhotoUris([]);
+    setPendingVideoUri(null);
+    const groupId = (uris.length > 1 || videoUri) ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null;
     try {
-      const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
-      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
-      const path = `${userId}/${selectedLieu.id}-${Date.now()}.${ext}`;
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-      const { error: upErr } = await supabase.storage.from('lieu-photos').upload(path, decode(base64), { contentType });
-      if (upErr) { Alert.alert('Erreur upload', upErr.message); return; }
-      const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
-      const { error: insertErr } = await supabase.from('photos').insert({ lieu_id: selectedLieu.id, user_id: userId, url: publicUrl, nom_chien: nomChien || null });
-      if (insertErr) { Alert.alert('Erreur', insertErr.message); return; }
-      Alert.alert('Merci !', 'Ta photo sera visible après validation par notre équipe.');
+      for (const uri of uris) {
+        const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+        const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+        const path = `${userId}/${selectedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        const { error: upErr } = await supabase.storage.from('lieu-photos').upload(path, decode(base64), { contentType });
+        if (upErr) { Alert.alert('Erreur upload', upErr.message); return; }
+        const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+        const { error: insertErr } = await supabase.from('photos').insert({
+          lieu_id: selectedLieu.id, user_id: userId, url: publicUrl,
+          nom_chien: nomChien || null,
+          ...(groupId ? { group_id: groupId } : {}),
+        });
+        if (insertErr) { Alert.alert('Erreur', insertErr.message); return; }
+      }
+      if (videoUri) {
+        const ext = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
+        const path = `${userId}/${selectedLieu.id}-${Date.now()}.${ext}`;
+        const base64 = await FileSystem.readAsStringAsync(videoUri, { encoding: FileSystem.EncodingType.Base64 });
+        const { error: upErr } = await supabase.storage.from('lieu-videos').upload(path, decode(base64), { contentType: 'video/' + ext });
+        if (!upErr) {
+          const { data: { publicUrl } } = supabase.storage.from('lieu-videos').getPublicUrl(path);
+          await supabase.from('videos').insert({
+            lieu_id: selectedLieu.id, user_id: userId, url: publicUrl, validee: false,
+            ...(groupId ? { group_id: groupId } : {}),
+          });
+        }
+      }
+      const count = uris.length + (videoUri ? 1 : 0);
+      Alert.alert('Merci !', count > 1 ? 'Tes médias seront visibles après validation par notre équipe.' : 'Ta photo sera visible après validation par notre équipe.');
     } catch (e: any) {
-      Alert.alert('Erreur', e?.message || 'Impossible d\'envoyer la photo.');
+      Alert.alert('Erreur', e?.message || 'Impossible d\'envoyer les médias.');
     } finally {
       setPhotoUploading(false);
     }
@@ -1516,7 +1564,7 @@ export default function CarteScreen() {
           <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} activeOpacity={1} onPress={() => doUploadPhoto(null)} />
             <View style={styles.dogTagCard}>
-              <Text style={styles.dogTagModalTitle}>Ton chien est sur la photo ? 🐾</Text>
+              <Text style={styles.dogTagModalTitle}>Ton chien est sur {pendingPhotoUris.length > 1 ? 'ces photos' : 'la photo'} ? 🐾</Text>
               <Text style={styles.dogTagModalSub}>Optionnel — laisse vide si ce n'est pas le cas</Text>
               <TextInput
                 style={styles.dogTagInput}

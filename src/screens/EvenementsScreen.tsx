@@ -161,7 +161,6 @@ export default function EvenementsScreen() {
       max_participants: maxPart ? parseInt(maxPart) : null,
       payant,
       prix: payant && prix ? parseFloat(prix) : null,
-      created_by: myUserId,
       valide: false,
       actif: true,
       lat: eventLat,

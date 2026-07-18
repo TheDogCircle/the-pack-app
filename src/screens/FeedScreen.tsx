@@ -24,6 +24,7 @@ type FeedItem = {
   note?: number;
   commentaire?: string;
   photoUrl?: string;
+  photos?: { id: string; url: string; nomChien: string | null }[];
   nomChien?: string | null;
   nbAvis?: number;
   created_at: string;
@@ -82,8 +83,8 @@ export default function FeedScreen() {
         .in('user_id', ids).order('created_at', { ascending: false }).limit(30),
       supabase.from('favoris').select('id,created_at,user_id,lieu_id')
         .in('user_id', ids).order('created_at', { ascending: false }).limit(30),
-      supabase.from('photos').select('id,url,created_at,user_id,lieu_id,nom_chien')
-        .in('user_id', ids).eq('validee', true).order('created_at', { ascending: false }).limit(20),
+      supabase.from('photos').select('id,url,created_at,user_id,lieu_id,nom_chien,group_id')
+        .in('user_id', ids).eq('validee', true).order('created_at', { ascending: false }).limit(30),
       supabase.from('lieux').select('id,nom,ville,cat,note_moyenne,nb_avis,created_at')
         .eq('actif', true).gte('created_at', since30days)
         .order('created_at', { ascending: false }).limit(10),
@@ -126,13 +127,39 @@ export default function FeedScreen() {
         lieu: lieuMap[f.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         created_at: f.created_at,
       })),
-      ...(photoData || []).map((p: any) => ({
-        id: 'p-' + p.id, type: 'photo' as const,
-        lieuId: p.lieu_id,
-        user: { id: p.user_id, prenom: profilMap[p.user_id]?.prenom || 'Membre', avatar_url: profilMap[p.user_id]?.avatar_url || null, username: profilMap[p.user_id]?.username || null, ambassadeur: profilMap[p.user_id]?.ambassadeur || null },
-        lieu: lieuMap[p.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
-        photoUrl: p.url, nomChien: p.nom_chien || null, created_at: p.created_at,
-      })),
+      ...(() => {
+        const grouped: Record<string, any[]> = {};
+        const ungrouped: any[] = [];
+        (photoData || []).forEach((p: any) => {
+          if (p.group_id) {
+            if (!grouped[p.group_id]) grouped[p.group_id] = [];
+            grouped[p.group_id].push(p);
+          } else {
+            ungrouped.push(p);
+          }
+        });
+        return [
+          ...ungrouped.map((p: any) => ({
+            id: 'p-' + p.id, type: 'photo' as const,
+            lieuId: p.lieu_id,
+            user: { id: p.user_id, prenom: profilMap[p.user_id]?.prenom || 'Membre', avatar_url: profilMap[p.user_id]?.avatar_url || null, username: profilMap[p.user_id]?.username || null, ambassadeur: profilMap[p.user_id]?.ambassadeur || null },
+            lieu: lieuMap[p.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
+            photoUrl: p.url, nomChien: p.nom_chien || null, created_at: p.created_at,
+          })),
+          ...Object.entries(grouped).map(([gid, group]) => {
+            const first = group[0];
+            return {
+              id: 'pg-' + gid, type: 'photo' as const,
+              lieuId: first.lieu_id,
+              user: { id: first.user_id, prenom: profilMap[first.user_id]?.prenom || 'Membre', avatar_url: profilMap[first.user_id]?.avatar_url || null, username: profilMap[first.user_id]?.username || null, ambassadeur: profilMap[first.user_id]?.ambassadeur || null },
+              lieu: lieuMap[first.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
+              photoUrl: first.url, nomChien: first.nom_chien || null,
+              photos: group.map((p: any) => ({ id: p.id, url: p.url, nomChien: p.nom_chien || null })),
+              created_at: first.created_at,
+            };
+          }),
+        ];
+      })(),
       ...(newLieux || []).map((l: any) => ({
         id: 'l-' + l.id, type: 'lieu' as const,
         lieuId: l.id, isNew: true,
@@ -364,7 +391,45 @@ export default function FeedScreen() {
               {item.commentaire ? (
                 <Text style={styles.comment} numberOfLines={2}>{item.commentaire}</Text>
               ) : null}
-              {isPhoto && item.photoUrl ? (
+              {isPhoto && item.photos && item.photos.length > 1 ? (
+                <>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                    {item.photos.map((photo, idx) => (
+                      <TouchableOpacity
+                        key={photo.id}
+                        activeOpacity={0.85}
+                        style={{ marginRight: idx < item.photos!.length - 1 ? 6 : 0 }}
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          if (item.lieuId) { mapNavigation.setPendingLieu(item.lieuId); navigation.navigate('Tabs', { screen: 'Carte' }); }
+                        }}
+                      >
+                        <Image source={{ uri: photo.url }} style={styles.feedPhotoMulti} />
+                        {photo.nomChien && (
+                          <View style={styles.feedDogTag}>
+                            <Text style={styles.feedDogTagText}>🐾 {photo.nomChien}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={styles.likeBtn}
+                    onPress={(e) => { e.stopPropagation?.(); togglePhotoLike(item.photos![0].id); }}
+                  >
+                    <Ionicons
+                      name={photoLikedByMe.has(item.photos[0].id) ? 'heart' : 'heart-outline'}
+                      size={16}
+                      color={photoLikedByMe.has(item.photos[0].id) ? '#E05070' : colors.textMuted}
+                    />
+                    {(photoLikesCount[item.photos[0].id] || 0) > 0 && (
+                      <Text style={[styles.likeCount, photoLikedByMe.has(item.photos[0].id) && { color: '#E05070' }]}>
+                        {photoLikesCount[item.photos[0].id]}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : isPhoto && item.photoUrl ? (
                 <>
                   <TouchableOpacity
                     activeOpacity={0.85}
@@ -553,6 +618,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ivoryPale, padding: 8, borderRadius: 6, marginBottom: 4, lineHeight: 17,
   },
   feedPhoto: { width: '100%', height: 180, borderRadius: 10, marginTop: 6, backgroundColor: colors.border },
+  feedPhotoMulti: { width: 160, height: 160, borderRadius: 10, backgroundColor: colors.border },
   feedDogTag: {
     alignSelf: 'flex-start', marginTop: 5,
     backgroundColor: colors.bordeaux + '12', borderRadius: 10,
