@@ -1219,7 +1219,7 @@ export default function CarteScreen() {
             )}
 
             {/* Bouton ajouter photo (haut gauche) */}
-            <TouchableOpacity style={styles.ficheBtnAddPhoto} onPress={uploadPhoto} disabled={photoUploading}>
+            <TouchableOpacity style={[styles.ficheBtnAddPhoto, { top: insets.top + 12 }]} onPress={uploadPhoto} disabled={photoUploading}>
               {photoUploading
                 ? <ActivityIndicator size="small" color="#fff" />
                 : <Ionicons name="camera" size={16} color="#fff" />
@@ -1468,6 +1468,66 @@ export default function CarteScreen() {
             )}
           </ScrollView>
         </Animated.View>
+
+        {avisModal && (
+          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} pointerEvents="box-none">
+            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)' }]} onPress={() => setAvisModal(false)} activeOpacity={1} />
+            <View style={[styles.modalCard, { position: 'absolute', bottom: 0, left: 0, right: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{myAvis ? 'Modifier mon avis' : 'Laisser un avis'}</Text>
+                <TouchableOpacity onPress={() => setAvisModal(false)}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSubtitle} numberOfLines={1}>{selectedLieu?.nom}</Text>
+              <View style={styles.starsRow}>
+                {[1,2,3,4,5].map(i => (
+                  <TouchableOpacity key={i} onPress={() => setAvisNote(i)}>
+                    <Ionicons name={i <= avisNote ? 'star' : 'star-outline'} size={36} color={colors.terra} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput
+                style={styles.avisInput}
+                placeholder="Ton expérience avec ton chien… (optionnel)"
+                placeholderTextColor={colors.textMuted}
+                value={avisComment}
+                onChangeText={setAvisComment}
+                multiline numberOfLines={4} textAlignVertical="top"
+              />
+              <TouchableOpacity style={[styles.avisSubmit, (!avisNote || avisLoading) && styles.avisSubmitDisabled]} onPress={submitAvis} disabled={!avisNote || avisLoading}>
+                {avisLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Publier mon avis</Text>}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        )}
+
+        {dogTagModal && (
+          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : undefined} pointerEvents="box-none">
+            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)' }]} activeOpacity={1} onPress={() => doUploadPhoto(null)} />
+            <View style={[styles.dogTagCard, { position: 'absolute', bottom: 0, left: 0, right: 0 }]}>
+              <Text style={styles.dogTagModalTitle}>Ton chien est sur la photo ? 🐾</Text>
+              <Text style={styles.dogTagModalSub}>Optionnel — laisse vide si ce n'est pas le cas</Text>
+              <TextInput
+                style={styles.dogTagInput}
+                value={dogTagInput}
+                onChangeText={setDogTagInput}
+                placeholder="Nom du chien…"
+                placeholderTextColor={colors.textMuted}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => doUploadPhoto(dogTagInput.trim() || null)}
+              />
+              <TouchableOpacity style={styles.dogTagSubmit} onPress={() => doUploadPhoto(dogTagInput.trim() || null)}>
+                <Text style={styles.dogTagSubmitText}>Publier la photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => doUploadPhoto(null)} style={{ alignItems: 'center', paddingVertical: 8 }}>
+                <Text style={styles.dogTagSkip}>Passer</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        )}
+
       </Modal>
     );
   }
@@ -2151,39 +2211,6 @@ export default function CarteScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal laisser un avis */}
-      <Modal visible={avisModal} transparent animationType="slide">
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{myAvis ? 'Modifier mon avis' : 'Laisser un avis'}</Text>
-              <TouchableOpacity onPress={() => setAvisModal(false)}>
-                <Ionicons name="close" size={22} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.modalSubtitle} numberOfLines={1}>{selectedLieu?.nom}</Text>
-            <View style={styles.starsRow}>
-              {[1,2,3,4,5].map(i => (
-                <TouchableOpacity key={i} onPress={() => setAvisNote(i)}>
-                  <Ionicons name={i <= avisNote ? 'star' : 'star-outline'} size={36} color={colors.terra} />
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TextInput
-              style={styles.avisInput}
-              placeholder="Ton expérience avec ton chien… (optionnel)"
-              placeholderTextColor={colors.textMuted}
-              value={avisComment}
-              onChangeText={setAvisComment}
-              multiline numberOfLines={4} textAlignVertical="top"
-            />
-            <TouchableOpacity style={[styles.avisSubmit, (!avisNote || avisLoading) && styles.avisSubmitDisabled]} onPress={submitAvis} disabled={!avisNote || avisLoading}>
-              {avisLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Publier mon avis</Text>}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* Onboarding modal */}
       <Modal visible={onboardingVisible} transparent animationType="fade">
         <View style={styles.onboardingOverlay}>
@@ -2306,37 +2333,6 @@ export default function CarteScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
-      </Modal>
-
-      {/* Dog tag modal */}
-      <Modal visible={dogTagModal} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <TouchableOpacity style={styles.feedbackOverlay} activeOpacity={1} onPress={() => doUploadPhoto(null)}>
-            <TouchableOpacity style={styles.dogTagCard} activeOpacity={1} onPress={() => {}}>
-              <Text style={styles.dogTagModalTitle}>Ton chien est sur la photo ? 🐾</Text>
-              <Text style={styles.dogTagModalSub}>Optionnel — laisse vide si ce n'est pas le cas</Text>
-              <TextInput
-                style={styles.dogTagInput}
-                value={dogTagInput}
-                onChangeText={setDogTagInput}
-                placeholder="Nom du chien…"
-                placeholderTextColor={colors.textMuted}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={() => doUploadPhoto(dogTagInput.trim() || null)}
-              />
-              <TouchableOpacity
-                style={styles.dogTagSubmit}
-                onPress={() => doUploadPhoto(dogTagInput.trim() || null)}
-              >
-                <Text style={styles.dogTagSubmitText}>Publier la photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => doUploadPhoto(null)} style={{ alignItems: 'center', paddingVertical: 8 }}>
-                <Text style={styles.dogTagSkip}>Passer</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
       </Modal>
 
       {/* Feedback strip */}
