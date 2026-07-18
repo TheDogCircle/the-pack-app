@@ -641,7 +641,17 @@ export default function CarteScreen() {
     if (!selectedLieu) return;
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages de ton téléphone."); return; }
+      if (!perm.granted) {
+        Alert.alert(
+          'Accès aux photos requis',
+          "Autorise The Pack à accéder à ta galerie dans les Réglages.",
+          [
+            { text: 'Annuler', style: 'cancel' },
+            { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (result.canceled || !result.assets?.[0]) return;
       setPendingPhotoUri(result.assets[0].uri);
