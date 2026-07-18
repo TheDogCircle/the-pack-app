@@ -84,10 +84,12 @@ const FAV_FILTER_OPTS: { key: string; label: string; icon: IoniconsName; color: 
 type Lieu = {
   id: string; nom: string; lat: number; lng: number; cat: string; ville: string; adresse: string;
   note_moyenne?: number | null; nb_avis?: number | null;
+  chiens_salle?: boolean | null; chiens_terrasse?: boolean | null; espace_dedie?: boolean | null;
+  eau?: boolean | null; gamelles?: boolean | null; chiens_laches?: boolean | null; chiens_laisse?: boolean | null;
 };
 type LieuFull = Lieu & {
   departement: string | null; description: string | null; tel: string | null;
-  horaires: string | null; site_web: string | null;
+  horaires: string | null; site_web: string | null; instagram_url: string | null; tiktok_url: string | null;
   note_moyenne: number | null; nb_avis: number | null;
   chiens_salle: boolean | null; chiens_terrasse: boolean | null; espace_dedie: boolean | null;
   eau: boolean | null; gamelles: boolean | null; chiens_laches: boolean | null; chiens_laisse: boolean | null;
@@ -183,6 +185,10 @@ export default function CarteScreen() {
   const [pendingPhotoUri, setPendingPhotoUri] = useState<string | null>(null);
   const [showEvents, setShowEvents] = useState(false);
   const [mapEvents, setMapEvents] = useState<EventMarker[]>([]);
+  const [filterModal, setFilterModal] = useState(false);
+  const [filterMinNote, setFilterMinNote] = useState(0);
+  const [filterEquipements, setFilterEquipements] = useState<string[]>([]);
+  const filterAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -286,7 +292,7 @@ export default function CarteScreen() {
   async function fetchLieux(r: Region, cat: string | null) {
     setLoading(true);
     let query = supabase
-      .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis').eq('actif', true)
+      .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse').eq('actif', true)
       .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
       .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
       .limit(200);
@@ -839,15 +845,23 @@ export default function CarteScreen() {
   }, [lieux]);
 
   const clusters = useMemo(() => {
-    const zoom = Math.min(20, Math.max(0, Math.round(Math.log(360 / region.latitudeDelta) / Math.LN2)));
+    if (!region.latitudeDelta || !region.longitudeDelta ||
+        region.latitudeDelta <= 0 || region.longitudeDelta <= 0 ||
+        isNaN(region.latitude) || isNaN(region.longitude)) return [];
+    const rawZoom = Math.round(Math.log(360 / region.latitudeDelta) / Math.LN2);
+    const zoom = isFinite(rawZoom) ? Math.min(20, Math.max(0, rawZoom)) : 10;
     const bbox: [number, number, number, number] = [
       region.longitude - region.longitudeDelta / 2,
       region.latitude - region.latitudeDelta / 2,
       region.longitude + region.longitudeDelta / 2,
       region.latitude + region.latitudeDelta / 2,
     ];
-    const all = clusterIndex.getClusters(bbox, zoom);
-    return all.slice(0, 80);
+    try {
+      const all = clusterIndex.getClusters(bbox, zoom);
+      return all.slice(0, 80);
+    } catch {
+      return [];
+    }
   }, [clusterIndex, region]);
 
   function sortLieux(items: Lieu[]): Lieu[] {
@@ -857,6 +871,113 @@ export default function CarteScreen() {
         return haversine(userLat, userLng, a.lat, a.lng) - haversine(userLat, userLng, b.lat, b.lng);
       return 0;
     });
+  }
+
+  const EQUIP_MAP: Record<string, keyof Lieu> = {
+    chiens_terrasse: 'chiens_terrasse',
+    eau: 'eau',
+    chiens_salle: 'chiens_salle',
+    chiens_laches: 'chiens_laches',
+    chiens_laisse: 'chiens_laisse',
+    espace_dedie: 'espace_dedie',
+    gamelles: 'gamelles',
+  };
+
+  const filteredLieux = useMemo(() => {
+    return lieux.filter(l => {
+      if (filterMinNote > 0 && (l.note_moyenne ?? 0) < filterMinNote) return false;
+      for (const eq of filterEquipements) {
+        const col = EQUIP_MAP[eq];
+        if (col && !l[col]) return false;
+      }
+      return true;
+    });
+  }, [lieux, filterMinNote, filterEquipements]);
+
+  const filterActive = filterMinNote > 0 || filterEquipements.length > 0;
+
+  function openFilterModal() {
+    setFilterModal(true);
+    Animated.spring(filterAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+  }
+  function closeFilterModal() {
+    Animated.timing(filterAnim, { toValue: SCREEN_H, duration: 220, useNativeDriver: true }).start(() => setFilterModal(false));
+  }
+  function toggleEquip(key: string) {
+    setFilterEquipements(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  }
+  function resetFilters() { setFilterMinNote(0); setFilterEquipements([]); }
+
+  function renderFilterModal() {
+    if (!filterModal) return null;
+    const EQUIP_CHIPS = [
+      { key: 'chiens_terrasse', label: 'Terrasse', emoji: '🪑' },
+      { key: 'chiens_salle', label: 'Accepté en salle', emoji: '🐾' },
+      { key: 'eau', label: 'Gamelle d\'eau', emoji: '💧' },
+      { key: 'gamelles', label: 'Gamelles', emoji: '🍖' },
+      { key: 'chiens_laches', label: 'Sans laisse OK', emoji: '🐕' },
+      { key: 'espace_dedie', label: 'Espace dédié', emoji: '💚' },
+    ];
+    return (
+      <Modal visible transparent animationType="none" onRequestClose={closeFilterModal}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={closeFilterModal} />
+        <Animated.View style={[styles.filterSheet, { transform: [{ translateY: filterAnim }] }]}>
+          {/* Handle */}
+          <View style={styles.handleArea}>
+            <View style={styles.handle} />
+          </View>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14 }}>
+            <TouchableOpacity onPress={closeFilterModal} style={{ marginRight: 12 }}>
+              <Ionicons name="close" size={22} color={colors.bordeaux} />
+            </TouchableOpacity>
+            <Text style={styles.filterSheetTitle}>Filtres</Text>
+            <TouchableOpacity onPress={resetFilters} style={{ marginLeft: 'auto' }}>
+              <Text style={styles.filterSheetReset}>Réinit.</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+            {/* Note minimum */}
+            <Text style={styles.filterSectionLabel}>NOTE MINIMUM</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 24 }}>
+              {[1,2,3,4,5].map(n => (
+                <TouchableOpacity key={n} onPress={() => setFilterMinNote(filterMinNote === n ? 0 : n)}>
+                  <Ionicons name={n <= filterMinNote ? 'star' : 'star-outline'} size={32} color={n <= filterMinNote ? colors.terra : colors.border} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            {/* Équipements */}
+            <Text style={styles.filterSectionLabel}>ÉQUIPEMENTS</Text>
+            <View style={styles.filterChipsGrid}>
+              {EQUIP_CHIPS.map(eq => {
+                const active = filterEquipements.includes(eq.key);
+                return (
+                  <TouchableOpacity
+                    key={eq.key}
+                    style={[styles.filterEquipChip, active && styles.filterEquipChipActive]}
+                    onPress={() => toggleEquip(eq.key)}
+                  >
+                    <Text style={{ fontSize: 16 }}>{eq.emoji}</Text>
+                    <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{eq.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+          {/* CTA */}
+          <View style={{ paddingHorizontal: 20, paddingBottom: 32, paddingTop: 8 }}>
+            <TouchableOpacity
+              style={styles.filterCTA}
+              onPress={closeFilterModal}
+            >
+              <Text style={styles.filterCTAText}>
+                Afficher {filteredLieux.length} lieu{filteredLieux.length !== 1 ? 'x' : ''}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </Modal>
+    );
   }
 
   function favIcon(): IoniconsName {
@@ -888,7 +1009,7 @@ export default function CarteScreen() {
     const currentPhoto = photos[fichePhotoIdx] || null;
 
     return (
-      <>
+      <Modal visible transparent animationType="none" onRequestClose={closeFiche} statusBarTranslucent>
         <TouchableOpacity style={styles.overlay} onPress={closeFiche} activeOpacity={1} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY: Animated.add(sheetAnim, sheetPanY) }] }]}>
           <View style={styles.handleArea} {...sheetPanResponder.panHandlers}>
@@ -1079,6 +1200,24 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 ) : null}
 
+                {selectedLieu.instagram_url ? (
+                  <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(selectedLieu.instagram_url!)}>
+                    <Ionicons name="logo-instagram" size={15} color={colors.textMuted} />
+                    <Text style={[styles.infoText, { color: colors.terra }]} numberOfLines={1}>
+                      {selectedLieu.instagram_url.replace(/^https?:\/\/(www\.)?instagram\.com\//, '@').replace(/\/$/, '')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {selectedLieu.tiktok_url ? (
+                  <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(selectedLieu.tiktok_url!)}>
+                    <Ionicons name="logo-tiktok" size={15} color={colors.textMuted} />
+                    <Text style={[styles.infoText, { color: colors.terra }]} numberOfLines={1}>
+                      {selectedLieu.tiktok_url.replace(/^https?:\/\/(www\.)?tiktok\.com\//, '').replace(/\/$/, '')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
                 {/* Actions */}
                 <View style={styles.actions}>
                   <TouchableOpacity
@@ -1143,7 +1282,7 @@ export default function CarteScreen() {
             )}
           </ScrollView>
         </Animated.View>
-      </>
+      </Modal>
     );
   }
 
@@ -1251,7 +1390,7 @@ export default function CarteScreen() {
                 <Text style={[styles.sortPillLabel, sortBy === s.key && styles.sortPillLabelActive]}>{s.label}</Text>
               </TouchableOpacity>
             ))}
-            <Text style={styles.listCount}>{lieux.length} lieu{lieux.length !== 1 ? 'x' : ''}</Text>
+            <Text style={styles.listCount}>{filteredLieux.length} lieu{filteredLieux.length !== 1 ? 'x' : ''}</Text>
           </View>
 
           {loading ? (
@@ -1263,11 +1402,11 @@ export default function CarteScreen() {
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-              {[...new Set(lieux.map(l => l.cat))]
+              {[...new Set(filteredLieux.map(l => l.cat))]
                 .sort((a, b) => (CAT_CONFIG[a]?.label || '').localeCompare(CAT_CONFIG[b]?.label || '', 'fr'))
                 .map(cat => {
                   const cfg = CAT_CONFIG[cat] || CAT_CONFIG.autre;
-                  const catLieux = sortLieux(lieux.filter(l => l.cat === cat));
+                  const catLieux = sortLieux(filteredLieux.filter(l => l.cat === cat));
                   const expanded = expandedCats.includes(cat);
                   return (
                     <View key={cat}>
@@ -1348,6 +1487,12 @@ export default function CarteScreen() {
             : null
           }
           <View style={styles.searchDivider} />
+          <TouchableOpacity style={styles.listToggleBtn} onPress={() => openFilterModal()}>
+            <View>
+              <Ionicons name="options-outline" size={18} color={filterActive ? colors.terra : colors.bordeaux} />
+              {filterActive && <View style={styles.filterActiveDot} />}
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.listToggleBtn} onPress={() => setListView(v => !v)}>
             <Ionicons name={listView ? 'map-outline' : 'list-outline'} size={18} color={listView ? colors.terra : colors.bordeaux} />
           </TouchableOpacity>
@@ -1489,11 +1634,12 @@ export default function CarteScreen() {
           style={[styles.pointsPopup, { opacity: pointsAnimOp, transform: [{ translateY: pointsAnimY }] }]}
           pointerEvents="none"
         >
-          <Text style={styles.pointsPopupText}>+5 pts 🐾</Text>
+          <Text style={styles.pointsPopupText}>+50 pts 🐾</Text>
         </Animated.View>
       )}
 
       {renderSheet()}
+      {renderFilterModal()}
 
       {/* Lightbox photo */}
       <Modal visible={lightboxIdx !== null} transparent animationType="fade">
@@ -1864,10 +2010,10 @@ export default function CarteScreen() {
                 <Text style={styles.onboardingTitle}>Gagne des points !</Text>
                 <View style={{ gap: 8, width: '100%' }}>
                   {([
-                    ['🐾', 'Explorateur', '0 pts',   '#546E7A'],
-                    ['🥈', 'Silver',      '50 pts',  '#8E8E93'],
-                    ['🥇', 'Gold',        '200 pts', '#C4693A'],
-                    ['💎', 'Platinum',    '500 pts', '#5A7FA5'],
+                    ['🐾', 'Explorateur', '0 pts',    '#546E7A'],
+                    ['🥈', 'Silver',      '500 pts',  '#8E8E93'],
+                    ['🥇', 'Gold',        '2000 pts', '#C4693A'],
+                    ['💎', 'Platinum',    '5000 pts', '#5A7FA5'],
                   ] as [string, string, string, string][]).map(([emoji, nom, pts, color]) => (
                     <View key={nom} style={styles.onboardingLevelRow}>
                       <Text style={styles.onboardingLevelEmoji}>{emoji}</Text>
@@ -2592,4 +2738,25 @@ const styles = StyleSheet.create({
   eventModalJoinText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
   eventModalCancel: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff3e0', borderRadius: 14, padding: 13, marginTop: 4, borderWidth: 1, borderColor: '#ffcc80' },
   eventModalCancelText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#e65100' },
+  // Filter modal
+  filterSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: colors.ivoryPale, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: SCREEN_H * 0.85,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 20,
+  },
+  filterSheetTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, flex: 1, textAlign: 'center' },
+  filterSheetReset: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.textMuted },
+  filterSectionLabel: { fontFamily: 'DMSans_500Medium', fontSize: 10, letterSpacing: 0.12, color: colors.textMuted, marginBottom: 12, marginTop: 8 },
+  filterChipsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  filterEquipChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 10, paddingHorizontal: 14,
+    backgroundColor: colors.white, borderRadius: 50, borderWidth: 1, borderColor: colors.border,
+  },
+  filterEquipChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  filterEquipLabel: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
+  filterCTA: { backgroundColor: colors.bordeaux, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
+  filterCTAText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  filterActiveDot: { position: 'absolute', top: -2, right: -2, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.terra },
 });

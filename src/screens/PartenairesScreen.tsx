@@ -38,6 +38,7 @@ type Post = {
 type Partenaire = {
   id: string; nom: string; description: string | null;
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
+  instagram_url: string | null; tiktok_url: string | null;
 };
 
 // ── Brand detail modal ──────────────────────────────────────────────────────
@@ -61,7 +62,6 @@ function BrandModal({
 
   const otherPosts = posts.filter(p => p.type !== 'offre');
   const offerPosts = posts.filter(p => p.type === 'offre');
-  const orderedPosts = [...otherPosts, ...offerPosts];
 
   const imgW = width - 32;
   const halfW = (imgW - 8) / 2;
@@ -105,12 +105,26 @@ function BrandModal({
 
         {/* Body */}
         <View style={s.body}>
-          {partenaire.site_web ? (
-            <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.site_web!)}>
-              <Ionicons name="globe-outline" size={14} color={colors.terra} />
-              <Text style={s.siteLinkText}>Visiter le site →</Text>
-            </TouchableOpacity>
-          ) : null}
+          <View style={s.linksRow}>
+            {partenaire.site_web ? (
+              <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.site_web!)}>
+                <Ionicons name="globe-outline" size={14} color={colors.terra} />
+                <Text style={s.siteLinkText}>Site web</Text>
+              </TouchableOpacity>
+            ) : null}
+            {partenaire.instagram_url ? (
+              <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.instagram_url!)}>
+                <Ionicons name="logo-instagram" size={14} color={colors.terra} />
+                <Text style={s.siteLinkText}>Instagram</Text>
+              </TouchableOpacity>
+            ) : null}
+            {partenaire.tiktok_url ? (
+              <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.tiktok_url!)}>
+                <Ionicons name="logo-tiktok" size={14} color={colors.terra} />
+                <Text style={s.siteLinkText}>TikTok</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
           {partenaire.description ? (
             <Text style={s.story}>{partenaire.description}</Text>
@@ -137,11 +151,11 @@ function BrandModal({
             </View>
           )}
 
-          {/* Posts & offers */}
-          {orderedPosts.length > 0 ? (
+          {/* Actualités */}
+          {otherPosts.length > 0 ? (
             <>
-              <Text style={s.sectionTitle}>À découvrir</Text>
-              {orderedPosts.map(post => {
+              <Text style={s.sectionTitle}>Actualités</Text>
+              {otherPosts.map(post => {
                 const periode = buildPeriode(post);
                 const isRevealed = revealed[post.id];
                 return (
@@ -150,37 +164,60 @@ function BrandModal({
                       ? <Image source={{ uri: post.image_url }} style={s.postItemImg} resizeMode="cover" />
                       : null}
                     <View style={s.postItemBody}>
-                      <Text style={s.postItemType}>{TYPE_LABEL[post.type] || post.type}</Text>
                       <Text style={s.postItemTitle}>{post.titre}</Text>
                       {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
 
-                      {post.code_promo ? (
-                        isRevealed ? (
-                          <View style={s.codeBox}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={s.codeLabel}>Code promo</Text>
-                              <Text style={s.codeValue}>{post.code_promo}</Text>
-                            </View>
-                            <TouchableOpacity style={s.codeCopyBtn} onPress={() => copyCode(post.code_promo!)}>
-                              <Text style={s.codeCopyText}>Copier</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <TouchableOpacity
-                            style={s.revealBtn}
-                            onPress={() => setRevealed(r => ({ ...r, [post.id]: true }))}
-                          >
-                            <Ionicons name="lock-closed-outline" size={13} color={colors.ivory} />
-                            <Text style={s.revealBtnText}>Voir le code</Text>
+                      <View style={s.postItemFooter}>
+                        {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
+                        {post.lien ? (
+                          <TouchableOpacity style={s.ctaBtn} onPress={() => Linking.openURL(post.lien!)}>
+                            <Text style={s.ctaBtnText}>Voir</Text>
+                            <Ionicons name="arrow-forward" size={12} color={colors.ivory} />
                           </TouchableOpacity>
-                        )
+                        ) : null}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
+
+          {/* Offres du moment */}
+          {offerPosts.length > 0 ? (
+            <>
+              <View style={s.offerSectionHeader}>
+                <Ionicons name="pricetag" size={14} color={colors.terra} />
+                <Text style={s.offerSectionTitle}>Offres du moment</Text>
+              </View>
+              {offerPosts.map(post => {
+                const periode = buildPeriode(post);
+                return (
+                  <View key={post.id} style={s.offerCard}>
+                    {post.image_url
+                      ? <Image source={{ uri: post.image_url }} style={s.offerCardImg} resizeMode="cover" />
+                      : null}
+                    <View style={s.offerCardBody}>
+                      <Text style={s.offerCardTitle}>{post.titre}</Text>
+                      {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
+
+                      {post.code_promo ? (
+                        <TouchableOpacity
+                          style={s.mailBtn}
+                          onPress={() => Linking.openURL(
+                            `mailto:thepackdogclub@gmail.com?subject=Offre ${partenaire.nom}&body=Bonjour, je souhaite recevoir le code promo pour l'offre "${post.titre}".`
+                          )}
+                        >
+                          <Ionicons name="mail-outline" size={14} color={colors.ivory} />
+                          <Text style={s.revealBtnText}>Recevoir l'offre par mail</Text>
+                        </TouchableOpacity>
                       ) : null}
 
                       <View style={s.postItemFooter}>
                         {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
                         {post.lien ? (
                           <TouchableOpacity style={s.ctaBtn} onPress={() => Linking.openURL(post.lien!)}>
-                            <Text style={s.ctaBtnText}>Découvrir</Text>
+                            <Text style={s.ctaBtnText}>Profiter de l'offre</Text>
                             <Ionicons name="arrow-forward" size={12} color={colors.ivory} />
                           </TouchableOpacity>
                         ) : null}
@@ -426,7 +463,8 @@ const s = StyleSheet.create({
   heroSite: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.65)', marginTop: 3 },
 
   body: { padding: 20 },
-  siteLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 },
+  linksRow: { flexDirection: 'row', gap: 16, marginBottom: 14 },
+  siteLink: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   siteLinkText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
   story: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 24, marginBottom: 4 },
 
@@ -447,6 +485,26 @@ const s = StyleSheet.create({
     paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.border,
   },
 
+  // Offres section
+  offerSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    marginTop: 28, marginBottom: 14,
+    paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  offerSectionTitle: {
+    fontFamily: 'DMSans_500Medium', fontSize: 13, letterSpacing: 0.4,
+    textTransform: 'uppercase', color: colors.terra,
+  },
+  offerCard: {
+    backgroundColor: colors.white, borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1.5, borderColor: colors.terra,
+    marginBottom: 14,
+    shadowColor: colors.terra, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3,
+  },
+  offerCardImg: { width: '100%', height: 180 },
+  offerCardBody: { padding: 16, gap: 6 },
+  offerCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, lineHeight: 24 },
+
   // Post item
   postItem: {
     backgroundColor: colors.white, borderRadius: 14, overflow: 'hidden',
@@ -466,6 +524,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8, marginTop: 4,
   },
   revealBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+  mailBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start',
+    backgroundColor: colors.bordeaux, borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 9, marginTop: 6,
+  },
 
   codeBox: {
     flexDirection: 'row', alignItems: 'center', gap: 10,

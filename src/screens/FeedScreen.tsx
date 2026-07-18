@@ -36,7 +36,7 @@ type FeedItem = {
   type: 'avis' | 'favori' | 'membre' | 'photo' | 'lieu';
   lieuId?: string;
   isNew?: boolean;
-  user: { id: string; prenom: string; avatar_url: string | null; username?: string | null };
+  user: { id: string; prenom: string; avatar_url: string | null; username?: string | null; ambassadeur?: boolean | null };
   lieu: { nom: string; ville: string; cat: string };
   note?: number;
   commentaire?: string;
@@ -59,7 +59,8 @@ export default function FeedScreen() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'activite' | 'explorer' | 'membres' | 'messages'>('activite');
+  const [tab, setTab] = useState<'activite' | 'evenements' | 'membres' | 'messages'>('activite');
+  const [evenements, setEvenements] = useState<Evenement[]>([]);
   const [searchMembre, setSearchMembre] = useState('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [photoLikesCount, setPhotoLikesCount] = useState<Record<string, number>>({});
@@ -79,7 +80,7 @@ export default function FeedScreen() {
     if (tab === 'messages') return;
     setLoading(true);
     if (tab === 'activite') await loadActivite();
-    else if (tab === 'explorer') await loadExplorer();
+    else if (tab === 'evenements') await loadEvenements();
     else if (tab === 'membres') await loadMembres();
     setLoading(false);
   }
@@ -120,7 +121,7 @@ export default function FeedScreen() {
     ].filter(Boolean))];
 
     const [{ data: profils }, { data: lieux }] = await Promise.all([
-      allUserIds.length > 0 ? supabase.from('profils').select('id,prenom,avatar_url,username').in('id', allUserIds) : Promise.resolve({ data: [] }),
+      allUserIds.length > 0 ? supabase.from('profils').select('id,prenom,avatar_url,username,ambassadeur').in('id', allUserIds) : Promise.resolve({ data: [] }),
       allLieuIds.length > 0 ? supabase.from('lieux').select('id,nom,ville,cat').in('id', allLieuIds) : Promise.resolve({ data: [] }),
     ]);
 
@@ -133,7 +134,7 @@ export default function FeedScreen() {
       ...(avis || []).map((a: any) => ({
         id: 'a-' + a.id, type: 'avis' as const,
         lieuId: a.lieu_id,
-        user: { id: a.user_id, prenom: profilMap[a.user_id]?.prenom || 'Membre', avatar_url: profilMap[a.user_id]?.avatar_url || null, username: profilMap[a.user_id]?.username || null },
+        user: { id: a.user_id, prenom: profilMap[a.user_id]?.prenom || 'Membre', avatar_url: profilMap[a.user_id]?.avatar_url || null, username: profilMap[a.user_id]?.username || null, ambassadeur: profilMap[a.user_id]?.ambassadeur || null },
         lieu: lieuMap[a.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         note: a.note, commentaire: a.commentaire, created_at: a.created_at,
       })),
@@ -147,7 +148,7 @@ export default function FeedScreen() {
       ...(photoData || []).map((p: any) => ({
         id: 'p-' + p.id, type: 'photo' as const,
         lieuId: p.lieu_id,
-        user: { id: p.user_id, prenom: profilMap[p.user_id]?.prenom || 'Membre', avatar_url: profilMap[p.user_id]?.avatar_url || null, username: profilMap[p.user_id]?.username || null },
+        user: { id: p.user_id, prenom: profilMap[p.user_id]?.prenom || 'Membre', avatar_url: profilMap[p.user_id]?.avatar_url || null, username: profilMap[p.user_id]?.username || null, ambassadeur: profilMap[p.user_id]?.ambassadeur || null },
         lieu: lieuMap[p.lieu_id] || { nom: '?', ville: '', cat: 'autre' },
         photoUrl: p.url, nomChien: p.nom_chien || null, created_at: p.created_at,
       })),
@@ -191,21 +192,33 @@ export default function FeedScreen() {
     }
   }
 
-  async function loadExplorer() {
-    const { data } = await supabase.from('lieux')
-      .select('id,nom,ville,cat,note_moyenne,nb_avis')
-      .eq('actif', true)
-      .not('nb_avis', 'is', null)
-      .order('nb_avis', { ascending: false })
+  async function loadEvenements() {
+    const now = new Date().toISOString();
+    const { data: evts } = await supabase
+      .from('evenements')
+      .select('id,titre,description,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,image_url,profils(username,avatar_url)')
+      .eq('valide', true).eq('actif', true)
+      .gte('date_heure', now)
+      .order('date_heure', { ascending: true })
       .limit(30);
-    setItems((data || []).map((l: any) => ({
-      id: 'e-' + l.id, type: 'lieu' as const,
-      lieuId: l.id,
-      user: { id: l.id, prenom: l.nom, avatar_url: null },
-      lieu: { nom: l.nom, ville: l.ville || '', cat: l.cat || 'autre' },
-      note: l.note_moyenne ?? undefined,
-      nbAvis: l.nb_avis ?? undefined,
-      created_at: new Date().toISOString(),
+    const list = evts || [];
+    if (!list.length) { setEvenements([]); return; }
+    const ids = list.map((e: any) => e.id);
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    const [partsRes, ...counts] = await Promise.all([
+      userId
+        ? supabase.from('participations').select('event_id').eq('user_id', userId).in('event_id', ids)
+        : Promise.resolve({ data: null }),
+      ...ids.map((id: string) =>
+        supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
+      ),
+    ]);
+    const inscritIds = new Set(((partsRes as any).data || []).map((p: any) => p.event_id));
+    setEvenements(list.map((e: any, i: number) => ({
+      ...e,
+      nb_inscrits: (counts[i] as any).count || 0,
+      je_suis_inscrit: inscritIds.has(e.id),
     })));
   }
 
@@ -374,6 +387,7 @@ export default function FeedScreen() {
               <Text style={styles.text}>
                 <Text style={styles.bold}>{item.user.prenom}</Text>
                 {item.user.username ? <Text style={styles.username}> @{item.user.username}</Text> : null}
+                {item.user.ambassadeur ? <Text style={{ fontSize: 9, fontWeight: '700', color: '#C9A826' }}> ⭐</Text> : null}
                 {item.type === 'avis' ? ' a noté ' : item.type === 'photo' ? ' a partagé une photo de ' : ' a ajouté aux favoris '}
                 <Text
                   style={[styles.lieuName, item.lieuId && { textDecorationLine: 'underline' }]}
@@ -453,10 +467,10 @@ export default function FeedScreen() {
     <View style={styles.container}>
       <View style={styles.tabsWrap}>
         {([
-          { key: 'activite', label: 'Activité' },
-          { key: 'explorer', label: 'Explorer' },
-          { key: 'membres',  label: 'Membres' },
-          { key: 'messages', label: 'Chat' },
+          { key: 'activite',   label: 'Activité' },
+          { key: 'evenements', label: 'Événements' },
+          { key: 'membres',    label: 'Membres' },
+          { key: 'messages',   label: 'Chat' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key as any)}>
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
@@ -466,6 +480,52 @@ export default function FeedScreen() {
 
       {tab === 'messages' ? (
         <MessagerieScreen />
+      ) : tab === 'evenements' ? (
+        loading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
+          <FlatList
+            data={evenements}
+            keyExtractor={e => e.id}
+            contentContainerStyle={{ padding: 16, gap: 12 }}
+            ListEmptyComponent={<Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40, fontFamily: 'DMSans_400Regular' }}>Aucun événement à venir</Text>}
+            renderItem={({ item: e }) => {
+              const date = new Date(e.date_heure);
+              const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+              const heureStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+              return (
+                <View style={{ backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 3 }}>
+                  {e.image_url ? <Image source={{ uri: e.image_url }} style={{ width: '100%', height: 140 }} resizeMode="cover" /> : null}
+                  <View style={{ padding: 14 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <View style={{ backgroundColor: colors.terra + '18', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+                        <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra }}>{dateStr} · {heureStr}</Text>
+                      </View>
+                      {e.payant && e.prix ? (
+                        <View style={{ backgroundColor: colors.bordeaux + '12', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+                          <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux }}>{e.prix}€</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={{ fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 4 }}>{e.titre}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                      <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+                      <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text>
+                    </View>
+                    {e.description ? <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginBottom: 8 }} numberOfLines={2}>{e.description}</Text> : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted }}>
+                        {e.nb_inscrits || 0} inscrit{(e.nb_inscrits || 0) > 1 ? 's' : ''}
+                        {e.max_participants ? ` / ${e.max_participants}` : ''}
+                      </Text>
+                      {e.profils?.username ? (
+                        <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted }}>par @{e.profils.username}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        )
       ) : loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
@@ -501,7 +561,7 @@ export default function FeedScreen() {
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>🐾</Text>
               <Text style={styles.emptyText}>
-                {tab === 'activite' ? "Suis des membres pour voir leur activité ici." : tab === 'explorer' ? "Aucun lieu à afficher pour l'instant." : "Aucun membre pour l'instant."}
+                {tab === 'activite' ? "Suis des membres pour voir leur activité ici." : "Aucun membre pour l'instant."}
               </Text>
             </View>
           }

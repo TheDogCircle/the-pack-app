@@ -33,10 +33,10 @@ const RACES = [
 ];
 
 const NIVEAUX = [
-  { nom: 'Explorateur', emoji: '🌱', min: 0,   max: 49   },
-  { nom: 'Silver',      emoji: '🌿', min: 50,  max: 199  },
-  { nom: 'Gold',        emoji: '🌳', min: 200, max: 499  },
-  { nom: 'Platinum',    emoji: '🏆', min: 500, max: 9999 },
+  { nom: 'Explorateur', emoji: '🌱', min: 0,    max: 499   },
+  { nom: 'Silver',      emoji: '🌿', min: 500,  max: 1999  },
+  { nom: 'Gold',        emoji: '🌳', min: 2000, max: 4999  },
+  { nom: 'Platinum',    emoji: '🏆', min: 5000, max: 99999 },
 ];
 
 function getNiveau(pts: number) {
@@ -55,8 +55,8 @@ const CAT_EMOJI: Record<string, string> = {
 type Profil = {
   id: string; prenom: string | null; username: string | null; ville: string | null;
   nom_chien: string | null; race_chien: string | null; avatar_url: string | null;
-  bio: string | null; points: number;
-  notif_follow: boolean | null; notif_lieu_nearby: boolean | null; notif_messages: boolean | null;
+  bio: string | null; points: number; ambassadeur?: boolean | null;
+  notif_follow: boolean | null; notif_lieu_nearby: boolean | null; notif_messages: boolean | null; notif_suggestion_validee: boolean | null;
 };
 type LieuMini = { id: string; nom: string; ville: string; cat: string };
 type FavItem = { id: string; lieu_id: string; liste: string; lieux: LieuMini | null };
@@ -82,6 +82,7 @@ export default function ProfilScreen() {
   const [notifFollow, setNotifFollow] = useState(true);
   const [notifLieuNearby, setNotifLieuNearby] = useState(true);
   const [notifMessages, setNotifMessages] = useState(true);
+  const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
   const [favFilter, setFavFilter] = useState<'tous' | 'favori' | 'a_tester' | 'deja_teste'>('tous');
   const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
@@ -128,6 +129,7 @@ export default function ProfilScreen() {
       setNotifFollow(p.notif_follow ?? true);
       setNotifLieuNearby(p.notif_lieu_nearby ?? true);
       setNotifMessages(p.notif_messages ?? true);
+      setNotifSuggestionValidee(p.notif_suggestion_validee ?? true);
     }
 
     const favLieuIds = [...new Set((favsRaw || []).map((f: any) => f.lieu_id).filter(Boolean))];
@@ -228,12 +230,13 @@ export default function ProfilScreen() {
     setFollowListLoading(false);
   }
 
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages', value: boolean) {
+  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee', value: boolean) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     if (key === 'notif_follow') setNotifFollow(value);
     else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
-    else setNotifMessages(value);
+    else if (key === 'notif_messages') setNotifMessages(value);
+    else setNotifSuggestionValidee(value);
     await supabase.from('profils').update({ [key]: value }).eq('id', session.user.id);
   }
 
@@ -253,7 +256,14 @@ export default function ProfilScreen() {
           </View>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
+            {profil?.ambassadeur ? (
+              <View style={{ backgroundColor: '#C9A826', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                <Text style={{ color: 'white', fontSize: 9, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' }}>⭐ Ambassadeur·ice</Text>
+              </View>
+            ) : null}
+          </View>
           {profil?.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
           {profil?.ville ? <Text style={styles.ville}>{profil.ville}</Text> : null}
           {(profil?.nom_chien || profil?.race_chien) ? (
@@ -417,7 +427,7 @@ export default function ProfilScreen() {
                 thumbColor={colors.ivory}
               />
             </View>
-            <View style={[styles.notifRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.notifRow}>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={styles.notifLabel}>Messages</Text>
                 <Text style={styles.notifSub}>Nouveaux messages reçus dans tes conversations</Text>
@@ -425,6 +435,18 @@ export default function ProfilScreen() {
               <Switch
                 value={notifMessages}
                 onValueChange={v => toggleNotif('notif_messages', v)}
+                trackColor={{ false: colors.border, true: colors.terra }}
+                thumbColor={colors.ivory}
+              />
+            </View>
+            <View style={[styles.notifRow, { borderBottomWidth: 0 }]}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.notifLabel}>Lieu suggéré validé</Text>
+                <Text style={styles.notifSub}>Quand un lieu que tu as proposé est publié sur la carte</Text>
+              </View>
+              <Switch
+                value={notifSuggestionValidee}
+                onValueChange={v => toggleNotif('notif_suggestion_validee', v)}
                 trackColor={{ false: colors.border, true: colors.terra }}
                 thumbColor={colors.ivory}
               />

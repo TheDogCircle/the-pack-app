@@ -14,11 +14,24 @@ import {
   DMSans_500Medium,
 } from '@expo-google-fonts/dm-sans';
 import * as Notifications from 'expo-notifications';
+import * as Updates from 'expo-updates';
 import Navigation, { navigationRef } from './src/navigation';
 import { mapNavigation } from './src/lib/mapNavigation';
 
+async function checkForOTAUpdate() {
+  try {
+    if (!Updates.isEnabled) return;
+    const update = await Updates.checkForUpdateAsync();
+    if (update.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    }
+  } catch (_) {}
+}
+
 export default function App() {
   useEffect(() => {
+    checkForOTAUpdate();
     const sub = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data as any;
       if (data?.type === 'new_lieu' && data?.lieuId) {

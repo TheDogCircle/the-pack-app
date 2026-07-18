@@ -10,8 +10,8 @@ import { useSession } from '../hooks/useSession';
 import AuthScreen from '../screens/AuthScreen';
 import CarteScreen from '../screens/CarteScreen';
 import FeedScreen from '../screens/FeedScreen';
-import EvenementsScreen from '../screens/EvenementsScreen';
 import PartenairesScreen from '../screens/PartenairesScreen';
+import ExplorerScreen from '../screens/ExplorerScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -33,10 +33,11 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }> = {
+  Explorer:    { active: 'compass',         inactive: 'compass-outline' },
   Carte:       { active: 'map',             inactive: 'map-outline' },
   Evenements:  { active: 'calendar',        inactive: 'calendar-outline' },
   Meute:       { active: 'people',          inactive: 'people-outline' },
-  Services:    { active: 'storefront',       inactive: 'storefront-outline' },
+  Services:    { active: 'ribbon',          inactive: 'ribbon-outline' },
   Profil:      { active: 'person-circle',   inactive: 'person-circle-outline' },
 };
 
@@ -129,16 +130,16 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
-      <Tab.Screen name="Evenements" component={EvenementsScreen} options={{ title: 'Événements' }} />
-      <Tab.Screen
-        name="Services" component={PartenairesScreen}
-        options={{ title: 'Services', tabBarBadge: partBadge ? ' ' : undefined }}
-        listeners={{ focus: () => setPartBadge(false) }}
-      />
+      <Tab.Screen name="Explorer"   component={ExplorerScreen}   options={{ title: 'Explorer', headerShown: false }} />
       <Tab.Screen
         name="Meute" component={FeedScreen}
         options={{ title: 'Meute', tabBarBadge: meuteBadge ? ' ' : undefined }}
         listeners={{ focus: () => setMeuteBadge(false) }}
+      />
+      <Tab.Screen
+        name="Services" component={PartenairesScreen}
+        options={{ title: 'Marques', tabBarBadge: partBadge ? ' ' : undefined }}
+        listeners={{ focus: () => setPartBadge(false) }}
       />
       <Tab.Screen name="Profil" component={ProfilScreen} options={{ title: 'Mon profil' }} />
     </Tab.Navigator>
