@@ -1527,6 +1527,54 @@ export default function CarteScreen() {
           </ScrollView>
         </Animated.View>
 
+        {enrichModal && (
+          <View style={StyleSheet.absoluteFillObject}>
+            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }]} onPress={() => setEnrichModal(false)} activeOpacity={1} />
+            <View style={[styles.modalCard, { position: 'absolute', bottom: 0, left: 0, right: 0, maxHeight: SCREEN_H * 0.85, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+              <TouchableOpacity style={styles.modalCloseFixed} onPress={() => setEnrichModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { paddingRight: 36 }]}>Compléter ou corriger</Text>
+              <Text style={styles.modalSubtitle} numberOfLines={1}>{selectedLieu?.nom}</Text>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Type de contribution</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {([['info_manquante', 'Infos manquantes'], ['erreur', 'Erreur à corriger']] as const).map(([v, l]) => (
+                      <TouchableOpacity key={v} style={[styles.catPill, enrichType === v && { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux }]} onPress={() => setEnrichType(v)}>
+                        <Text style={[styles.catPillLabel, enrichType === v && styles.catPillLabelActive]}>{l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Description du lieu</Text>
+                  <TextInput style={[styles.proposeInput, { minHeight: 60, textAlignVertical: 'top' }]} value={enrichDesc} onChangeText={setEnrichDesc} placeholder="Ex : terrasse couverte, chiens admis en salle…" placeholderTextColor={colors.textMuted} multiline />
+                </View>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Téléphone</Text>
+                  <TextInput style={styles.proposeInput} value={enrichTel} onChangeText={setEnrichTel} placeholder="01 23 45 67 89" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
+                </View>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Site web</Text>
+                  <TextInput style={styles.proposeInput} value={enrichSite} onChangeText={setEnrichSite} placeholder="https://…" placeholderTextColor={colors.textMuted} autoCapitalize="none" />
+                </View>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Horaires</Text>
+                  <TextInput style={styles.proposeInput} value={enrichHoraires} onChangeText={setEnrichHoraires} placeholder="Ex : Lun-Ven 9h-18h, fermé dimanche" placeholderTextColor={colors.textMuted} />
+                </View>
+                <View style={styles.proposeField}>
+                  <Text style={styles.proposeLabel}>Autre remarque</Text>
+                  <TextInput style={[styles.proposeInput, { minHeight: 60, textAlignVertical: 'top' }]} value={enrichNote} onChangeText={setEnrichNote} placeholder="Toute info utile…" placeholderTextColor={colors.textMuted} multiline />
+                </View>
+                <TouchableOpacity style={[styles.avisSubmit, enrichLoading && styles.avisSubmitDisabled]} onPress={submitEnrich} disabled={enrichLoading}>
+                  {enrichLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Envoyer</Text>}
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        )}
+
         {avisModal && (
           <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setAvisModal(false)} activeOpacity={1} />
@@ -2222,53 +2270,6 @@ export default function CarteScreen() {
       </Modal>
 
       {/* Modal compléter la fiche */}
-      <Modal visible={enrichModal} transparent animationType="slide">
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={[styles.modalCard, { maxHeight: SCREEN_H * 0.85 }]}>
-            <TouchableOpacity style={styles.modalCloseFixed} onPress={() => setEnrichModal(false)}>
-              <Ionicons name="close" size={22} color={colors.textMuted} />
-            </TouchableOpacity>
-            <Text style={[styles.modalTitle, { paddingRight: 36 }]}>Compléter ou corriger</Text>
-            <Text style={styles.modalSubtitle} numberOfLines={1}>{selectedLieu?.nom}</Text>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Type de contribution</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {([['info_manquante', 'Infos manquantes'], ['erreur', 'Erreur à corriger']] as const).map(([v, l]) => (
-                    <TouchableOpacity key={v} style={[styles.catPill, enrichType === v && { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux }]} onPress={() => setEnrichType(v)}>
-                      <Text style={[styles.catPillLabel, enrichType === v && styles.catPillLabelActive]}>{l}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Description du lieu</Text>
-                <TextInput style={[styles.proposeInput, { minHeight: 60, textAlignVertical: 'top' }]} value={enrichDesc} onChangeText={setEnrichDesc} placeholder="Ex : terrasse couverte, chiens admis en salle…" placeholderTextColor={colors.textMuted} multiline />
-              </View>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Téléphone</Text>
-                <TextInput style={styles.proposeInput} value={enrichTel} onChangeText={setEnrichTel} placeholder="01 23 45 67 89" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
-              </View>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Site web</Text>
-                <TextInput style={styles.proposeInput} value={enrichSite} onChangeText={setEnrichSite} placeholder="https://…" placeholderTextColor={colors.textMuted} autoCapitalize="none" />
-              </View>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Horaires</Text>
-                <TextInput style={styles.proposeInput} value={enrichHoraires} onChangeText={setEnrichHoraires} placeholder="Ex : Lun-Ven 9h-18h, fermé dimanche" placeholderTextColor={colors.textMuted} />
-              </View>
-              <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Autre remarque</Text>
-                <TextInput style={[styles.proposeInput, { minHeight: 60, textAlignVertical: 'top' }]} value={enrichNote} onChangeText={setEnrichNote} placeholder="Toute info utile…" placeholderTextColor={colors.textMuted} multiline />
-              </View>
-              <TouchableOpacity style={[styles.avisSubmit, enrichLoading && styles.avisSubmitDisabled]} onPress={submitEnrich} disabled={enrichLoading}>
-                {enrichLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Envoyer</Text>}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* Onboarding modal */}
       <Modal visible={onboardingVisible} transparent animationType="fade">
         <View style={styles.onboardingOverlay}>
