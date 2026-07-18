@@ -392,79 +392,84 @@ export default function CarteScreen() {
       return;
     }
 
-    if (lieuData) setSelectedLieu(lieuData);
-    const favRow = (favData as any)?.data;
-    setFavListe(favRow ? (favRow.liste || 'favori') : null);
-    const myAvisRow = (myAvisData as any)?.data;
-    setMyAvis(myAvisRow ? { note: myAvisRow.note, commentaire: myAvisRow.commentaire } : null);
+    try {
+      if (lieuData) setSelectedLieu(lieuData);
+      const favRow = (favData as any)?.data;
+      setFavListe(favRow ? (favRow.liste || 'favori') : null);
+      const myAvisRow = (myAvisData as any)?.data;
+      setMyAvis(myAvisRow ? { note: myAvisRow.note, commentaire: myAvisRow.commentaire } : null);
 
-    // Photos avec likes + auteur
-    const photoIds = (photosRaw || []).map((p: any) => p.id);
-    if (photoIds.length > 0) {
-      const photoUserIds = [...new Set((photosRaw || []).map((p: any) => p.user_id).filter(Boolean))];
-      const [{ data: allLikes }, { data: myLikes }, { data: photoAuthors }] = await Promise.all([
-        supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
-        userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
-        photoUserIds.length > 0 ? supabase.from('profils').select('id,username').in('id', photoUserIds) : Promise.resolve({ data: [] }),
-      ]);
-      const countMap: Record<string, number> = {};
-      (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
-      const mySet = new Set((myLikes || []).map((l: any) => l.photo_id));
-      const authorMap: Record<string, string | null> = {};
-      (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username || null; });
-      setPhotos((photosRaw || []).map((p: any) => ({
-        id: p.id, url: p.url,
-        likeCount: countMap[p.id] || 0,
-        likedByMe: mySet.has(p.id),
-        authorUsername: authorMap[p.user_id] || null,
-        nomChien: p.nom_chien || null,
-      })));
-    } else {
-      setPhotos([]);
-      // Fallback photo Google pour les lieux sans photo communauté (sauf vétos)
-      if (lieuData) {
-        if (lieuData.google_photo_url) {
-          setGooglePhotoUrl(lieuData.google_photo_url);
+      // Photos avec likes + auteur
+      const photoIds = (photosRaw || []).map((p: any) => p.id);
+      if (photoIds.length > 0) {
+        const photoUserIds = [...new Set((photosRaw || []).map((p: any) => p.user_id).filter(Boolean))];
+        const [{ data: allLikes }, { data: myLikes }, { data: photoAuthors }] = await Promise.all([
+          supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
+          userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
+          photoUserIds.length > 0 ? supabase.from('profils').select('id,username').in('id', photoUserIds) : Promise.resolve({ data: [] }),
+        ]);
+        const countMap: Record<string, number> = {};
+        (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
+        const mySet = new Set((myLikes || []).map((l: any) => l.photo_id));
+        const authorMap: Record<string, string | null> = {};
+        (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username || null; });
+        setPhotos((photosRaw || []).map((p: any) => ({
+          id: p.id, url: p.url,
+          likeCount: countMap[p.id] || 0,
+          likedByMe: mySet.has(p.id),
+          authorUsername: authorMap[p.user_id] || null,
+          nomChien: p.nom_chien || null,
+        })));
+      } else {
+        setPhotos([]);
+        // Fallback photo Google pour les lieux sans photo communauté
+        if (lieuData) {
+          if (lieuData.google_photo_url) {
+            setGooglePhotoUrl(lieuData.google_photo_url);
+          } else {
+            setGooglePhotoUrl(null);
+            const lieuId = lieuData.id;
+            (async () => {
+              try {
+                const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
+                  body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
+                });
+                const json = await res.json();
+                const photoName = json.places?.[0]?.photos?.[0]?.name;
+                if (photoName) {
+                  const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
+                  setGooglePhotoUrl(url);
+                  supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuId).then(() => {});
+                }
+              } catch {}
+            })();
+          }
         } else {
           setGooglePhotoUrl(null);
-          (async () => {
-            try {
-              const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
-                body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
-              });
-              const json = await res.json();
-              const photoName = json.places?.[0]?.photos?.[0]?.name;
-              if (photoName) {
-                const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-                setGooglePhotoUrl(url);
-                supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuData.id);
-              }
-            } catch {}
-          })();
         }
-      } else {
-        setGooglePhotoUrl(null);
       }
-    }
 
-    // Avis + profils séparément (comme le site web)
-    if ((avisRaw || []).length > 0) {
-      const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
-      const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
-      const profilMap: Record<string, { prenom: string; username: string | null; ambassadeur?: boolean | null }> = {};
-      (profils || []).forEach((p: any) => { profilMap[p.id] = { prenom: p.prenom || 'Membre', username: p.username || null, ambassadeur: p.ambassadeur || null }; });
-      setFicheAvis((avisRaw || []).map((a: any) => ({
-        id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
-        prenom: profilMap[a.user_id]?.prenom || 'Membre',
-        username: profilMap[a.user_id]?.username || null,
-        reponse_pro: a.reponse_pro || null,
-        ambassadeur: profilMap[a.user_id]?.ambassadeur || null,
-      })));
+      // Avis + profils séparément
+      if ((avisRaw || []).length > 0) {
+        const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
+        const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
+        const profilMap: Record<string, { prenom: string; username: string | null; ambassadeur?: boolean | null }> = {};
+        (profils || []).forEach((p: any) => { profilMap[p.id] = { prenom: p.prenom || 'Membre', username: p.username || null, ambassadeur: p.ambassadeur || null }; });
+        setFicheAvis((avisRaw || []).map((a: any) => ({
+          id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
+          prenom: profilMap[a.user_id]?.prenom || 'Membre',
+          username: profilMap[a.user_id]?.username || null,
+          reponse_pro: a.reponse_pro || null,
+          ambassadeur: profilMap[a.user_id]?.ambassadeur || null,
+        })));
+      }
+    } catch (_) {
+      // erreur silencieuse, on affiche quand même ce qu'on a
+    } finally {
+      setSheetLoading(false);
     }
-
-    setSheetLoading(false);
   }
 
   function closeFiche() {
