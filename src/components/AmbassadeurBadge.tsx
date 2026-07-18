@@ -2,6 +2,14 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+export function ExplorateurBadge() {
+  return (
+    <View style={styles.dotExp}>
+      <Ionicons name="compass" size={8} color="#fff" />
+    </View>
+  );
+}
+
 export function AmbassadeurBadge({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   if (size === 'md') {
     return (
@@ -22,6 +30,12 @@ const styles = StyleSheet.create({
   dot: {
     width: 15, height: 15, borderRadius: 8,
     backgroundColor: '#C9A826',
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 4,
+  },
+  dotExp: {
+    width: 15, height: 15, borderRadius: 8,
+    backgroundColor: '#3a7bd5',
     alignItems: 'center', justifyContent: 'center',
     marginLeft: 4,
   },

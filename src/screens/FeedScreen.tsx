@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
-import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
+import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
 import { mapNavigation } from '../lib/mapNavigation';
 import MessagerieScreen from './MessagerieScreen';
 
@@ -19,7 +19,7 @@ type FeedItem = {
   type: 'avis' | 'favori' | 'membre' | 'photo' | 'lieu';
   lieuId?: string;
   isNew?: boolean;
-  user: { id: string; prenom: string; avatar_url: string | null; username?: string | null; ambassadeur?: boolean | null };
+  user: { id: string; prenom: string; avatar_url: string | null; username?: string | null; ambassadeur?: boolean | null; explorateur?: boolean | null };
   lieu: { nom: string; ville: string; cat: string };
   note?: number;
   commentaire?: string;
@@ -179,11 +179,13 @@ export default function FeedScreen() {
     const myId = session.user.id;
     setMyUserId(myId);
 
-    const [{ data: membresData }, { data: myFollowsData }] = await Promise.all([
-      supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien')
+    const [{ data: membresData }, { data: myFollowsData }, { data: explorateurRows }] = await Promise.all([
+      supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur')
         .neq('id', myId).not('prenom', 'is', null).limit(50),
       supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
+      supabase.from('explorateurs').select('user_id').eq('statut', 'actif').not('user_id', 'is', null),
     ]);
+    const explorateurIds = new Set((explorateurRows || []).map((e: any) => e.user_id));
 
     if (!membresData?.length) { setItems([]); return; }
 
@@ -204,7 +206,7 @@ export default function FeedScreen() {
     setMembresMutual(mutualMap);
     setItems(membresData.map((p: any) => ({
       id: 'm-' + p.id, type: 'membre' as const,
-      user: { id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url },
+      user: { id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ambassadeur: p.ambassadeur || null, explorateur: explorateurIds.has(p.id) },
       lieu: { nom: p.nom_chien || '', ville: p.ville || '', cat: 'autre' },
       created_at: new Date().toISOString(),
       extra: p.ville,
@@ -321,7 +323,11 @@ export default function FeedScreen() {
         <View style={styles.body}>
           {isMembre ? (
             <>
-              <Text style={styles.memberName}>{item.user.prenom}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.memberName}>{item.user.prenom}</Text>
+                {item.user.ambassadeur ? <AmbassadeurBadge /> : null}
+                {item.user.explorateur ? <ExplorateurBadge /> : null}
+              </View>
               {item.lieu.ville ? <Text style={styles.ville}>{item.lieu.ville}</Text> : null}
               {item.lieu.nom ? <Text style={styles.dogInfo}>🐾 {item.lieu.nom}</Text> : null}
               {(membresMutual[item.user.id] || 0) > 0 && (
