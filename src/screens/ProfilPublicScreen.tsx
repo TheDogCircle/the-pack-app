@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, ActivityIndicator, Dimensions, Modal, FlatList,
+  Image, ActivityIndicator, Dimensions, Modal, FlatList, Linking,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +35,7 @@ type Profil = {
   ville: string | null; bio: string | null; avatar_url: string | null;
   nom_chien: string | null; race_chien: string | null; points: number;
   ambassadeur?: boolean | null;
+  instagram_url?: string | null; tiktok_url?: string | null;
 };
 type AvisItem = {
   id: string; note: number; commentaire: string | null; created_at: string; lieu_id: string;
@@ -153,7 +154,9 @@ export default function ProfilPublicScreen() {
   }
 
   function goToLieu(lieuId: string) {
-    mapNavigation.setPendingLieu(lieuId);
+    mapNavigation.setPendingLieu(lieuId, () => {
+      navigation.navigate('ProfilPublic', { userId, prenom: profil?.prenom || '', avatarUrl: profil?.avatar_url });
+    });
     navigation.navigate('Tabs', { screen: 'Carte' });
   }
 
@@ -242,6 +245,24 @@ export default function ProfilPublicScreen() {
             <Text style={styles.dogText}>
               {[profil.nom_chien, profil.race_chien].filter(Boolean).join(' · ')}
             </Text>
+          </View>
+        ) : null}
+
+        {/* Réseaux sociaux */}
+        {(profil.instagram_url || profil.tiktok_url) ? (
+          <View style={styles.socialRow}>
+            {profil.instagram_url ? (
+              <TouchableOpacity style={styles.socialBtn} onPress={() => Linking.openURL(profil.instagram_url!)}>
+                <Ionicons name="logo-instagram" size={14} color={colors.terraPale} />
+                <Text style={styles.socialBtnText}>Instagram</Text>
+              </TouchableOpacity>
+            ) : null}
+            {profil.tiktok_url ? (
+              <TouchableOpacity style={styles.socialBtn} onPress={() => Linking.openURL(profil.tiktok_url!)}>
+                <Ionicons name="logo-tiktok" size={14} color={colors.terraPale} />
+                <Text style={styles.socialBtnText}>TikTok</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -439,6 +460,9 @@ const styles = StyleSheet.create({
   dogRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dogEmoji: { fontSize: 16 },
   dogText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: 'rgba(245,239,224,0.7)' },
+  socialRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  socialBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(245,239,224,0.1)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  socialBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terraPale },
 
   // Tabs
   tabs: { flexDirection: 'row', backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },

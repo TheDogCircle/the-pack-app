@@ -473,6 +473,7 @@ export default function CarteScreen() {
   }
 
   function closeFiche() {
+    const returnCallback = mapNavigation.consumeReturn();
     setPrevSelectedId(selectedLieu?.id ?? null);
     if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
     markerResetTimer.current = setTimeout(() => setPrevSelectedId(null), 600);
@@ -485,6 +486,7 @@ export default function CarteScreen() {
       setFavListe(null);
       setMyAvis(null);
       setGooglePhotoUrl(null);
+      if (returnCallback) returnCallback();
     });
   }
 
@@ -637,13 +639,17 @@ export default function CarteScreen() {
   async function uploadPhoto() {
     if (!userId) { showLoginPrompt(); return; }
     if (!selectedLieu) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages."); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true, aspect: [4, 3] });
-    if (result.canceled) return;
-    setPendingPhotoUri(result.assets[0].uri);
-    setDogTagInput(myDogName || '');
-    setDogTagModal(true);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages de ton téléphone."); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+      if (result.canceled || !result.assets?.[0]) return;
+      setPendingPhotoUri(result.assets[0].uri);
+      setDogTagInput(myDogName || '');
+      setDogTagModal(true);
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la galerie.');
+    }
   }
 
   async function doUploadPhoto(nomChien: string | null) {
@@ -652,16 +658,22 @@ export default function CarteScreen() {
     setPhotoUploading(true);
     const uri = pendingPhotoUri;
     setPendingPhotoUri(null);
-    const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
-    const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
-    const path = `${userId}/${selectedLieu.id}-${Date.now()}.${ext}`;
-    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-    const { error: upErr } = await supabase.storage.from('lieu-photos').upload(path, decode(base64), { contentType });
-    if (upErr) { setPhotoUploading(false); Alert.alert('Erreur', upErr.message); return; }
-    const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
-    await supabase.from('photos').insert({ lieu_id: selectedLieu.id, user_id: userId, url: publicUrl, nom_chien: nomChien || null });
-    setPhotoUploading(false);
-    Alert.alert('Merci !', 'Ta photo sera visible après validation par notre équipe.');
+    try {
+      const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const path = `${userId}/${selectedLieu.id}-${Date.now()}.${ext}`;
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const { error: upErr } = await supabase.storage.from('lieu-photos').upload(path, decode(base64), { contentType });
+      if (upErr) { Alert.alert('Erreur upload', upErr.message); return; }
+      const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+      const { error: insertErr } = await supabase.from('photos').insert({ lieu_id: selectedLieu.id, user_id: userId, url: publicUrl, nom_chien: nomChien || null });
+      if (insertErr) { Alert.alert('Erreur', insertErr.message); return; }
+      Alert.alert('Merci !', 'Ta photo sera visible après validation par notre équipe.');
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Impossible d\'envoyer la photo.');
+    } finally {
+      setPhotoUploading(false);
+    }
   }
 
   async function submitAvis() {
@@ -1469,9 +1481,11 @@ export default function CarteScreen() {
         style={styles.map}
         initialRegion={region}
         onRegionChangeComplete={r => {
-          setRegion(r);
           if (regionTimer.current) clearTimeout(regionTimer.current);
-          regionTimer.current = setTimeout(() => { if (!favFilter) fetchLieux(r, activeCat); }, 400);
+          regionTimer.current = setTimeout(() => {
+            setRegion(r);
+            if (!favFilter) fetchLieux(r, activeCat);
+          }, 300);
         }}
         onLongPress={handleMapLongPress}
         showsUserLocation

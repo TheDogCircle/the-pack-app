@@ -58,6 +58,7 @@ type Profil = {
   nom_chien: string | null; race_chien: string | null; avatar_url: string | null;
   bio: string | null; points: number; ambassadeur?: boolean | null;
   notif_follow: boolean | null; notif_lieu_nearby: boolean | null; notif_messages: boolean | null; notif_suggestion_validee: boolean | null;
+  instagram_url: string | null; tiktok_url: string | null;
 };
 
 type ExplorateurData = {
@@ -258,6 +259,8 @@ export default function ProfilScreen() {
   const [nomChien, setNomChien] = useState('');
   const [raceChien, setRaceChien] = useState('');
   const [bio, setBio] = useState('');
+  const [instagram, setInstagramProfil] = useState('');
+  const [tiktok, setTiktokProfil] = useState('');
   const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
   const [showExplorEdit, setShowExplorEdit] = useState(false);
 
@@ -294,6 +297,8 @@ export default function ProfilScreen() {
       setNomChien(p.nom_chien || '');
       setRaceChien(p.race_chien || '');
       setBio(p.bio || '');
+      setInstagramProfil(p.instagram_url || '');
+      setTiktokProfil(p.tiktok_url || '');
     }
 
     const favLieuIds = [...new Set((favsRaw || []).map((f: any) => f.lieu_id).filter(Boolean))];
@@ -324,6 +329,7 @@ export default function ProfilScreen() {
       prenom: prenom.trim() || null, ville: ville.trim() || null,
       nom_chien: nomChien.trim() || null, race_chien: raceChien.trim() || null,
       bio: bio.trim() || null,
+      instagram_url: instagram.trim() || null, tiktok_url: tiktok.trim() || null,
     });
     setSaving(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -535,6 +541,18 @@ export default function ProfilScreen() {
                     {editing
                       ? <TextInput style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]} value={bio} onChangeText={setBio} placeholder="Quelques mots sur toi…" placeholderTextColor={colors.textMuted} multiline />
                       : <Text style={styles.fieldValue}>{bio || '—'}</Text>}
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Instagram</Text>
+                    {editing
+                      ? <TextInput style={styles.input} value={instagram} onChangeText={setInstagramProfil} placeholder="https://instagram.com/ton_compte" placeholderTextColor={colors.textMuted} autoCapitalize="none" keyboardType="url" />
+                      : <Text style={styles.fieldValue}>{instagram || '—'}</Text>}
+                  </View>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>TikTok</Text>
+                    {editing
+                      ? <TextInput style={styles.input} value={tiktok} onChangeText={setTiktokProfil} placeholder="https://tiktok.com/@ton_compte" placeholderTextColor={colors.textMuted} autoCapitalize="none" keyboardType="url" />
+                      : <Text style={styles.fieldValue}>{tiktok || '—'}</Text>}
                   </View>
                 </View>
 
