@@ -1470,9 +1470,9 @@ export default function CarteScreen() {
         </Animated.View>
 
         {avisModal && (
-          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} pointerEvents="box-none">
-            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)' }]} onPress={() => setAvisModal(false)} activeOpacity={1} />
-            <View style={[styles.modalCard, { position: 'absolute', bottom: 0, left: 0, right: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setAvisModal(false)} activeOpacity={1} />
+            <View style={[styles.modalCard, { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{myAvis ? 'Modifier mon avis' : 'Laisser un avis'}</Text>
                 <TouchableOpacity onPress={() => setAvisModal(false)}>
@@ -1503,9 +1503,9 @@ export default function CarteScreen() {
         )}
 
         {dogTagModal && (
-          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : undefined} pointerEvents="box-none">
-            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.4)' }]} activeOpacity={1} onPress={() => doUploadPhoto(null)} />
-            <View style={[styles.dogTagCard, { position: 'absolute', bottom: 0, left: 0, right: 0 }]}>
+          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} activeOpacity={1} onPress={() => doUploadPhoto(null)} />
+            <View style={styles.dogTagCard}>
               <Text style={styles.dogTagModalTitle}>Ton chien est sur la photo ? 🐾</Text>
               <Text style={styles.dogTagModalSub}>Optionnel — laisse vide si ce n'est pas le cas</Text>
               <TextInput
