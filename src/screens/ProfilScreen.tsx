@@ -16,6 +16,7 @@ import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { savePushToken } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
+import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const RACES = [
   'Akita Inu','Alaskan Malamute','Basenji','Basset Hound','Beagle','Berger Allemand',
@@ -429,11 +430,7 @@ export default function ProfilScreen() {
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
-            {profil?.ambassadeur ? (
-              <View style={{ backgroundColor: '#C9A826', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                <Text style={{ color: 'white', fontSize: 9, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' }}>⭐ Ambassadeur·ice</Text>
-              </View>
-            ) : null}
+            {profil?.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
           </View>
           {profil?.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
           {profil?.ville ? <Text style={styles.ville}>{profil.ville}</Text> : null}

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
+import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const SCREEN_W = Dimensions.get('window').width;
 const PHOTO_W = (SCREEN_W - 16 * 2 - 8) / 2;
@@ -33,6 +34,7 @@ type Profil = {
   id: string; prenom: string | null; username: string | null;
   ville: string | null; bio: string | null; avatar_url: string | null;
   nom_chien: string | null; race_chien: string | null; points: number;
+  ambassadeur?: boolean | null;
 };
 type AvisItem = {
   id: string; note: number; commentaire: string | null; created_at: string; lieu_id: string;
@@ -190,7 +192,11 @@ export default function ProfilPublicScreen() {
             </View>
           )}
           <View style={styles.headerInfo}>
-            <Text style={styles.nom}>{profil.prenom || 'Membre'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.nom}>{profil.prenom || 'Membre'}</Text>
+              {profil.ambassadeur ? <AmbassadeurBadge /> : null}
+            </View>
+            {profil.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
             {profil.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
             {profil.ville ? (
               <View style={styles.villeRow}>

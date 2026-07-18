@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import { mapNavigation } from '../lib/mapNavigation';
 import MessagerieScreen from './MessagerieScreen';
 
@@ -337,7 +338,7 @@ export default function FeedScreen() {
               <Text style={styles.text}>
                 <Text style={styles.bold}>{item.user.prenom}</Text>
                 {item.user.username ? <Text style={styles.username}> @{item.user.username}</Text> : null}
-                {item.user.ambassadeur ? <Text style={{ fontSize: 9, fontWeight: '700', color: '#C9A826' }}> ⭐</Text> : null}
+                {item.user.ambassadeur ? <AmbassadeurBadge /> : null}
                 {item.type === 'avis' ? ' a noté ' : item.type === 'photo' ? ' a partagé une photo de ' : ' a ajouté aux favoris '}
                 <Text
                   style={[styles.lieuName, item.lieuId && { textDecorationLine: 'underline' }]}

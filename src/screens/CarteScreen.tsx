@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
+import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
@@ -111,7 +112,7 @@ type LieuFull = Lieu & {
   manager_user_id: string | null;
 };
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
-type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null };
+type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null; ambassadeur?: boolean | null };
 type CityResult = { nom: string; lat: number; lng: number };
 type EventMarker = {
   id: string; titre: string; date_heure: string;
@@ -423,14 +424,15 @@ export default function CarteScreen() {
     // Avis + profils séparément (comme le site web)
     if ((avisRaw || []).length > 0) {
       const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
-      const { data: profils } = await supabase.from('profils').select('id,prenom,username').in('id', uids);
-      const profilMap: Record<string, { prenom: string; username: string | null }> = {};
-      (profils || []).forEach((p: any) => { profilMap[p.id] = { prenom: p.prenom || 'Membre', username: p.username || null }; });
+      const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
+      const profilMap: Record<string, { prenom: string; username: string | null; ambassadeur?: boolean | null }> = {};
+      (profils || []).forEach((p: any) => { profilMap[p.id] = { prenom: p.prenom || 'Membre', username: p.username || null, ambassadeur: p.ambassadeur || null }; });
       setFicheAvis((avisRaw || []).map((a: any) => ({
         id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
         prenom: profilMap[a.user_id]?.prenom || 'Membre',
         username: profilMap[a.user_id]?.username || null,
         reponse_pro: a.reponse_pro || null,
+        ambassadeur: profilMap[a.user_id]?.ambassadeur || null,
       })));
     }
 
@@ -646,10 +648,10 @@ export default function CarteScreen() {
     const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
     if ((avisRaw || []).length > 0) {
       const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
-      const { data: profils } = await supabase.from('profils').select('id,prenom,username').in('id', uids);
+      const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
       const pm: Record<string, any> = {};
       (profils || []).forEach((p: any) => { pm[p.id] = p; });
-      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: pm[a.user_id]?.prenom || 'Membre', username: pm[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null })));
+      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: pm[a.user_id]?.prenom || 'Membre', username: pm[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: pm[a.user_id]?.ambassadeur || null })));
     }
     Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
   }
@@ -1393,7 +1395,10 @@ export default function CarteScreen() {
                       <View key={a.id} style={styles.ficheAvisCard}>
                         <View style={styles.ficheAvisHeader}>
                           <View style={{ flex: 1, marginRight: 8 }}>
-                            <Text style={styles.ficheAvisAuthor}>{a.prenom}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={styles.ficheAvisAuthor}>{a.prenom}</Text>
+                              {a.ambassadeur ? <AmbassadeurBadge /> : null}
+                            </View>
                             {a.username ? <Text style={styles.ficheAvisUsername}>@{a.username}</Text> : null}
                           </View>
                           <View style={styles.ficheAvisStars}>
