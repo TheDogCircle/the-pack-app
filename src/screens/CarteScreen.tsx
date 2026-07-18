@@ -422,7 +422,7 @@ export default function CarteScreen() {
     } else {
       setPhotos([]);
       // Fallback photo Google pour les lieux sans photo communauté (sauf vétos)
-      if (lieuData && lieuData.cat !== 'veto') {
+      if (lieuData) {
         if (lieuData.google_photo_url) {
           setGooglePhotoUrl(lieuData.google_photo_url);
         } else {
