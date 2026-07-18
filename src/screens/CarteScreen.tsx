@@ -217,6 +217,8 @@ export default function CarteScreen() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextFetchRef = useRef(false);
+  const lastFetchedRegionRef = useRef<Region | null>(null);
   const sheetAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetPanY = useRef(new Animated.Value(0)).current;
   const sheetPanResponder = useRef(
@@ -312,7 +314,16 @@ export default function CarteScreen() {
   }, [showEvents, userId]);
 
   async function fetchLieux(r: Region, cat: string | null) {
-    setLoading(true);
+    const last = lastFetchedRegionRef.current;
+    if (last) {
+      const movedLat = Math.abs(r.latitude - last.latitude);
+      const movedLng = Math.abs(r.longitude - last.longitude);
+      const deltaChanged = Math.abs(r.latitudeDelta - last.latitudeDelta) / last.latitudeDelta;
+      const threshold = Math.min(r.latitudeDelta, last.latitudeDelta) * 0.35;
+      if (movedLat < threshold && movedLng < threshold && deltaChanged < 0.4 && cat === activeCat) return;
+    }
+    lastFetchedRegionRef.current = r;
+    if (lieux.length === 0) setLoading(true);
     let query = supabase
       .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse').eq('actif', true)
       .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
@@ -329,6 +340,7 @@ export default function CarteScreen() {
     setActiveCat(next);
     setFavFilter(null);
     setAutresOpen(false);
+    lastFetchedRegionRef.current = null;
     fetchLieux(region, next);
   }
 
@@ -336,6 +348,7 @@ export default function CarteScreen() {
     const next = cat === activeCat ? null : cat;
     setActiveCat(next);
     setFavFilter(null);
+    lastFetchedRegionRef.current = null;
     setAutresOpen(false);
     fetchLieux(region, next);
   }
@@ -372,6 +385,7 @@ export default function CarteScreen() {
     setFicheAvis([]);
     setFichePhotoIdx(0);
     Animated.spring(sheetAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+    skipNextFetchRef.current = true;
     mapRef.current?.animateToRegion({ latitude: lieu.lat, longitude: lieu.lng, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
 
     let lieuData: any = null, favData: any = null, myAvisData: any = null, photosRaw: any[] = [], avisRaw: any[] = [];
@@ -381,7 +395,7 @@ export default function CarteScreen() {
         userId ? supabase.from('favoris').select('id,liste').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         userId ? supabase.from('avis').select('id,note,commentaire').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).eq('validee', true).order('created_at', { ascending: true }).limit(20),
-        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
+        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
       ]);
       lieuData = results[0].data;
       favData = results[1];
@@ -452,18 +466,13 @@ export default function CarteScreen() {
         }
       }
 
-      // Avis + profils séparément
       if ((avisRaw || []).length > 0) {
-        const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
-        const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
-        const profilMap: Record<string, { prenom: string; username: string | null; ambassadeur?: boolean | null }> = {};
-        (profils || []).forEach((p: any) => { profilMap[p.id] = { prenom: p.prenom || 'Membre', username: p.username || null, ambassadeur: p.ambassadeur || null }; });
         setFicheAvis((avisRaw || []).map((a: any) => ({
           id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
-          prenom: profilMap[a.user_id]?.prenom || 'Membre',
-          username: profilMap[a.user_id]?.username || null,
+          prenom: (a.profils as any)?.prenom || 'Membre',
+          username: (a.profils as any)?.username || null,
           reponse_pro: a.reponse_pro || null,
-          ambassadeur: profilMap[a.user_id]?.ambassadeur || null,
+          ambassadeur: (a.profils as any)?.ambassadeur || null,
         })));
       }
     } catch (_) {
@@ -748,14 +757,9 @@ export default function CarteScreen() {
     setAvisModal(false); setAvisNote(0); setAvisComment('');
     const { data } = await supabase.from('lieux').select('*').eq('id', selectedLieu.id).single();
     if (data) setSelectedLieu(data);
-    // Rafraîchir la liste des avis
-    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
+    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
     if ((avisRaw || []).length > 0) {
-      const uids = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
-      const { data: profils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', uids);
-      const pm: Record<string, any> = {};
-      (profils || []).forEach((p: any) => { pm[p.id] = p; });
-      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: pm[a.user_id]?.prenom || 'Membre', username: pm[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: pm[a.user_id]?.ambassadeur || null })));
+      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: (a.profils as any)?.prenom || 'Membre', username: (a.profils as any)?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: (a.profils as any)?.ambassadeur || null })));
     }
     Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
   }
@@ -1650,6 +1654,7 @@ export default function CarteScreen() {
           if (regionTimer.current) clearTimeout(regionTimer.current);
           regionTimer.current = setTimeout(() => {
             setRegion(r);
+            if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
             if (!favFilter) fetchLieux(r, activeCat);
           }, 300);
         }}
