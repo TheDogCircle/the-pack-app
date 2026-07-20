@@ -202,15 +202,25 @@ function BrandModal({
                       {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
 
                       {post.code_promo ? (
-                        <TouchableOpacity
-                          style={s.mailBtn}
-                          onPress={() => Linking.openURL(
-                            `mailto:thepackdogclub@gmail.com?subject=Offre ${partenaire.nom}&body=Bonjour, je souhaite recevoir le code promo pour l'offre "${post.titre}".`
-                          )}
-                        >
-                          <Ionicons name="mail-outline" size={14} color={colors.ivory} />
-                          <Text style={s.revealBtnText}>Recevoir l'offre par mail</Text>
-                        </TouchableOpacity>
+                        revealed[post.id] ? (
+                          <View style={s.codeBox}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.codeLabel}>Code promo</Text>
+                              <Text style={s.codeValue}>{post.code_promo}</Text>
+                            </View>
+                            <TouchableOpacity style={s.codeCopyBtn} onPress={() => copyCode(post.code_promo!)}>
+                              <Text style={s.codeCopyText}>Copier</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={s.revealBtn}
+                            onPress={() => setRevealed(prev => ({ ...prev, [post.id]: true }))}
+                          >
+                            <Ionicons name="lock-open-outline" size={14} color={colors.ivory} />
+                            <Text style={s.revealBtnText}>Voir le code</Text>
+                          </TouchableOpacity>
+                        )
                       ) : null}
 
                       <View style={s.postItemFooter}>
