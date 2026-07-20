@@ -37,9 +37,16 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   toiletteur:  { icon: 'cut-outline',        markerIcon: 'cut',          label: 'Toiletteur',    color: '#7B7AAA' },
   boutique:    { icon: 'bag-outline',        markerIcon: 'bag',          label: 'Boutique',      color: '#8B5A2B' },
   hotel:       { icon: 'bed-outline',        markerIcon: 'bed',          label: 'Hôtel',         color: '#4A7FA5' },
-  bar:         { icon: 'wine-outline',       markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
-  autre:       { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
+  bar:           { icon: 'wine-outline',        markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
+  concept_store: { icon: 'bag-handle-outline', markerIcon: 'bag-handle',   label: 'Concept Store', color: '#D4A853' },
+  educateur:     { icon: 'school-outline',     markerIcon: 'school',       label: 'Éducateur',     color: '#5B8DB8' },
+  autre:         { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
+
+const PROPOSE_CATS = [
+  'restaurant', 'cafe', 'bar', 'hotel', 'parc', 'parc_chien', 'plage',
+  'boutique', 'concept_store', 'toiletteur', 'veto', 'educateur', 'autre',
+];
 
 function CatIcon({ cat, name, size, color }: { cat?: string | null; name: IoniconsName; size: number; color: string }) {
   if (cat === 'plage') return <MaterialCommunityIcons name="waves" size={size} color={color} />;
@@ -157,7 +164,8 @@ export default function CarteScreen() {
   const [proposeNom, setProposeNom] = useState('');
   const [proposeAdresse, setProposeAdresse] = useState('');
   const [proposeVille, setProposeVille] = useState('');
-  const [proposeCat, setProposeCat] = useState('restaurant');
+  const [proposeCats, setProposeCats] = useState<string[]>(['restaurant']);
+  const [proposeAutreLabel, setProposeAutreLabel] = useState('');
   const [proposeTel, setProposeTel] = useState('');
   const [proposeSite, setProposeSite] = useState('');
   const [proposeDesc, setProposeDesc] = useState('');
@@ -303,7 +311,7 @@ export default function CarteScreen() {
         mapRef.current?.animateToRegion(r, 600);
         // fetchLieux sera déclenché par onRegionChangeComplete après l'animation
       } else {
-        fetchLieux(region, null);
+        fetchLieux(region, null, true);
       }
     })();
   }, []);
@@ -313,9 +321,9 @@ export default function CarteScreen() {
     else setMapEvents([]);
   }, [showEvents, userId]);
 
-  async function fetchLieux(r: Region, cat: string | null) {
+  async function fetchLieux(r: Region, cat: string | null, reset = false) {
     const last = lastFetchedRegionRef.current;
-    if (last) {
+    if (!reset && last) {
       const movedLat = Math.abs(r.latitude - last.latitude);
       const movedLng = Math.abs(r.longitude - last.longitude);
       const deltaChanged = Math.abs(r.latitudeDelta - last.latitudeDelta) / last.latitudeDelta;
@@ -328,10 +336,19 @@ export default function CarteScreen() {
       .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse').eq('actif', true)
       .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
       .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
-      .limit(200);
+      .limit(500);
     if (cat) query = (query as any).eq('cat', cat);
     const { data } = await query;
-    setLieux(data || []);
+    const newPlaces = data || [];
+    if (reset) {
+      setLieux(newPlaces);
+    } else {
+      setLieux(prev => {
+        const existing = new Set(prev.map(l => l.id));
+        const toAdd = newPlaces.filter(l => !existing.has(l.id));
+        return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+      });
+    }
     setLoading(false);
   }
 
@@ -341,7 +358,7 @@ export default function CarteScreen() {
     setFavFilter(null);
     setAutresOpen(false);
     lastFetchedRegionRef.current = null;
-    fetchLieux(region, next);
+    fetchLieux(region, next, true);
   }
 
   function onAutresCatPress(cat: string) {
@@ -350,14 +367,14 @@ export default function CarteScreen() {
     setFavFilter(null);
     lastFetchedRegionRef.current = null;
     setAutresOpen(false);
-    fetchLieux(region, next);
+    fetchLieux(region, next, true);
   }
 
   async function onFavFilterPress(liste: string) {
     setAutresOpen(false);
     if (favFilter === liste) {
       setFavFilter(null);
-      fetchLieux(region, activeCat);
+      fetchLieux(region, activeCat, true);
       return;
     }
     setFavFilter(liste);
@@ -601,7 +618,7 @@ export default function CarteScreen() {
     const r: Region = { latitude: city.lat, longitude: city.lng, latitudeDelta: 0.2, longitudeDelta: 0.2 };
     setRegion(r);
     mapRef.current?.animateToRegion(r, 800);
-    fetchLieux(r, activeCat);
+    fetchLieux(r, activeCat, true);
   }
 
   async function searchProposeSuggestions(query: string) {
@@ -753,8 +770,14 @@ export default function CarteScreen() {
     );
     setAvisLoading(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
+    const isNewAvis = !myAvis;
     setMyAvis({ note: avisNote, commentaire: avisComment.trim() || null });
     setAvisModal(false); setAvisNote(0); setAvisComment('');
+    if (isNewAvis && userId) {
+      const pointsToAdd = avisComment.trim() ? 15 : 10;
+      const { data: pd } = await supabase.from('profils').select('points').eq('id', userId).single();
+      if (pd) await supabase.from('profils').update({ points: (pd.points || 0) + pointsToAdd }).eq('id', userId);
+    }
     const { data } = await supabase.from('lieux').select('*').eq('id', selectedLieu.id).single();
     if (data) setSelectedLieu(data);
     const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
@@ -872,7 +895,7 @@ export default function CarteScreen() {
     requireAuth(async () => {
       const { latitude, longitude } = e.nativeEvent.coordinate;
       setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-      setProposeCat('restaurant'); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+      setProposeCats(['restaurant']); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
       setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
       setProposeLat(latitude);
       setProposeLng(longitude);
@@ -920,8 +943,15 @@ export default function CarteScreen() {
     setProposeLoading(true);
     const { data: insertedLieu, error } = await supabase.from('lieux').insert({
       nom: proposeNom.trim(), adresse: proposeAdresse.trim() || null, ville: proposeVille.trim(),
-      cat: proposeCat, tel: proposeTel.trim() || null, site_web: proposeSite.trim() || null,
-      description: proposeDesc.trim() || null,
+      cat: proposeCats[0],
+      tel: proposeTel.trim() || null, site_web: proposeSite.trim() || null,
+      description: (() => {
+        const extras: string[] = [];
+        if (proposeCats.length > 1) extras.push(`Typologies: ${proposeCats.map(k => CAT_CONFIG[k]?.label || k).join(', ')}`);
+        if (proposeCats.includes('autre') && proposeAutreLabel.trim()) extras.push(`Type: ${proposeAutreLabel.trim()}`);
+        const prefix = extras.length ? `[${extras.join(' | ')}]\n` : '';
+        return (prefix + proposeDesc.trim()) || null;
+      })(),
       lat: proposeLat ?? region.latitude,
       lng: proposeLng ?? region.longitude,
       actif: false,
@@ -931,7 +961,7 @@ export default function CarteScreen() {
     if (!error && userId) {
       const { data: profilData } = await supabase.from('profils').select('points').eq('id', userId).single();
       if (profilData) {
-        await supabase.from('profils').update({ points: (profilData.points || 0) + 5 }).eq('id', userId);
+        await supabase.from('profils').update({ points: (profilData.points || 0) + 50 }).eq('id', userId);
       }
     }
     // Upload photos
@@ -966,7 +996,7 @@ export default function CarteScreen() {
     if (error) { Alert.alert('Erreur', error.message); return; }
     setProposeModal(false);
     setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-    setProposeCat('restaurant'); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+    setProposeCats(['restaurant']); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
     setProposeLat(null); setProposeLng(null);
     setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
     setProposePhotos([]);
@@ -2086,19 +2116,39 @@ export default function CarteScreen() {
                 )}
               </View>
               <View style={styles.proposeField}>
-                <Text style={styles.proposeLabel}>Catégorie *</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {CATEGORIES.filter(c => c.key !== null).map(c => {
-                    const catCfg = CAT_CONFIG[c.key!];
-                    const active = proposeCat === c.key;
+                <Text style={styles.proposeLabel}>Type(s) de lieu * <Text style={{ color: colors.textMuted, fontWeight: '400' }}>(plusieurs possibles)</Text></Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {PROPOSE_CATS.map(key => {
+                    const catCfg = CAT_CONFIG[key];
+                    if (!catCfg) return null;
+                    const active = proposeCats.includes(key);
                     return (
-                      <TouchableOpacity key={c.key!} style={[styles.catPill, active && { backgroundColor: catCfg.color, borderColor: catCfg.color }]} onPress={() => setProposeCat(c.key!)}>
-                        <CatIcon cat={c.key} name={c.icon} size={13} color={active ? '#fff' : catCfg.color} />
-                        <Text style={[styles.catPillLabel, active && styles.catPillLabelActive]}>{c.label}</Text>
+                      <TouchableOpacity
+                        key={key}
+                        style={[styles.catPill, active && { backgroundColor: catCfg.color, borderColor: catCfg.color }]}
+                        onPress={() => setProposeCats(prev => {
+                          if (prev.includes(key)) {
+                            const next = prev.filter(k => k !== key);
+                            return next.length ? next : prev;
+                          }
+                          return [...prev, key];
+                        })}
+                      >
+                        <CatIcon cat={key} name={catCfg.icon} size={13} color={active ? '#fff' : catCfg.color} />
+                        <Text style={[styles.catPillLabel, active && styles.catPillLabelActive]}>{catCfg.label}</Text>
                       </TouchableOpacity>
                     );
                   })}
-                </ScrollView>
+                </View>
+                {proposeCats.includes('autre') && (
+                  <TextInput
+                    style={[styles.proposeInput, { marginTop: 8 }]}
+                    value={proposeAutreLabel}
+                    onChangeText={setProposeAutreLabel}
+                    placeholder="Précise le type de lieu…"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                )}
               </View>
               <View style={styles.proposeField}>
                 <Text style={styles.proposeLabel}>Ville *</Text>
