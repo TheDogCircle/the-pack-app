@@ -59,10 +59,17 @@ export async function sendPushNotification(
   data?: Record<string, unknown>,
 ): Promise<void> {
   try {
+    const current = await Notifications.getBadgeCountAsync().catch(() => 0);
     await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ to: token, title, body, data, sound: 'default', badge: 1 }),
+      body: JSON.stringify({ to: token, title, body, data, sound: 'default', badge: current + 1 }),
     });
+  } catch {}
+}
+
+export async function clearBadge(): Promise<void> {
+  try {
+    await Notifications.setBadgeCountAsync(0);
   } catch {}
 }

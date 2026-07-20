@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
+import { AppState, AppStateStatus, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   PlayfairDisplay_400Regular,
@@ -17,6 +17,7 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import Navigation, { navigationRef } from './src/navigation';
 import { mapNavigation } from './src/lib/mapNavigation';
+import { clearBadge } from './src/lib/notifications';
 
 async function checkForOTAUpdate() {
   try {
@@ -30,18 +31,41 @@ async function checkForOTAUpdate() {
 }
 
 export default function App() {
+  const appStateRef = useRef(AppState.currentState);
+
   useEffect(() => {
     checkForOTAUpdate();
-    const sub = Notifications.addNotificationResponseReceivedListener(response => {
+
+    // Efface le badge dès que l'app revient au premier plan
+    const appStateSub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        clearBadge();
+      }
+      appStateRef.current = next;
+    });
+
+    // Gère le tap sur une notification (app en arrière-plan ou fermée)
+    const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
+      clearBadge();
       const data = response.notification.request.content.data as any;
-      if (data?.type === 'new_lieu' && data?.lieuId) {
-        mapNavigation.setPendingLieu(data.lieuId);
-        if (navigationRef.isReady()) {
-          navigationRef.navigate('Tabs', { screen: 'Carte' } as any);
-        }
+      if (!navigationRef.isReady()) return;
+
+      if ((data?.type === 'new_lieu' && data?.lieuId) ||
+          (data?.type === 'suggestion_validee' && data?.lieu_id)) {
+        const lieuId = data?.lieuId ?? data?.lieu_id;
+        mapNavigation.setPendingLieu(lieuId);
+        navigationRef.navigate('Tabs', { screen: 'Carte' } as any);
+      } else if (data?.type === 'follow' && data?.userId) {
+        navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
+      } else if (data?.conversationId) {
+        navigationRef.navigate('Tabs', { screen: 'Meute' } as any);
       }
     });
-    return () => sub.remove();
+
+    return () => {
+      appStateSub.remove();
+      responseSub.remove();
+    };
   }, []);
 
   const [fontsLoaded] = useFonts({
