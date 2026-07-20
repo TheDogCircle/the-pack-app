@@ -112,12 +112,11 @@ export default function EvenementsScreen() {
   async function toggleInscription(eventId: string, join: boolean) {
     if (!myUserId) return;
     setInscriptionLoading(true);
-    if (join) {
-      await supabase.from('participations').insert({ event_id: eventId, user_id: myUserId });
-    } else {
-      await supabase.from('participations').delete().eq('event_id', eventId).eq('user_id', myUserId);
-    }
+    const { error } = join
+      ? await supabase.from('participations').insert({ event_id: eventId, user_id: myUserId })
+      : await supabase.from('participations').delete().eq('event_id', eventId).eq('user_id', myUserId);
     setInscriptionLoading(false);
+    if (error) { Alert.alert('Erreur', error.message); return; }
     const update = (e: Evenement) => e.id !== eventId ? e : {
       ...e, je_suis_inscrit: join, nb_inscrits: (e.nb_inscrits || 0) + (join ? 1 : -1),
     };
@@ -165,6 +164,8 @@ export default function EvenementsScreen() {
       actif: true,
       lat: eventLat,
       lng: eventLng,
+      created_by: myUserId,
+      organisateur_id: myUserId,
     });
     setSaving(false);
     if (error) { Alert.alert('Erreur', error.message); return; }

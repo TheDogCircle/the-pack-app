@@ -24,13 +24,15 @@ const RACES = [
   'Bobtail (Old English Sheepdog)','Border Collie','Boston Terrier','Bouledogue Anglais',
   'Bouledogue Français','Boxer','Braque de Weimar','Braque Français','Bull Terrier',
   'Cairn Terrier','Caniche (Toy / Nain / Moyen / Grand)','Carlin (Pug)','Cavalier King Charles',
-  'Chihuahua','Chow Chow','Cocker Américain','Cocker Anglais','Colley (Lassie)','Dalmatien',
+  'Chihuahua','Chow Chow','Cocker Américain','Cocker Anglais','Colley (Lassie)',
+  'Corgi (Pembroke / Cardigan)','Dalmatien',
   'Doberman','Dogue Allemand (Great Dane)','Dogue de Bordeaux','Épagneul Breton',
   'Fox Terrier','Golden Retriever','Husky Sibérien','Jack Russell Terrier',
   'Labrador Retriever','Leonberg','Lévrier (Greyhound / Whippet)','Lhasa Apso',
   'Maltais','Montagne des Pyrénées','Pékinois','Rottweiler','Saint-Bernard','Samoyède',
   'Setter Irlandais','Shiba Inu','Shih Tzu','Spitz Nain (Poméranien)','Teckel',
-  'Terre-Neuve','Westie (West Highland White Terrier)','Yorkshire Terrier','Autres',
+  'Terre-Neuve','Westie (West Highland White Terrier)','Yorkshire Terrier',
+  'Croisé...','Autre...',
 ];
 
 const NIVEAUX = [
@@ -245,6 +247,8 @@ export default function ProfilScreen() {
   const [avis, setAvis] = useState<AvisItem[]>([]);
   const [myPhotos, setMyPhotos] = useState<PhotoItem[]>([]);
   const [raceModal, setRaceModal] = useState(false);
+  const [raceCustomMode, setRaceCustomMode] = useState<'croisé' | 'autre' | null>(null);
+  const [raceCustomInput, setRaceCustomInput] = useState('');
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [accordionOpen, setAccordionOpen] = useState(false);
@@ -818,28 +822,65 @@ export default function ProfilScreen() {
       </Modal>
 
       {/* Race picker modal */}
-      <Modal visible={raceModal} animationType="slide" transparent>
+      <Modal visible={raceModal} animationType="slide" transparent onRequestClose={() => { setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); }}>
         <View style={styles.raceModalOverlay}>
           <View style={styles.raceModalCard}>
             <View style={styles.raceModalHeader}>
-              <Text style={styles.raceModalTitle}>Choisir une race</Text>
-              <TouchableOpacity onPress={() => setRaceModal(false)}>
-                <Ionicons name="close" size={22} color={colors.textMuted} />
+              <Text style={styles.raceModalTitle}>{raceCustomMode ? (raceCustomMode === 'croisé' ? 'Chien croisé' : 'Autre race') : 'Choisir une race'}</Text>
+              <TouchableOpacity onPress={() => { if (raceCustomMode) { setRaceCustomMode(null); setRaceCustomInput(''); } else { setRaceModal(false); } }}>
+                <Ionicons name={raceCustomMode ? 'arrow-back' : 'close'} size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
-            <FlatList
-              data={RACES}
-              keyExtractor={r => r}
-              renderItem={({ item }) => (
+            {raceCustomMode ? (
+              <View style={{ padding: 16 }}>
+                <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginBottom: 10 }}>
+                  {raceCustomMode === 'croisé' ? 'Précise les races mélangées (ex : Labrador / Berger)' : 'Précise la race de ton chien'}
+                </Text>
+                <TextInput
+                  style={{ borderWidth: 1.5, borderColor: colors.border, borderRadius: 10, padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: 'white' }}
+                  placeholder={raceCustomMode === 'croisé' ? 'Ex : Labrador / Berger Allemand' : 'Ex : Pomsky'}
+                  placeholderTextColor={colors.textMuted}
+                  value={raceCustomInput}
+                  onChangeText={setRaceCustomInput}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    const val = raceCustomInput.trim();
+                    if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
+                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput('');
+                  }}
+                />
                 <TouchableOpacity
-                  style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
-                  onPress={() => { setRaceChien(item); setRaceModal(false); }}
+                  style={{ backgroundColor: raceCustomInput.trim() ? colors.bordeaux : colors.border, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }}
+                  onPress={() => {
+                    const val = raceCustomInput.trim();
+                    if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
+                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput('');
+                  }}
+                  disabled={!raceCustomInput.trim()}
                 >
-                  <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
-                  {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                  <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 14, color: 'white' }}>Confirmer</Text>
                 </TouchableOpacity>
-              )}
-            />
+              </View>
+            ) : (
+              <FlatList
+                data={RACES}
+                keyExtractor={r => r}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
+                    onPress={() => {
+                      if (item === 'Croisé...') { setRaceCustomMode('croisé'); setRaceCustomInput(''); return; }
+                      if (item === 'Autre...') { setRaceCustomMode('autre'); setRaceCustomInput(''); return; }
+                      setRaceChien(item); setRaceModal(false);
+                    }}
+                  >
+                    <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
+                    {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                  </TouchableOpacity>
+                )}
+              />
+            )}
           </View>
         </View>
       </Modal>

@@ -46,11 +46,18 @@ type LieuCard = {
   id: string; nom: string; cat: string; ville: string;
   note_moyenne?: number | null; photoUrl?: string | null;
   google_photo_url?: string | null;
+  distance?: number; // km, only for nearby section
 };
 
 type ExplorateurLieu = {
   lieu_id: string; nom: string; cat: string; ville: string;
   commentaire: string | null; photoUrl?: string | null;
+};
+
+type RecentPhoto = {
+  id: string; url: string;
+  lieuId: string; lieu: { nom: string; cat: string; ville: string };
+  nomChien: string | null;
 };
 
 type Explorateur = {
@@ -95,7 +102,7 @@ async function fetchGooglePhoto(lieu: { id: string; nom: string; ville: string }
     const photoName = json.places?.[0]?.photos?.[0]?.name;
     if (!photoName) return null;
     const photoUrl = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-    supabase.from('lieux').update({ google_photo_url: photoUrl }).eq('id', lieu.id);
+    await supabase.from('lieux').update({ google_photo_url: photoUrl }).eq('id', lieu.id);
     return photoUrl;
   } catch {
     return null;
@@ -332,7 +339,49 @@ function SmallCard({ lieu, onPress }: { lieu: LieuCard; onPress: () => void }) {
             <Text style={styles.smallCardRating}>{lieu.note_moyenne.toFixed(1)}</Text>
           </View>
         ) : null}
+        {lieu.distance !== undefined ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 }}>
+            <Ionicons name="navigate-outline" size={10} color={colors.textMuted} />
+            <Text style={styles.smallCardDist}>
+              {lieu.distance < 1
+                ? `${Math.round(lieu.distance * 1000)} m`
+                : `${lieu.distance.toFixed(1)} km`}
+            </Text>
+          </View>
+        ) : null}
       </View>
+    </TouchableOpacity>
+  );
+}
+
+function PhotoMiniCard({
+  photo, liked, likeCount, onPress, onLike,
+}: {
+  photo: RecentPhoto;
+  liked: boolean;
+  likeCount: number;
+  onPress: () => void;
+  onLike: () => void;
+}) {
+  const color = CAT_COLOR[photo.lieu.cat] || colors.textMuted;
+  return (
+    <TouchableOpacity style={styles.photoCard} onPress={onPress} activeOpacity={0.88}>
+      <Image source={{ uri: photo.url }} style={styles.photoCardImg} resizeMode="cover" />
+      <View style={styles.photoCardOverlay}>
+        {photo.nomChien ? (
+          <View style={styles.photoCardDogTag}>
+            <Text style={styles.photoCardDogText}>🐾 {photo.nomChien}</Text>
+          </View>
+        ) : null}
+        <View style={styles.photoCardBottom}>
+          <View style={[styles.photoCardCatDot, { backgroundColor: color }]} />
+          <Text style={styles.photoCardLieu} numberOfLines={1}>{photo.lieu.nom}</Text>
+        </View>
+      </View>
+      <TouchableOpacity style={styles.photoCardLike} onPress={e => { e.stopPropagation?.(); onLike(); }}>
+        <Ionicons name={liked ? 'heart' : 'heart-outline'} size={15} color={liked ? '#E05070' : 'rgba(255,255,255,0.8)'} />
+        {likeCount > 0 ? <Text style={[styles.photoCardLikeCount, liked && { color: '#E05070' }]}>{likeCount}</Text> : null}
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
@@ -390,6 +439,12 @@ export default function ExplorerScreen() {
 
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
+  const [nearbyRadius, setNearbyRadius] = useState(5);
+
+  const [recentLieux, setRecentLieux] = useState<LieuCard[]>([]);
+  const [recentPhotos, setRecentPhotos] = useState<RecentPhoto[]>([]);
+  const [photoLikesCount, setPhotoLikesCount] = useState<Record<string, number>>({});
+  const [photoLikedByMe, setPhotoLikedByMe] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -422,7 +477,7 @@ export default function ExplorerScreen() {
 
   useFocusEffect(useCallback(() => {
     loadAll();
-  }, [userId, userLat, userLng, activeCat]));
+  }, [userId, userLat, userLng, activeCat, nearbyRadius]));
 
   async function loadAll() {
     setLoading(true);
@@ -431,6 +486,8 @@ export default function ExplorerScreen() {
       loadTopLieux(),
       loadExplorateurs(),
       loadAdressesDuMoment(),
+      loadRecentLieux(),
+      loadRecentPhotos(),
     ]);
     setLoading(false);
   }
@@ -483,17 +540,20 @@ export default function ExplorerScreen() {
     let q = supabase.from('lieux').select('id,nom,cat,ville,lat,lng,note_moyenne,google_photo_url').eq('actif', true);
     if (activeCat) q = (q as any).eq('cat', activeCat);
     if (userLat && userLng) {
-      const delta = 0.12;
+      // Bounding box slightly larger than radius; strict circle filter applied client-side
+      const delta = (nearbyRadius / 111) * 1.3;
       q = (q as any)
         .gte('lat', userLat - delta).lte('lat', userLat + delta)
         .gte('lng', userLng - delta).lte('lng', userLng + delta);
     }
-    q = (q as any).limit(20);
+    q = (q as any).limit(60);
     const { data } = await q;
     let lieux = data || [];
     if (userLat && userLng) {
       lieux = lieux
-        .sort((a: any, b: any) => haversine(userLat!, userLng!, a.lat, a.lng) - haversine(userLat!, userLng!, b.lat, b.lng))
+        .map((l: any) => ({ ...l, distance: haversine(userLat!, userLng!, l.lat, l.lng) }))
+        .filter((l: any) => l.distance <= nearbyRadius)
+        .sort((a: any, b: any) => a.distance - b.distance)
         .slice(0, 10);
     } else {
       lieux = lieux.slice(0, 10);
@@ -525,6 +585,70 @@ export default function ExplorerScreen() {
     mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
       fetchGooglePhoto(l).then(url => { if (url) setTopLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
     );
+  }
+
+  async function loadRecentLieux() {
+    const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
+      .eq('actif', true).gte('created_at', since30days)
+      .order('created_at', { ascending: false }).limit(10);
+    if (activeCat) q = (q as any).eq('cat', activeCat);
+    const { data } = await q;
+    const lieux = data || [];
+    const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
+    const mapped = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
+    setRecentLieux(mapped);
+    mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
+      fetchGooglePhoto(l).then(url => { if (url) setRecentLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
+    );
+  }
+
+  async function loadRecentPhotos() {
+    const { data: photoData } = await supabase
+      .from('photos').select('id,url,lieu_id,nom_chien')
+      .eq('validee', true).order('created_at', { ascending: false }).limit(15);
+    if (!photoData?.length) { setRecentPhotos([]); return; }
+
+    const lieuIds = [...new Set((photoData as any[]).map(p => p.lieu_id).filter(Boolean))];
+    const { data: lieuxData } = lieuIds.length > 0
+      ? await supabase.from('lieux').select('id,nom,cat,ville').in('id', lieuIds)
+      : { data: [] };
+    const lieuMap: Record<string, any> = {};
+    (lieuxData || []).forEach((l: any) => { lieuMap[l.id] = l; });
+
+    const mapped: RecentPhoto[] = (photoData as any[]).map(p => ({
+      id: p.id, url: p.url,
+      lieuId: p.lieu_id,
+      lieu: lieuMap[p.lieu_id] || { nom: '?', cat: 'autre', ville: '' },
+      nomChien: p.nom_chien || null,
+    }));
+    setRecentPhotos(mapped);
+
+    const photoIds = mapped.map(p => p.id);
+    const [{ data: allLikes }, { data: myLikes }] = await Promise.all([
+      supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
+      userId
+        ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const countMap: Record<string, number> = {};
+    (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
+    setPhotoLikesCount(countMap);
+    setPhotoLikedByMe(new Set((myLikes || []).map((l: any) => l.photo_id)));
+  }
+
+  async function togglePhotoLike(photoId: string) {
+    if (!userId) return;
+    const isLiked = photoLikedByMe.has(photoId);
+    if (isLiked) {
+      await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId);
+      setPhotoLikedByMe(prev => { const s = new Set(prev); s.delete(photoId); return s; });
+      setPhotoLikesCount(prev => ({ ...prev, [photoId]: Math.max(0, (prev[photoId] || 0) - 1) }));
+    } else {
+      await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });
+      setPhotoLikedByMe(prev => new Set([...prev, photoId]));
+      setPhotoLikesCount(prev => ({ ...prev, [photoId]: (prev[photoId] || 0) + 1 }));
+    }
   }
 
   function openLieu(lieuId: string) {
@@ -613,7 +737,7 @@ export default function ExplorerScreen() {
             )}
 
             {/* Nearby */}
-            {nearbyLieux.length > 0 && (
+            {userLat && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>{nearbyTitle}</Text>
@@ -621,16 +745,46 @@ export default function ExplorerScreen() {
                     <Text style={styles.seeAll}>Voir la carte →</Text>
                   </TouchableOpacity>
                 </View>
-                <FlatList
-                  data={nearbyLieux.filter(l => l.id !== featuredLieu?.id)}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={i => i.id}
-                  contentContainerStyle={styles.cardsRow}
-                  renderItem={({ item }) => (
-                    <SmallCard lieu={item} onPress={() => openLieu(item.id)} />
-                  )}
-                />
+                {/* Distance filter chips */}
+                <ScrollView
+                  horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.distChipsRow}
+                >
+                  {[2, 5, 10, 20].map(km => (
+                    <TouchableOpacity
+                      key={km}
+                      style={[styles.distChip, nearbyRadius === km && styles.distChipActive]}
+                      onPress={() => setNearbyRadius(km)}
+                    >
+                      <Ionicons
+                        name="location-outline" size={11}
+                        color={nearbyRadius === km ? colors.ivory : colors.bordeaux}
+                      />
+                      <Text style={[styles.distChipLabel, nearbyRadius === km && styles.distChipLabelActive]}>
+                        {km} km
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                {nearbyLieux.length > 0 ? (
+                  <FlatList
+                    data={nearbyLieux.filter(l => l.id !== featuredLieu?.id)}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={i => i.id}
+                    contentContainerStyle={styles.cardsRow}
+                    renderItem={({ item }) => (
+                      <SmallCard lieu={item} onPress={() => openLieu(item.id)} />
+                    )}
+                  />
+                ) : (
+                  <View style={styles.nearbyEmpty}>
+                    <Ionicons name="location-outline" size={28} color={colors.textMuted} />
+                    <Text style={styles.nearbyEmptyText}>
+                      Aucun lieu dans un rayon de {nearbyRadius} km.{'\n'}Essaie d'élargir la distance.
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -646,6 +800,51 @@ export default function ExplorerScreen() {
                   contentContainerStyle={styles.cardsRow}
                   renderItem={({ item }) => (
                     <SmallCard lieu={item} onPress={() => openLieu(item.id)} />
+                  )}
+                />
+              </View>
+            )}
+
+            {/* Récemment ajoutés */}
+            {recentLieux.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Récemment ajoutés</Text>
+                  <TouchableOpacity onPress={() => navigation.navigate('Carte')}>
+                    <Text style={styles.seeAll}>Voir la carte →</Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={recentLieux}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyExtractor={i => i.id}
+                  contentContainerStyle={styles.cardsRow}
+                  renderItem={({ item }) => (
+                    <SmallCard lieu={item} onPress={() => openLieu(item.id)} />
+                  )}
+                />
+              </View>
+            )}
+
+            {/* Photos de la communauté */}
+            {recentPhotos.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Photos de la communauté</Text>
+                <FlatList
+                  data={recentPhotos}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyExtractor={p => p.id}
+                  contentContainerStyle={styles.cardsRow}
+                  renderItem={({ item }) => (
+                    <PhotoMiniCard
+                      photo={item}
+                      liked={photoLikedByMe.has(item.id)}
+                      likeCount={photoLikesCount[item.id] || 0}
+                      onPress={() => openLieu(item.lieuId)}
+                      onLike={() => togglePhotoLike(item.id)}
+                    />
                   )}
                 />
               </View>
@@ -836,6 +1035,53 @@ const styles = StyleSheet.create({
   candidBtnLabel: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
   candidSentText: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
 
+  // Photo mini cards
+  photoCard: {
+    width: CARD_W, height: CARD_W, borderRadius: 14,
+    overflow: 'hidden', backgroundColor: colors.border,
+  },
+  photoCardImg: { width: CARD_W, height: CARD_W },
+  photoCardOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'space-between', padding: 8,
+    backgroundColor: 'rgba(61,26,26,0.28)',
+  },
+  photoCardDogTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(61,26,26,0.55)',
+    borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3,
+  },
+  photoCardDogText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory },
+  photoCardBottom: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  photoCardCatDot: { width: 6, height: 6, borderRadius: 3 },
+  photoCardLieu: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory, flex: 1 },
+  photoCardLike: {
+    position: 'absolute', top: 8, right: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(61,26,26,0.45)',
+    borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4,
+  },
+  photoCardLikeCount: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
+
+  // Distance chips
+  distChipsRow: { gap: 8, paddingBottom: 14 },
+  distChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: colors.white, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  distChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  distChipLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  distChipLabelActive: { color: colors.ivory },
+
+  // Nearby empty state
+  nearbyEmpty: { alignItems: 'center', gap: 8, paddingVertical: 24 },
+  nearbyEmptyText: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted,
+    textAlign: 'center', lineHeight: 20,
+  },
+
   // Small cards
   cardsRow: { gap: 12, paddingRight: 4, paddingBottom: 4 },
   smallCard: {
@@ -849,4 +1095,5 @@ const styles = StyleSheet.create({
   smallCardCat: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   smallCardVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   smallCardRating: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+  smallCardDist: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 });

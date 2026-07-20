@@ -199,7 +199,6 @@ export default function ProfilPublicScreen() {
               <Text style={styles.nom}>{profil.prenom || 'Membre'}</Text>
               {profil.ambassadeur ? <AmbassadeurBadge /> : null}
             </View>
-            {profil.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
             {profil.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
             {profil.ville ? (
               <View style={styles.villeRow}>

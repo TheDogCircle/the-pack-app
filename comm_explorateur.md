@@ -1,69 +1,109 @@
-# Messages de partenariat — Programme Explorateur The Pack Club
+# Comm Explorateur — Lancement mardi 22 juillet
 
 ---
 
-## Version DM Instagram (courte, directe)
+## 1. DM Instagram — version courte (à envoyer en premier contact)
 
-Salut [Prénom] 👋
-
-Je suis Marine, fondatrice de The Pack Club — une appli communautaire pour les dog lovers en France 🐾
-
-J'adore ton contenu et je voudrais te proposer un truc sympa : une **fiche Explorateur** gratuite sur l'appli, avec ta bannière, ta bio, tes liens et surtout **tes adresses dog-friendly préférées** mises en avant pour toute notre communauté.
-
-En échange, juste une mention occasionnelle quand tu parles d'un lieu — aucune obligation contractuelle, on reste dans l'esprit de la commu 😊
-
-Ça t'intéresse ? Je t'en dis plus ici ou par mail : thepackdogclub@gmail.com
-
-À bientôt 🐶
-Marine
+> Personnalise [entre crochets] avant d'envoyer.
 
 ---
 
-## Version email (plus développée)
+Salut [Prénom] 🐾
 
-**Objet : Partenariat Explorateur – The Pack Club 🐾**
+Je suis Marine, fondatrice de The Pack Club — une appli communautaire pour les dog lovers en France. Je suis ton compte depuis un moment et j'adore [ce que tu fais / la façon dont tu parles de ton chien / tes adresses].
+
+Je lance mardi une section **Explorateurs** dans l'app et je pense vraiment à toi pour en faire partie ✨
+
+Concrètement : une fiche à ton image sur l'appli (bannière, bio, liens), avec **tes adresses dog-friendly préférées** mises en avant pour toute notre communauté. C'est gratuit, permanent, et ça ne te demande rien à gérer.
+
+En échange, juste une mention naturelle de temps en temps quand tu parles d'un lieu 😊 Pas de contrat, pas de fréquence imposée.
+
+Ça te parle ? Je t'en dis plus ici ou par mail thepackdogclub@gmail.com 🐶
+
+---
+
+## 2. Email — version développée (si tu as leur adresse ou pour le suivi)
+
+**Objet : Tu rejoins les Explorateurs The Pack Club ? 🐾**
+
+---
 
 Bonjour [Prénom],
 
-Je m'appelle Marine, je suis la fondatrice de The Pack Club — une application mobile communautaire dédiée aux propriétaires de chiens en France, avec une carte des lieux dog-friendly, un feed de la meute, des partenariats marques et une vraie vie de communauté 🐾
+Je m'appelle Marine, je suis la fondatrice de The Pack Club — une application communautaire pour les propriétaires de chiens en France (carte des lieux dog-friendly, feed de la meute, partenariats marques 🐾).
 
-Je suis votre contenu depuis un moment et j'apprécie vraiment votre authenticité et la façon dont vous partagez votre vie avec [nom du chien]. C'est exactement l'esprit que je veux mettre en avant sur The Pack Club.
+Je te contacte parce que je suis ton compte [depuis X temps / depuis que j'ai vu ton post sur...] et que [quelque chose de spécifique et sincère sur leur contenu]. Tu corresponds exactement à l'esprit qu'on veut mettre en avant.
 
+**Ce que je te propose**
 
-**Le programme Explorateur**
+On lance mardi une nouvelle section dans l'app : **Les Explorateurs**. C'est un espace dédié aux créateurs de la communauté canine, avec pour chaque Explorateur :
 
-Nous lançons une nouvelle section dans l'application : **Les Explorateurs** — un espace dédié aux créateurs de contenu de la communauté canine.
+- Une **fiche profil** à ton image (photo, bannière, bio, liens Instagram / TikTok / YouTube)
+- Tes **adresses dog-friendly favorites** mises en avant avec tes commentaires perso — visibles par toute notre communauté
+- Une **vitrine permanente** dans l'appli, pas une collab ponctuelle
 
-Concrètement, vous bénéficiez de :
+C'est **entièrement gratuit**. En échange, on te demande juste de mentionner The Pack Club naturellement quand tu parles d'un lieu — sans obligation de fréquence ni de format. On s'occupe de tout créer ensemble, tu n'as rien à gérer techniquement.
 
-- ✨ Une **fiche profil complète** avec votre photo, bannière, bio et liens (Instagram, TikTok, YouTube, site)
-- 📍 Vos **lieux dog-friendly favoris** mis en avant avec vos recommandations personnalisées (visible par toute la communauté)
-- 💛 Une **vitrine permanente** sur l'application, accessible à tous nos utilisateurs
+**Pourquoi maintenant ?**
 
-Ce partenariat est **entièrement gratuit**. En contrepartie, nous vous demandons simplement de mentionner The Pack Club de façon naturelle quand vous partagez une adresse dog-friendly — sans obligation de fréquence ni de format.
+On est en pleine croissance et on veut que les premières fiches Explorateur soient celles de créateurs qu'on a vraiment sélectionnés — pas un annuaire ouvert à tous. Ton profil a exactement la place qu'il mérite ici.
 
-
-**Pourquoi The Pack Club ?**
-
-L'appli est disponible sur l'App Store, avec une communauté qui grandit chaque mois. Nous croyons que les meilleures recommandations viennent des dog lovers eux-mêmes — et c'est précisément pour ça que votre profil aurait toute sa place ici.
-
-
-Si ce partenariat vous intéresse, je serais ravie d'en discuter avec vous. Répondez directement à ce mail ou contactez-moi à thepackdogclub@gmail.com.
+Si ça t'intéresse, réponds-moi ici ou à thepackdogclub@gmail.com et on cale ça ensemble rapidement 🙌
 
 À très bientôt,
 
-Marine Merlin
+Marine
 Fondatrice — The Pack Club
-thepackdogclub@gmail.com
-@thepackclub sur Instagram
-thepackclub.fr
+thepackdogclub@gmail.com | @thepackclub | thepackclub.fr
 
 ---
 
-## Points clés à mentionner à l'oral / en story
+## 3. Story / post The Pack Club — annonce du lancement (mardi)
 
-- L'appli est gratuite pour les utilisateurs
-- La fiche Explorateur est permanente (pas une collab ponctuelle)
-- Les recommandations de lieux de l'influenceur sont mises en avant avec leur commentaire perso
-- On peut ajouter les lieux ensemble — l'influenceur n'a rien à gérer techniquement
-- Possibilité de lier leur compte utilisateur à leur fiche pour qu'ils puissent proposer eux-mêmes leurs lieux favoris à terme
+**Caption post Instagram :**
+
+> On lance quelque chose qu'on prépare depuis un moment 🐾✨
+>
+> Les **Explorateurs The Pack Club** — une section dédiée dans l'app aux créateurs de la communauté canine.
+>
+> Des fiches profil à leur image, leurs adresses dog-friendly préférées, leurs recommandations perso... Le tout accessible à toute la meute directement depuis l'appli.
+>
+> Les premiers Explorateurs arrivent mardi. Et si tu veux rejoindre l'aventure, le lien est dans la bio 🐶
+>
+> #thepackclub #doglovers #dogfriendly #explorateur #chien #communauté
+
+**Story (séquence en 3 slides) :**
+
+- Slide 1 : "On lance quelque chose 👀" — fond bordeaux, texte ivoire, patte animée
+- Slide 2 : "Les Explorateurs The Pack Club — les créateurs canins qui nous font découvrir leurs adresses favorites" — avec aperçu d'une fiche
+- Slide 3 : "Tu veux en faire partie ? → Lien dans la bio" + sticker lien vers thepackclub.fr
+
+---
+
+## 4. Checklist mardi 22 juillet
+
+- [ ] Publier le post Instagram d'annonce le matin (9h-10h)
+- [ ] Envoyer les DMs aux comptes ciblés (liste ci-dessous)
+- [ ] Ajouter le premier Explorateur en base (INSERT SQL) pour que la section soit visible dans l'app
+- [ ] Répondre aux candidatures reçues via l'app (table `explorateur_candidatures` dans Supabase)
+
+---
+
+## 5. Comptes à contacter en priorité
+
+> À compléter avec tes propres choix — voici des profils types à cibler :
+
+- Comptes Paris dog-friendly (restaurants, parcs, cafés avec chiens)
+- Créateurs lifestyle avec chien (golden, berger, labrador — races populaires)
+- Petits comptes très engagés (5k-30k abonnés) plutôt que très gros (meilleur taux d'engagement)
+- Comptes qui font déjà des "bons plans" ou "adresses" → ils auront naturellement envie de partager leurs lieux sur l'app
+
+---
+
+## 6. FAQ rapide si on te pose des questions
+
+**C'est payant ?** Non, entièrement gratuit pour toi.
+**Je dois poster combien de fois ?** Aucune obligation. Une mention naturelle de temps en temps suffit.
+**Comment on crée ma fiche ?** On le fait ensemble — tu m'envoies tes infos et je m'occupe de tout mettre en place.
+**L'app est disponible où ?** Sur l'App Store (iOS), bientôt Android.
+**Combien d'utilisateurs ?** Communauté en croissance, essentiellement Paris et grandes villes.
