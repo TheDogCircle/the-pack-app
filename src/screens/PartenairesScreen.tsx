@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   Image, Linking, ActivityIndicator, RefreshControl,
   Modal, StatusBar, useWindowDimensions, Clipboard,
-  Alert,
+  Alert, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -40,6 +40,147 @@ type Partenaire = {
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
   instagram_url: string | null; tiktok_url: string | null;
 };
+
+const SECTEURS = [
+  'Alimentation', 'Accessoires', 'Bien-être', 'Toilettage',
+  'Vétérinaire', 'Mode', 'Tech', 'Voyage', 'Autre',
+];
+
+// ── Candidature marque modal ────────────────────────────────────────────────
+
+function CandidatureMarqueModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const [nomMarque, setNomMarque] = useState('');
+  const [contactNom, setContactNom] = useState('');
+  const [email, setEmail] = useState('');
+  const [telephone, setTelephone] = useState('');
+  const [secteur, setSecteur] = useState('');
+  const [description, setDescription] = useState('');
+  const [siteWeb, setSiteWeb] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [showSecteurPicker, setShowSecteurPicker] = useState(false);
+
+  function reset() {
+    setNomMarque(''); setContactNom(''); setEmail(''); setTelephone('');
+    setSecteur(''); setDescription(''); setSiteWeb('');
+    setSending(false); setSent(false); setShowSecteurPicker(false);
+  }
+
+  async function submit() {
+    if (!nomMarque.trim() || !contactNom.trim() || !email.trim()) {
+      Alert.alert('Champs requis', 'Merci de renseigner le nom de la marque, le contact et l\'email.');
+      return;
+    }
+    setSending(true);
+    const { error } = await supabase.from('candidatures_partenaires').insert({
+      nom_marque: nomMarque.trim(),
+      contact_nom: contactNom.trim(),
+      email: email.trim(),
+      telephone: telephone.trim() || null,
+      secteur: secteur || null,
+      description: description.trim() || null,
+      site_web: siteWeb.trim() || null,
+    });
+    setSending(false);
+    if (error) { Alert.alert('Erreur', 'Impossible d\'envoyer la candidature. Réessaie plus tard.'); return; }
+    setSent(true);
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { reset(); onClose(); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <ScrollView style={s.candidContainer} contentContainerStyle={{ paddingBottom: 50 }} keyboardShouldPersistTaps="handled">
+          <View style={s.candidHeader}>
+            <Text style={s.candidTitle}>Devenir partenaire</Text>
+            <TouchableOpacity onPress={() => { reset(); onClose(); }}>
+              <Ionicons name="close" size={22} color={colors.bordeaux} />
+            </TouchableOpacity>
+          </View>
+
+          {sent ? (
+            <View style={{ alignItems: 'center', paddingVertical: 48, gap: 14 }}>
+              <Ionicons name="checkmark-circle" size={60} color={colors.terra} />
+              <Text style={s.candidSentTitle}>Candidature envoyée !</Text>
+              <Text style={s.candidSentText}>On revient vers toi très vite 🐾</Text>
+              <TouchableOpacity style={s.candidBtn} onPress={() => { reset(); onClose(); }}>
+                <Text style={s.candidBtnLabel}>Fermer</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <Text style={s.candidIntro}>
+                Tu es une marque dog-friendly et tu souhaites partager tes offres avec la communauté The Pack Club ? Remplis ce formulaire et on reviendra vers toi rapidement.
+              </Text>
+
+              <Text style={s.candidLabel}>Nom de la marque *</Text>
+              <TextInput style={s.candidInput} value={nomMarque} onChangeText={setNomMarque} placeholder="Ex : Woofood" placeholderTextColor={colors.textMuted} />
+
+              <Text style={s.candidLabel}>Nom / prénom contact *</Text>
+              <TextInput style={s.candidInput} value={contactNom} onChangeText={setContactNom} placeholder="Ex : Sophie Martin" placeholderTextColor={colors.textMuted} />
+
+              <Text style={s.candidLabel}>Email *</Text>
+              <TextInput style={s.candidInput} value={email} onChangeText={setEmail} placeholder="contact@mamarque.fr" placeholderTextColor={colors.textMuted} keyboardType="email-address" autoCapitalize="none" />
+
+              <Text style={s.candidLabel}>Téléphone</Text>
+              <TextInput style={s.candidInput} value={telephone} onChangeText={setTelephone} placeholder="06 00 00 00 00" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
+
+              <Text style={s.candidLabel}>Secteur d'activité</Text>
+              <TouchableOpacity style={s.candidSelect} onPress={() => setShowSecteurPicker(true)}>
+                <Text style={[s.candidSelectText, !secteur && { color: colors.textMuted }]}>
+                  {secteur || 'Choisir un secteur'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              <Text style={s.candidLabel}>Description du partenariat souhaité</Text>
+              <TextInput
+                style={[s.candidInput, { height: 100, textAlignVertical: 'top', paddingTop: 12 }]}
+                value={description} onChangeText={setDescription}
+                placeholder="Décris ton offre, tes valeurs, ce que tu souhaites proposer à la communauté..."
+                placeholderTextColor={colors.textMuted} multiline numberOfLines={4}
+              />
+
+              <Text style={s.candidLabel}>Site web</Text>
+              <TextInput style={s.candidInput} value={siteWeb} onChangeText={setSiteWeb} placeholder="https://mamarque.fr" placeholderTextColor={colors.textMuted} keyboardType="url" autoCapitalize="none" />
+
+              <TouchableOpacity
+                style={[s.candidBtn, (sending || !nomMarque.trim() || !contactNom.trim() || !email.trim()) && { opacity: 0.5 }]}
+                onPress={submit}
+                disabled={sending || !nomMarque.trim() || !contactNom.trim() || !email.trim()}
+              >
+                <Text style={s.candidBtnLabel}>{sending ? 'Envoi en cours…' : 'Envoyer ma candidature'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Secteur picker */}
+      <Modal visible={showSecteurPicker} animationType="slide" presentationStyle="formSheet" transparent onRequestClose={() => setShowSecteurPicker(false)}>
+        <View style={s.pickerOverlay}>
+          <View style={s.pickerSheet}>
+            <View style={s.pickerHeader}>
+              <Text style={s.pickerTitle}>Secteur d'activité</Text>
+              <TouchableOpacity onPress={() => setShowSecteurPicker(false)}>
+                <Ionicons name="close" size={20} color={colors.bordeaux} />
+              </TouchableOpacity>
+            </View>
+            {SECTEURS.map(sec => (
+              <TouchableOpacity
+                key={sec}
+                style={[s.pickerItem, secteur === sec && s.pickerItemActive]}
+                onPress={() => { setSecteur(sec); setShowSecteurPicker(false); }}
+              >
+                <Text style={[s.pickerItemText, secteur === sec && s.pickerItemTextActive]}>{sec}</Text>
+                {secteur === sec && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
+    </Modal>
+  );
+}
 
 // ── Brand detail modal ──────────────────────────────────────────────────────
 
@@ -301,6 +442,7 @@ export default function PartenairesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Partenaire | null>(null);
+  const [showCandidature, setShowCandidature] = useState(false);
 
   useEffect(() => { init(); }, [session?.user?.id]);
 
@@ -387,6 +529,17 @@ export default function PartenairesScreen() {
             </View>
           ))}
         </View>
+
+        {/* CTA marques */}
+        <View style={s.brandCta}>
+          <Ionicons name="storefront-outline" size={28} color={colors.terra} />
+          <Text style={s.brandCtaTitle}>Vous êtes une marque dog-friendly ?</Text>
+          <Text style={s.brandCtaText}>Rejoignez nos partenaires et partagez vos offres avec toute la communauté.</Text>
+          <TouchableOpacity style={s.brandCtaBtn} onPress={() => setShowCandidature(true)}>
+            <Text style={s.brandCtaBtnLabel}>Postuler comme partenaire</Text>
+            <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
       <BrandModal
@@ -394,6 +547,11 @@ export default function PartenairesScreen() {
         posts={selectedBrand ? postsFor(selectedBrand.id) : []}
         visible={!!selectedBrand}
         onClose={() => setSelectedBrand(null)}
+      />
+
+      <CandidatureMarqueModal
+        visible={showCandidature}
+        onClose={() => setShowCandidature(false)}
       />
     </>
   );
@@ -557,4 +715,68 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 7,
   },
   ctaBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+
+  // Brand CTA section
+  brandCta: {
+    margin: 28, marginTop: 20, padding: 24,
+    backgroundColor: colors.white, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', gap: 10,
+    marginBottom: 12,
+  },
+  brandCtaTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, textAlign: 'center' },
+  brandCtaText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  brandCtaBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: colors.bordeaux, borderRadius: 20,
+    paddingHorizontal: 18, paddingVertical: 11, marginTop: 4,
+  },
+  brandCtaBtnLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+
+  // Candidature modal
+  candidContainer: { flex: 1, backgroundColor: colors.ivoryPale },
+  candidHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 24, paddingBottom: 12,
+  },
+  candidTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux },
+  candidIntro: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid,
+    lineHeight: 20, paddingHorizontal: 20, marginBottom: 20,
+  },
+  candidLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux, paddingHorizontal: 20, marginBottom: 6, marginTop: 14 },
+  candidInput: {
+    marginHorizontal: 20, backgroundColor: colors.white, borderRadius: 10,
+    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 14, paddingVertical: 11,
+    fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,
+  },
+  candidSelect: {
+    marginHorizontal: 20, backgroundColor: colors.white, borderRadius: 10,
+    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 14, paddingVertical: 13,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  candidSelectText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  candidBtn: {
+    marginHorizontal: 20, marginTop: 24, backgroundColor: colors.bordeaux,
+    borderRadius: 12, paddingVertical: 15, alignItems: 'center',
+  },
+  candidBtnLabel: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  candidSentTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux },
+  candidSentText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted },
+
+  // Secteur picker
+  pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  pickerSheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32 },
+  pickerHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  pickerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickerItemActive: { backgroundColor: 'rgba(196,105,58,0.06)' },
+  pickerItemText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux },
+  pickerItemTextActive: { fontFamily: 'DMSans_500Medium', color: colors.terra },
 });
