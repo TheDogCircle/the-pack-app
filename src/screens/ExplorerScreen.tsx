@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Image, ActivityIndicator, Dimensions, FlatList,
-  Modal, TextInput, Linking, KeyboardAvoidingView, Platform,
+  Modal, TextInput, Linking, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -252,7 +252,7 @@ function CandidatureModal({ userId, onClose }: { userId: string; onClose: () => 
   async function submit() {
     if (!nom.trim()) return;
     setSending(true);
-    await supabase.from('explorateur_candidatures').insert({
+    const { error } = await supabase.from('explorateur_candidatures').insert({
       user_id: userId,
       nom: nom.trim(),
       instagram_url: instagram.trim() || null,
@@ -261,6 +261,7 @@ function CandidatureModal({ userId, onClose }: { userId: string; onClose: () => 
       message: message.trim() || null,
     });
     setSending(false);
+    if (error) { Alert.alert('Erreur', "Impossible d'envoyer la candidature."); return; }
     setSent(true);
   }
 
@@ -446,6 +447,8 @@ export default function ExplorerScreen() {
   const [photoLikesCount, setPhotoLikesCount] = useState<Record<string, number>>({});
   const [photoLikedByMe, setPhotoLikedByMe] = useState<Set<string>>(new Set());
 
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user.id) {
@@ -477,19 +480,92 @@ export default function ExplorerScreen() {
 
   useFocusEffect(useCallback(() => {
     loadAll();
-  }, [userId, userLat, userLng, activeCat, nearbyRadius]));
+  }, [userId, userLat, userLng, activeCat]));
+
+  // Radius chip change → only reload nearby section, not everything
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    loadNearby();
+  }, [nearbyRadius]);
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([
-      loadNearby(),
-      loadTopLieux(),
+    const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    let qAdresses = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
+      .eq('actif', true).eq('mise_en_avant', true).order('updated_at', { ascending: false }).limit(10);
+    if (activeCat) qAdresses = (qAdresses as any).eq('cat', activeCat);
+
+    let qTop = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
+      .eq('actif', true).not('note_moyenne', 'is', null).order('note_moyenne', { ascending: false }).limit(10);
+    if (activeCat) qTop = (qTop as any).eq('cat', activeCat);
+
+    let qRecent = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
+      .eq('actif', true).gte('created_at', since30days).order('created_at', { ascending: false }).limit(10);
+    if (activeCat) qRecent = (qRecent as any).eq('cat', activeCat);
+
+    let qNearby = supabase.from('lieux').select('id,nom,cat,ville,lat,lng,note_moyenne,google_photo_url').eq('actif', true);
+    if (activeCat) qNearby = (qNearby as any).eq('cat', activeCat);
+    if (userLat && userLng) {
+      const delta = (nearbyRadius / 111) * 1.3;
+      qNearby = (qNearby as any)
+        .gte('lat', userLat - delta).lte('lat', userLat + delta)
+        .gte('lng', userLng - delta).lte('lng', userLng + delta);
+    }
+    qNearby = (qNearby as any).limit(60);
+
+    // All 4 lieux queries + explorateurs + photos in parallel
+    const [[rAdresses, rTop, rRecent, rNearby]] = await Promise.all([
+      Promise.all([qAdresses, qTop, qRecent, qNearby]),
       loadExplorateurs(),
-      loadAdressesDuMoment(),
-      loadRecentLieux(),
       loadRecentPhotos(),
     ]);
+
+    let adressesRaw: LieuCard[] = (rAdresses.data || []) as LieuCard[];
+    let topRaw: LieuCard[] = (rTop.data || []) as LieuCard[];
+    let recentRaw: LieuCard[] = (rRecent.data || []) as LieuCard[];
+    let nearbyRaw: LieuCard[] = (rNearby.data || []) as LieuCard[];
+
+    if (userLat && userLng) {
+      nearbyRaw = nearbyRaw
+        .map((l: any) => ({ ...l, distance: haversine(userLat!, userLng!, l.lat, l.lng) }))
+        .filter((l: any) => l.distance <= nearbyRadius)
+        .sort((a: any, b: any) => a.distance - b.distance)
+        .slice(0, 10);
+    } else {
+      nearbyRaw = nearbyRaw.slice(0, 10);
+    }
+
+    // ONE photo query for all sections combined
+    const allIds = [...new Set([...adressesRaw, ...nearbyRaw, ...topRaw, ...recentRaw].map(l => l.id))];
+    const photoMap = await fetchPhotosForLieux(allIds);
+    const enrich = (l: LieuCard): LieuCard => ({ ...l, photoUrl: photoMap[l.id] || (l as any).google_photo_url || null });
+
+    const adresses = adressesRaw.map(enrich);
+    const nearby = nearbyRaw.map(enrich);
+    const top = topRaw.map(enrich);
+    const recent = recentRaw.map(enrich);
+
+    setAdressesDuMoment(adresses);
+    setNearbyLieux(nearby);
+    setTopLieux(top);
+    setRecentLieux(recent);
+    setFeaturedLieu(nearby.find(l => l.photoUrl) || nearby[0] || adresses[0] || null);
     setLoading(false);
+    initialLoadDone.current = true;
+
+    // Background: fetch Google photos, deduplicated across all sections
+    const seen = new Set<string>();
+    [...adresses, ...nearby, ...top, ...recent]
+      .filter(l => !l.photoUrl && !seen.has(l.id) && (seen.add(l.id), true))
+      .forEach(l => fetchGooglePhoto(l).then(url => {
+        if (!url) return;
+        const patch = (list: LieuCard[]) => list.map(p => p.id === l.id ? { ...p, photoUrl: url } : p);
+        setAdressesDuMoment(patch);
+        setNearbyLieux(prev => { const r = patch(prev); setFeaturedLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp); return r; });
+        setTopLieux(patch);
+        setRecentLieux(patch);
+      }));
   }
 
   async function loadExplorateurs() {
@@ -522,25 +598,11 @@ export default function ExplorerScreen() {
     setSelectedExplorateur({ ...exp, lieux });
   }
 
-  async function loadAdressesDuMoment() {
-    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
-      .eq('actif', true).eq('mise_en_avant', true).order('updated_at', { ascending: false }).limit(10);
-    if (activeCat) q = (q as any).eq('cat', activeCat);
-    const { data } = await q;
-    const lieux = data || [];
-    const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
-    const mapped = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
-    setAdressesDuMoment(mapped);
-    mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
-      fetchGooglePhoto(l).then(url => { if (url) setAdressesDuMoment(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
-    );
-  }
-
+  // Standalone: called when nearbyRadius chip changes (no full reload)
   async function loadNearby() {
     let q = supabase.from('lieux').select('id,nom,cat,ville,lat,lng,note_moyenne,google_photo_url').eq('actif', true);
     if (activeCat) q = (q as any).eq('cat', activeCat);
     if (userLat && userLng) {
-      // Bounding box slightly larger than radius; strict circle filter applied client-side
       const delta = (nearbyRadius / 111) * 1.3;
       q = (q as any)
         .gte('lat', userLat - delta).lte('lat', userLat + delta)
@@ -548,7 +610,7 @@ export default function ExplorerScreen() {
     }
     q = (q as any).limit(60);
     const { data } = await q;
-    let lieux = data || [];
+    let lieux: LieuCard[] = data || [];
     if (userLat && userLng) {
       lieux = lieux
         .map((l: any) => ({ ...l, distance: haversine(userLat!, userLng!, l.lat, l.lng) }))
@@ -558,48 +620,16 @@ export default function ExplorerScreen() {
     } else {
       lieux = lieux.slice(0, 10);
     }
-    const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
-    const withPhotos = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
+    const photos = await fetchPhotosForLieux(lieux.map(l => l.id));
+    const withPhotos = lieux.map(l => ({ ...l, photoUrl: photos[l.id] || (l as any).google_photo_url || null }));
     setNearbyLieux(withPhotos);
-    const featured = withPhotos.find((l: LieuCard) => l.photoUrl) || withPhotos[0] || null;
-    setFeaturedLieu(featured);
-    withPhotos.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
+    setFeaturedLieu(prev => withPhotos.find(l => l.photoUrl) || withPhotos[0] || prev);
+    withPhotos.filter(l => !l.photoUrl).forEach(l =>
       fetchGooglePhoto(l).then(url => {
         if (!url) return;
         setNearbyLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p));
-        setFeaturedLieu(prev => prev?.id === l.id ? { ...prev, photoUrl: url } : prev);
+        setFeaturedLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp);
       })
-    );
-  }
-
-  async function loadTopLieux() {
-    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
-      .eq('actif', true).not('note_moyenne', 'is', null)
-      .order('note_moyenne', { ascending: false }).limit(10);
-    if (activeCat) q = (q as any).eq('cat', activeCat);
-    const { data } = await q;
-    const lieux = data || [];
-    const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
-    const mapped = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
-    setTopLieux(mapped);
-    mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
-      fetchGooglePhoto(l).then(url => { if (url) setTopLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
-    );
-  }
-
-  async function loadRecentLieux() {
-    const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    let q = supabase.from('lieux').select('id,nom,cat,ville,note_moyenne,google_photo_url')
-      .eq('actif', true).gte('created_at', since30days)
-      .order('created_at', { ascending: false }).limit(10);
-    if (activeCat) q = (q as any).eq('cat', activeCat);
-    const { data } = await q;
-    const lieux = data || [];
-    const photos = await fetchPhotosForLieux(lieux.map((l: any) => l.id));
-    const mapped = lieux.map((l: any) => ({ ...l, photoUrl: photos[l.id] || l.google_photo_url || null }));
-    setRecentLieux(mapped);
-    mapped.filter((l: LieuCard) => !l.photoUrl).forEach((l: LieuCard) =>
-      fetchGooglePhoto(l).then(url => { if (url) setRecentLieux(prev => prev.map(p => p.id === l.id ? { ...p, photoUrl: url } : p)); })
     );
   }
 
@@ -640,12 +670,14 @@ export default function ExplorerScreen() {
   async function togglePhotoLike(photoId: string) {
     if (!userId) return;
     const isLiked = photoLikedByMe.has(photoId);
+    const { error } = isLiked
+      ? await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId)
+      : await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });
+    if (error) return;
     if (isLiked) {
-      await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId);
       setPhotoLikedByMe(prev => { const s = new Set(prev); s.delete(photoId); return s; });
       setPhotoLikesCount(prev => ({ ...prev, [photoId]: Math.max(0, (prev[photoId] || 0) - 1) }));
     } else {
-      await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });
       setPhotoLikedByMe(prev => new Set([...prev, photoId]));
       setPhotoLikesCount(prev => ({ ...prev, [photoId]: (prev[photoId] || 0) + 1 }));
     }
