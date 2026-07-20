@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
-import { savePushToken } from '../lib/notifications';
+import { savePushToken, sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
@@ -256,6 +256,7 @@ export default function ProfilScreen() {
   const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState<{ id: string; follower_id: string; prenom: string | null; username: string | null; avatar_url: string | null }[]>([]);
   const cardRef = useRef<View>(null);
 
   const [prenom, setPrenom] = useState('');
@@ -281,7 +282,7 @@ export default function ProfilScreen() {
 
     savePushToken(session.user.id);
 
-    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }] = await Promise.all([
+    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }] = await Promise.all([
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
@@ -289,6 +290,7 @@ export default function ProfilScreen() {
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', session.user.id).eq('statut', 'accepte'),
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', session.user.id).eq('statut', 'accepte'),
       supabase.from('explorateurs').select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web').eq('user_id', session.user.id).maybeSingle(),
+      supabase.from('follows').select('id,follower_id').eq('following_id', session.user.id).eq('statut', 'en_attente'),
     ]);
     setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
@@ -321,6 +323,21 @@ export default function ProfilScreen() {
       lieu_id: a.lieu_id, lieux: lieuxMap[a.lieu_id] || null,
     })));
     setMyPhotos(photosList || []);
+
+    if (pendingFollows && pendingFollows.length > 0) {
+      const ids = pendingFollows.map((f: any) => f.follower_id);
+      const { data: fp } = await supabase.from('profils').select('id,prenom,username,avatar_url').in('id', ids);
+      const pm = Object.fromEntries((fp || []).map((p: any) => [p.id, p]));
+      setPendingRequests(pendingFollows.map((f: any) => ({
+        id: f.id, follower_id: f.follower_id,
+        prenom: pm[f.follower_id]?.prenom || null,
+        username: pm[f.follower_id]?.username || null,
+        avatar_url: pm[f.follower_id]?.avatar_url || null,
+      })));
+    } else {
+      setPendingRequests([]);
+    }
+
     setLoading(false);
   }
 
@@ -404,6 +421,21 @@ export default function ProfilScreen() {
     setFollowListLoading(false);
   }
 
+  async function acceptRequest(followId: string, followerId: string) {
+    await supabase.from('follows').update({ statut: 'accepte' }).eq('id', followId);
+    setPendingRequests(prev => prev.filter(r => r.id !== followId));
+    setFollowersCount(c => c + 1);
+    const { data: req } = await supabase.from('profils').select('push_token,notif_follow').eq('id', followerId).single();
+    if (req?.push_token && req?.notif_follow !== false) {
+      sendPushNotification(req.push_token, 'Demande acceptée 🐾', `${profil?.prenom || 'Quelqu\'un'} a accepté ta demande de suivi !`, { type: 'follow_accepted' });
+    }
+  }
+
+  async function rejectRequest(followId: string) {
+    await supabase.from('follows').delete().eq('id', followId);
+    setPendingRequests(prev => prev.filter(r => r.id !== followId));
+  }
+
   if (sessionLoading || loading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder à ton profil, tes adresses et tes avis." />;
 
@@ -437,13 +469,17 @@ export default function ProfilScreen() {
               <Text style={styles.statLabel}>Favoris</Text>
             </View>
             <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('followers')} activeOpacity={0.7}>
-              <Text style={styles.statNum}>{followersCount}</Text>
+              <Text style={styles.statNum}>{followersCount}{pendingRequests.length > 0 ? ` +${pendingRequests.length}` : ''}</Text>
               <Text style={styles.statLabel}>Abonnés</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('following')} activeOpacity={0.7}>
               <Text style={styles.statNum}>{followingCount}</Text>
               <Text style={styles.statLabel}>Abonnements</Text>
             </TouchableOpacity>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{avis.length + myPhotos.filter((ph: any) => ph.validee).length}</Text>
+              <Text style={styles.statLabel}>Contributions</Text>
+            </View>
           </View>
           {(() => {
             const pts = profil?.points || 0;
@@ -475,6 +511,30 @@ export default function ProfilScreen() {
         <Ionicons name="share-outline" size={15} color={colors.bordeaux} />
         <Text style={styles.shareBtnText}>Partager mon profil</Text>
       </TouchableOpacity>
+
+      {/* Demandes en attente */}
+      {pendingRequests.length > 0 && (
+        <View style={styles.pendingSection}>
+          <Text style={styles.pendingTitle}>🔔 Demandes en attente ({pendingRequests.length})</Text>
+          {pendingRequests.map(req => (
+            <View key={req.id} style={styles.pendingRow}>
+              {req.avatar_url
+                ? <Image source={{ uri: req.avatar_url }} style={styles.pendingAvatar} />
+                : <View style={styles.pendingAvatarFallback}><Text style={styles.pendingAvatarLetter}>{(req.prenom || '?')[0].toUpperCase()}</Text></View>}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pendingName}>{req.prenom || 'Utilisateur'}</Text>
+                {req.username ? <Text style={styles.pendingUsername}>@{req.username}</Text> : null}
+              </View>
+              <TouchableOpacity style={styles.pendingAccept} onPress={() => acceptRequest(req.id, req.follower_id)}>
+                <Text style={styles.pendingAcceptText}>Accepter</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.pendingReject} onPress={() => rejectRequest(req.id)}>
+                <Ionicons name="close" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -934,6 +994,28 @@ const styles = StyleSheet.create({
   niveauBarFill: { height: 3, backgroundColor: colors.terra, borderRadius: 2 },
   niveauNext: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.4)', marginTop: 3 },
   logoutIcon: { padding: 4 },
+  pendingSection: {
+    backgroundColor: 'rgba(196,105,58,0.07)', borderBottomWidth: 1, borderBottomColor: 'rgba(196,105,58,0.15)',
+    paddingHorizontal: 16, paddingVertical: 10,
+  },
+  pendingTitle: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra, marginBottom: 8 },
+  pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  pendingAvatar: { width: 36, height: 36, borderRadius: 18 },
+  pendingAvatarFallback: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bordeaux,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  pendingAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.ivory },
+  pendingName: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  pendingUsername: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  pendingAccept: {
+    backgroundColor: colors.terra, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6,
+  },
+  pendingAcceptText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+  pendingReject: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
   tabs: {
     flexDirection: 'row', backgroundColor: colors.white,
     borderBottomWidth: 1, borderBottomColor: colors.border,
