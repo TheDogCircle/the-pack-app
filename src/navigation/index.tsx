@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { savePushToken } from '../lib/notifications';
 
 import { useSession } from '../hooks/useSession';
 import AuthScreen from '../screens/AuthScreen';
@@ -159,6 +160,8 @@ export default function Navigation() {
       setOnboardingChecked(true);
       return;
     }
+    // Enregistre le token dès la connexion, quel que soit l'écran ouvert
+    savePushToken(session.user.id);
     setOnboardingChecked(false);
     supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle()
       .then(({ data }) => {
