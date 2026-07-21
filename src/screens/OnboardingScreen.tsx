@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
+  KeyboardAvoidingView, Keyboard, Platform, ScrollView, ActivityIndicator,
   Modal, FlatList, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,24 +20,35 @@ const RACES = [
   'Border Terrier', 'Boston Terrier', 'Bouledogue Anglais', 'Bouledogue Français',
   'Bouvier Bernois', 'Bouvier des Flandres', 'Boxer', 'Braque Allemand (Drathaar)',
   "Braque d'Auvergne", 'Braque de Weimar', 'Braque Français', 'Braque Hongrois (Magyar Vizsla)',
-  'Bull Terrier', 'Cairn Terrier', 'Cane Corso', 'Caniche (Toy / Nain / Moyen / Grand)',
-  'Carlin (Pug)', 'Cavalier King Charles', "Chien de Montagne de l'Atlas (Aidi)",
-  'Chien Loup Tchécoslovaque', 'Chien Loup de Saarloos', 'Chihuahua', 'Chow Chow',
-  'Clumber Spaniel', 'Cocker Américain', 'Cocker Anglais', 'Colley (Lassie)',
-  'Coton de Tuléar', 'Croisé', 'Dalmatien', 'Doberman', 'Dogue Allemand (Great Dane)',
-  'Dogue de Bordeaux', 'English Springer Spaniel', 'Épagneul Breton', 'Épagneul Français',
-  'Épagneul Papillon', 'Eurasier', 'Flat-Coated Retriever', 'Fox Terrier', 'Galgo Espagnol',
-  'Golden Retriever', 'Grand Bleu de Gascogne', 'Griffon Belge', 'Griffon Nivernais',
-  'Husky Sibérien', 'Irish Wolfhound (Lévrier Irlandais)', 'Jack Russell Terrier',
-  "Kangal / Berger d'Anatolie", 'Kelpie Australien', 'Labrador Retriever', 'Lagotto Romagnolo',
-  'Leonberg', 'Lévrier Afghan', 'Lévrier (Greyhound / Whippet)', 'Lhasa Apso', 'Maltais',
-  'Mastiff Anglais', 'Montagne des Pyrénées', 'Münsterlander', 'Pékinois',
-  'Pinscher Moyen', 'Pinscher Nain', 'Pointer', 'Rottweiler', 'Saint-Bernard',
-  'Saluki', 'Samoyède', 'Schnauzer Géant', 'Schnauzer Moyen', 'Schnauzer Nain',
-  'Scottish Terrier', 'Shar Pei', 'Setter Irlandais', 'Shiba Inu', 'Shih Tzu',
-  'Sloughi', 'Spitz Nain (Poméranien)', 'Spitz Moyen', 'Staffordshire Bull Terrier',
+  'Bull Terrier', 'Cairn Terrier', 'Cane Corso', 'Caniche',
+  'Carlin (Pug)', 'Cavalier King Charles', "Chien de la Réunion (Bourbon Créole)",
+  "Chien de Montagne de l'Atlas (Aidi)", 'Chien Loup Tchécoslovaque', 'Chien Loup de Saarloos',
+  'Chihuahua', 'Chow Chow', 'Clumber Spaniel', 'Cocker Américain', 'Cocker Anglais',
+  'Colley (Lassie)', 'Coton de Tuléar', 'Croisé', 'Dalmatien', 'Doberman',
+  'Dogue Allemand (Great Dane)', 'Dogue de Bordeaux', 'English Springer Spaniel',
+  'Épagneul Breton', 'Épagneul Français', 'Épagneul Münsterlander', 'Épagneul Papillon',
+  'Eurasier', 'Flat-Coated Retriever', 'Fox Terrier', 'Galgo Espagnol', 'Golden Retriever',
+  'Grand Bleu de Gascogne', 'Griffon Belge', 'Griffon Nivernais', 'Husky Sibérien',
+  'Irish Wolfhound (Lévrier Irlandais)', 'Jack Russell Terrier', "Kangal / Berger d'Anatolie",
+  'Kelpie Australien', 'Labrador Retriever', 'Lagotto Romagnolo', 'Leonberg', 'Lévrier Afghan',
+  'Lévrier (Greyhound / Whippet)', 'Lhasa Apso', 'Maltais', 'Mastiff Anglais',
+  'Montagne des Pyrénées', 'Pékinois', 'Pinscher', 'Pointer', 'Rottweiler', 'Saint-Bernard',
+  'Saluki', 'Samoyède', 'Schnauzer', 'Scottish Terrier', 'Shar Pei', 'Setter Irlandais',
+  'Shiba Inu', 'Shih Tzu', 'Sloughi', 'Spitz (Poméranien)', 'Staffordshire Bull Terrier',
   'Teckel', 'Terre-Neuve', 'Tosa Inu', 'Welsh Corgi Cardigan', 'Welsh Corgi Pembroke',
   'Westie (West Highland White Terrier)', 'Yorkshire Terrier', 'Autre race',
+];
+
+const GENRES = [
+  { key: 'male',    label: 'Mâle',    emoji: '♂️' },
+  { key: 'femelle', label: 'Femelle', emoji: '♀️' },
+];
+
+const TRANCHES_AGE = [
+  { key: 'chiot',  label: 'Chiot',  emoji: '🐣', sub: '0 – 1 an'  },
+  { key: 'jeune',  label: 'Jeune',  emoji: '🐕', sub: '1 – 3 ans' },
+  { key: 'adulte', label: 'Adulte', emoji: '🦮', sub: '3 – 8 ans' },
+  { key: 'senior', label: 'Senior', emoji: '🐾', sub: '8+ ans'    },
 ];
 
 const STATUTS_AMOUREUX = [
@@ -75,9 +86,13 @@ export default function OnboardingScreen() {
   // Step 2 — dog
   const [nomChien, setNomChien] = useState('');
   const [raceChien, setRaceChien] = useState('');
+  const [genre, setGenre] = useState('');
+  const [trancheAge, setTrancheAge] = useState('');
   const [statutAmoureux, setStatutAmoureux] = useState('');
   const [nomChienError, setNomChienError] = useState(false);
   const [raceError, setRaceError] = useState(false);
+  const [genreError, setGenreError] = useState(false);
+  const [trancheAgeError, setTrancheAgeError] = useState(false);
 
   // Race picker
   const [raceModal, setRaceModal] = useState(false);
@@ -128,9 +143,13 @@ export default function OnboardingScreen() {
     if (!session) return;
     const nc = !nomChien.trim();
     const rc = !raceChien;
+    const g = !genre;
+    const ta = !trancheAge;
     setNomChienError(nc);
     setRaceError(rc);
-    if (nc || rc) return;
+    setGenreError(g);
+    setTrancheAgeError(ta);
+    if (nc || rc || g || ta) return;
 
     setSaving(true);
     const { error: upsertError } = await supabase.from('profils').upsert({
@@ -142,6 +161,8 @@ export default function OnboardingScreen() {
       ville: ville.trim() || null,
       nom_chien: nomChien.trim(),
       race_chien: raceChien,
+      genre_chien: genre,
+      tranche_age_chien: trancheAge,
       statut_amoureux_chien: statutAmoureux || null,
     });
     setSaving(false);
@@ -322,6 +343,45 @@ export default function OnboardingScreen() {
               </TouchableOpacity>
               {raceError && <Text style={styles.errorText}>La race est requise</Text>}
 
+              <Text style={[styles.label, { marginTop: 16 }]}>Genre *</Text>
+              <View style={styles.statutGrid}>
+                {GENRES.map(g => {
+                  const active = genre === g.key;
+                  return (
+                    <TouchableOpacity
+                      key={g.key}
+                      style={[styles.statutPill, active && styles.statutPillActive, genreError && !genre && styles.inputError]}
+                      onPress={() => { setGenre(g.key); setGenreError(false); }}
+                    >
+                      <Text style={styles.statutEmoji}>{g.emoji}</Text>
+                      <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {genreError && <Text style={styles.errorText}>Le genre est requis</Text>}
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Tranche d'âge *</Text>
+              <View style={styles.statutGrid}>
+                {TRANCHES_AGE.map(t => {
+                  const active = trancheAge === t.key;
+                  return (
+                    <TouchableOpacity
+                      key={t.key}
+                      style={[styles.statutPill, active && styles.statutPillActive]}
+                      onPress={() => { setTrancheAge(t.key); setTrancheAgeError(false); }}
+                    >
+                      <Text style={styles.statutEmoji}>{t.emoji}</Text>
+                      <View>
+                        <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{t.label}</Text>
+                        <Text style={[styles.statutSub, active && styles.statutLabelActive]}>{t.sub}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {trancheAgeError && <Text style={styles.errorText}>La tranche d'âge est requise</Text>}
+
               <Text style={[styles.label, { marginTop: 16 }]}>Situation amoureuse</Text>
               <View style={styles.statutGrid}>
                 {STATUTS_AMOUREUX.map(s => {
@@ -390,7 +450,7 @@ export default function OnboardingScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
-                  onPress={() => { setRaceChien(item); setRaceError(false); setRaceModal(false); }}
+                  onPress={() => { Keyboard.dismiss(); setRaceChien(item); setRaceError(false); setRaceModal(false); }}
                 >
                   <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
                   {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
@@ -510,6 +570,7 @@ const styles = StyleSheet.create({
   statutEmoji: { fontSize: 14 },
   statutLabel: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
   statutLabelActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
+  statutSub: { fontFamily: 'DMSans_300Light', fontSize: 10, color: colors.textMuted },
 
   btn: { backgroundColor: colors.terra, borderRadius: 14, padding: 16, alignItems: 'center' },
   btnDisabled: { opacity: 0.6 },

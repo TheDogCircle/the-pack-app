@@ -25,6 +25,9 @@ const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
 const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 
+// Feature flag — mettre à true pour réactiver l'upload vidéo
+const ENABLE_VIDEO_UPLOAD = false;
+
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
 const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName; label: string; color: string }> = {
@@ -695,19 +698,23 @@ export default function CarteScreen() {
         setDogTagModal(true);
       };
 
-      Alert.alert(
-        'Ajouter une vidéo ?',
-        'Tu peux joindre une courte vidéo en plus (optionnel).',
-        [
-          { text: 'Non, publier', onPress: () => proceed(null) },
-          { text: 'Ajouter une vidéo', onPress: async () => {
-            try {
-              const vid = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 });
-              proceed(!vid.canceled && vid.assets?.[0]?.uri ? vid.assets[0].uri : null);
-            } catch { proceed(null); }
-          }},
-        ]
-      );
+      if (ENABLE_VIDEO_UPLOAD) {
+        Alert.alert(
+          'Ajouter une vidéo ?',
+          'Tu peux joindre une courte vidéo en plus (optionnel).',
+          [
+            { text: 'Non, publier', onPress: () => proceed(null) },
+            { text: 'Ajouter une vidéo', onPress: async () => {
+              try {
+                const vid = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 });
+                proceed(!vid.canceled && vid.assets?.[0]?.uri ? vid.assets[0].uri : null);
+              } catch { proceed(null); }
+            }},
+          ]
+        );
+      } else {
+        proceed(null);
+      }
     } catch (e: any) {
       Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la galerie.');
     }
@@ -2293,7 +2300,8 @@ export default function CarteScreen() {
                 </ScrollView>
               </View>
 
-              {/* Vidéo */}
+              {/* Vidéo — masqué via ENABLE_VIDEO_UPLOAD */}
+              {ENABLE_VIDEO_UPLOAD && (
               <View style={styles.proposeField}>
                 <Text style={styles.proposeLabel}>Vidéo (max 60 sec)</Text>
                 {proposeVideo ? (
@@ -2315,6 +2323,7 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+              )}
 
               <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || proposeLoading}>
                 {proposeLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Soumettre le lieu</Text>}

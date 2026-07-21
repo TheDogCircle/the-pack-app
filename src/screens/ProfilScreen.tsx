@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal, FlatList, Dimensions, Share,
+  Keyboard, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -19,20 +20,32 @@ import { mapNavigation } from '../lib/mapNavigation';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const RACES = [
-  'Akita Inu','Alaskan Malamute','Basenji','Basset Hound','Beagle','Berger Allemand',
-  'Berger Australien','Berger Belge Malinois','Berger des Pyrénées','Bichon Frisé',
-  'Bobtail (Old English Sheepdog)','Border Collie','Boston Terrier','Bouledogue Anglais',
-  'Bouledogue Français','Boxer','Braque de Weimar','Braque Français','Bull Terrier',
-  'Cairn Terrier','Caniche (Toy / Nain / Moyen / Grand)','Carlin (Pug)','Cavalier King Charles',
-  'Chihuahua','Chow Chow','Cocker Américain','Cocker Anglais','Colley (Lassie)',
-  'Corgi (Pembroke / Cardigan)','Dalmatien',
-  'Doberman','Dogue Allemand (Great Dane)','Dogue de Bordeaux','Épagneul Breton',
-  'Fox Terrier','Golden Retriever','Husky Sibérien','Jack Russell Terrier',
-  'Labrador Retriever','Leonberg','Lévrier (Greyhound / Whippet)','Lhasa Apso',
-  'Maltais','Montagne des Pyrénées','Pékinois','Rottweiler','Saint-Bernard','Samoyède',
-  'Setter Irlandais','Shiba Inu','Shih Tzu','Spitz Nain (Poméranien)','Teckel',
-  'Terre-Neuve','Westie (West Highland White Terrier)','Yorkshire Terrier',
-  'Croisé...','Autre...',
+  'Affenpinscher', 'Airedale Terrier', 'Akita Américain', 'Akita Inu', 'Alaskan Malamute',
+  'American Staffordshire Terrier (Amstaff)', 'Barbet', 'Basenji', 'Basset Hound', 'Beagle',
+  'Beauceron', 'Berger Allemand', 'Berger Australien', 'Berger Belge Groenendael',
+  'Berger Belge Malinois', 'Berger Belge Tervueren', 'Berger Blanc Suisse',
+  'Berger de Brie (Briard)', 'Berger des Pyrénées', 'Berger Picard', 'Bichon Frisé',
+  'Bloodhound (Saint-Hubert)', 'Bobtail (Old English Sheepdog)', 'Border Collie',
+  'Border Terrier', 'Boston Terrier', 'Bouledogue Anglais', 'Bouledogue Français',
+  'Bouvier Bernois', 'Bouvier des Flandres', 'Boxer', 'Braque Allemand (Drathaar)',
+  "Braque d'Auvergne", 'Braque de Weimar', 'Braque Français', 'Braque Hongrois (Magyar Vizsla)',
+  'Bull Terrier', 'Cairn Terrier', 'Cane Corso', 'Caniche',
+  'Carlin (Pug)', 'Cavalier King Charles', "Chien de la Réunion (Bourbon Créole)",
+  "Chien de Montagne de l'Atlas (Aidi)", 'Chien Loup Tchécoslovaque', 'Chien Loup de Saarloos',
+  'Chihuahua', 'Chow Chow', 'Clumber Spaniel', 'Cocker Américain', 'Cocker Anglais',
+  'Colley (Lassie)', 'Coton de Tuléar', 'Croisé', 'Dalmatien', 'Doberman',
+  'Dogue Allemand (Great Dane)', 'Dogue de Bordeaux', 'English Springer Spaniel',
+  'Épagneul Breton', 'Épagneul Français', 'Épagneul Münsterlander', 'Épagneul Papillon',
+  'Eurasier', 'Flat-Coated Retriever', 'Fox Terrier', 'Galgo Espagnol', 'Golden Retriever',
+  'Grand Bleu de Gascogne', 'Griffon Belge', 'Griffon Nivernais', 'Husky Sibérien',
+  'Irish Wolfhound (Lévrier Irlandais)', 'Jack Russell Terrier', "Kangal / Berger d'Anatolie",
+  'Kelpie Australien', 'Labrador Retriever', 'Lagotto Romagnolo', 'Leonberg', 'Lévrier Afghan',
+  'Lévrier (Greyhound / Whippet)', 'Lhasa Apso', 'Maltais', 'Mastiff Anglais',
+  'Montagne des Pyrénées', 'Pékinois', 'Pinscher', 'Pointer', 'Rottweiler', 'Saint-Bernard',
+  'Saluki', 'Samoyède', 'Schnauzer', 'Scottish Terrier', 'Shar Pei', 'Setter Irlandais',
+  'Shiba Inu', 'Shih Tzu', 'Sloughi', 'Spitz (Poméranien)', 'Staffordshire Bull Terrier',
+  'Teckel', 'Terre-Neuve', 'Tosa Inu', 'Welsh Corgi Cardigan', 'Welsh Corgi Pembroke',
+  'Westie (West Highland White Terrier)', 'Yorkshire Terrier', 'Autre race',
 ];
 
 const NIVEAUX = [
@@ -249,6 +262,11 @@ export default function ProfilScreen() {
   const [raceModal, setRaceModal] = useState(false);
   const [raceCustomMode, setRaceCustomMode] = useState<'croisé' | 'autre' | null>(null);
   const [raceCustomInput, setRaceCustomInput] = useState('');
+  const [raceSearch, setRaceSearch] = useState('');
+  const filteredRaces = useMemo(
+    () => RACES.filter(r => r.toLowerCase().includes(raceSearch.toLowerCase())),
+    [raceSearch],
+  );
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [accordionOpen, setAccordionOpen] = useState(false);
@@ -882,12 +900,12 @@ export default function ProfilScreen() {
       </Modal>
 
       {/* Race picker modal */}
-      <Modal visible={raceModal} animationType="slide" transparent onRequestClose={() => { setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); }}>
-        <View style={styles.raceModalOverlay}>
+      <Modal visible={raceModal} animationType="slide" transparent onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}>
+        <KeyboardAvoidingView style={styles.raceModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.raceModalCard}>
             <View style={styles.raceModalHeader}>
               <Text style={styles.raceModalTitle}>{raceCustomMode ? (raceCustomMode === 'croisé' ? 'Chien croisé' : 'Autre race') : 'Choisir une race'}</Text>
-              <TouchableOpacity onPress={() => { if (raceCustomMode) { setRaceCustomMode(null); setRaceCustomInput(''); } else { setRaceModal(false); } }}>
+              <TouchableOpacity onPress={() => { if (raceCustomMode) { setRaceCustomMode(null); setRaceCustomInput(''); } else { Keyboard.dismiss(); setRaceModal(false); setRaceSearch(''); } }}>
                 <Ionicons name={raceCustomMode ? 'arrow-back' : 'close'} size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
@@ -907,7 +925,7 @@ export default function ProfilScreen() {
                   onSubmitEditing={() => {
                     const val = raceCustomInput.trim();
                     if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
-                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput('');
+                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
                   }}
                 />
                 <TouchableOpacity
@@ -915,7 +933,7 @@ export default function ProfilScreen() {
                   onPress={() => {
                     const val = raceCustomInput.trim();
                     if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
-                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput('');
+                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
                   }}
                   disabled={!raceCustomInput.trim()}
                 >
@@ -923,26 +941,53 @@ export default function ProfilScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              <FlatList
-                data={RACES}
-                keyExtractor={r => r}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
-                    onPress={() => {
-                      if (item === 'Croisé...') { setRaceCustomMode('croisé'); setRaceCustomInput(''); return; }
-                      if (item === 'Autre...') { setRaceCustomMode('autre'); setRaceCustomInput(''); return; }
-                      setRaceChien(item); setRaceModal(false);
-                    }}
-                  >
-                    <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
-                    {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
-                  </TouchableOpacity>
-                )}
-              />
+              <>
+                <View style={styles.raceSearchWrap}>
+                  <Ionicons name="search" size={15} color={colors.textMuted} />
+                  <TextInput
+                    style={styles.raceSearchInput}
+                    placeholder="Rechercher une race…"
+                    placeholderTextColor={colors.textMuted}
+                    value={raceSearch}
+                    onChangeText={setRaceSearch}
+                    autoCorrect={false}
+                    returnKeyType="search"
+                  />
+                  {raceSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setRaceSearch('')}>
+                      <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <FlatList
+                  data={filteredRaces}
+                  extraData={raceSearch}
+                  keyExtractor={r => r}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
+                      onPress={() => {
+                        if (item === 'Croisé') { setRaceCustomMode('croisé'); setRaceCustomInput(''); setRaceSearch(''); return; }
+                        if (item === 'Autre race') { setRaceCustomMode('autre'); setRaceCustomInput(''); setRaceSearch(''); return; }
+                        Keyboard.dismiss();
+                        setRaceChien(item); setRaceModal(false); setRaceSearch('');
+                      }}
+                    >
+                      <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
+                      {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyComponent={
+                    <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
+                      Aucune race trouvée
+                    </Text>
+                  }
+                />
+              </>
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {showExplorEdit && explorateur && session && (
@@ -1172,6 +1217,12 @@ const styles = StyleSheet.create({
     padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   raceModalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  raceSearchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    margin: 12, paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: 'white', borderRadius: 10, borderWidth: 1.5, borderColor: colors.border,
+  },
+  raceSearchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, padding: 0 },
   raceItem: { paddingVertical: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border + '66' },
   raceItemActive: { backgroundColor: colors.terra + '0D' },
   raceItemText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux },
