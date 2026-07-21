@@ -280,6 +280,8 @@ export default function ProfilScreen() {
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<{ id: string; follower_id: string; prenom: string | null; username: string | null; avatar_url: string | null }[]>([]);
+  const [myLieux, setMyLieux] = useState<{ id: string; nom: string; cat: string; ville: string; actif: boolean }[]>([]);
+  const [lieuxOpen, setLieuxOpen] = useState(false);
   const cardRef = useRef<View>(null);
 
   const [prenom, setPrenom] = useState('');
@@ -305,7 +307,7 @@ export default function ProfilScreen() {
 
     savePushToken(session.user.id);
 
-    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }] = await Promise.all([
+    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }, { data: mesLieux }] = await Promise.all([
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
@@ -314,6 +316,7 @@ export default function ProfilScreen() {
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', session.user.id).eq('statut', 'accepte'),
       supabase.from('explorateurs').select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web').eq('user_id', session.user.id).maybeSingle(),
       supabase.from('follows').select('id,follower_id').eq('following_id', session.user.id).eq('statut', 'en_attente'),
+      supabase.from('lieux').select('id,nom,cat,ville,actif').eq('submitted_by', session.user.id).order('created_at', { ascending: false }).limit(30),
     ]);
     setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
@@ -346,6 +349,7 @@ export default function ProfilScreen() {
       lieu_id: a.lieu_id, lieux: lieuxMap[a.lieu_id] || null,
     })));
     setMyPhotos(photosList || []);
+    setMyLieux((mesLieux || []) as { id: string; nom: string; cat: string; ville: string; actif: boolean }[]);
 
     if (pendingFollows && pendingFollows.length > 0) {
       const ids = pendingFollows.map((f: any) => f.follower_id);
@@ -475,9 +479,14 @@ export default function ProfilScreen() {
           </View>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
-            {profil?.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
+              {profil?.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
+            </View>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.logoutIcon}>
+              <Ionicons name="settings-outline" size={20} color="rgba(245,239,224,0.6)" />
+            </TouchableOpacity>
           </View>
           {profil?.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
           {profil?.ville ? <Text style={styles.ville}>{profil.ville}</Text> : null}
@@ -524,9 +533,6 @@ export default function ProfilScreen() {
             );
           })()}
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.logoutIcon}>
-          <Ionicons name="settings-outline" size={22} color="rgba(245,239,224,0.6)" />
-        </TouchableOpacity>
       </View>
 
       {/* Partager */}
@@ -665,6 +671,45 @@ export default function ProfilScreen() {
                     )}
                   </View>
                 </View>
+              </View>
+            )}
+          </View>
+
+          {/* Mes suggestions de lieux */}
+          <View style={styles.accordionWrap}>
+            <TouchableOpacity style={styles.accordionHeader} onPress={() => setLieuxOpen(o => !o)} activeOpacity={0.8}>
+              <Ionicons name="location-outline" size={15} color={colors.bordeaux} />
+              <Text style={styles.accordionTitle}>Mes suggestions de lieux</Text>
+              {myLieux.length > 0 && (
+                <View style={styles.lieuxCountBadge}>
+                  <Text style={styles.lieuxCountBadgeText}>{myLieux.length}</Text>
+                </View>
+              )}
+              <Ionicons name={lieuxOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+            {lieuxOpen && (
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
+                {myLieux.length === 0 ? (
+                  <View style={{ padding: 16 }}>
+                    <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>
+                      Tu n'as pas encore suggéré de lieu.
+                    </Text>
+                  </View>
+                ) : (
+                  myLieux.map((l, i) => (
+                    <View key={l.id} style={[styles.lieuSuggestRow, i < myLieux.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.lieuSuggestNom} numberOfLines={1}>{l.nom}</Text>
+                        <Text style={styles.lieuSuggestVille}>{l.ville}</Text>
+                      </View>
+                      <View style={[styles.lieuSuggestStatus, { backgroundColor: l.actif ? '#edf8f1' : '#fff8ed' }]}>
+                        <Text style={[styles.lieuSuggestStatusText, { color: l.actif ? '#3a9e5f' : '#c07020' }]}>
+                          {l.actif ? '✓ Approuvé' : '⏳ En attente'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                )}
               </View>
             )}
           </View>
@@ -1031,8 +1076,8 @@ const styles = StyleSheet.create({
   ville: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.6)' },
   dogInfo: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.7)', marginTop: 2 },
   points: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terraPale, marginTop: 3 },
-  statsRow: { flexDirection: 'row', gap: 18, marginTop: 10 },
-  statItem: {},
+  statsRow: { flexDirection: 'row', gap: 18, marginTop: 10, flexWrap: 'wrap' },
+  statItem: { minWidth: 50 },
   statNum: { fontFamily: 'DMSans_500Medium', fontSize: 17, color: colors.terraPale },
   statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.45)', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 1 },
   niveauWrap: { marginTop: 10 },
@@ -1043,7 +1088,17 @@ const styles = StyleSheet.create({
   niveauBarWrap: { height: 3, backgroundColor: 'rgba(245,239,224,0.12)', borderRadius: 2, overflow: 'hidden' },
   niveauBarFill: { height: 3, backgroundColor: colors.terra, borderRadius: 2 },
   niveauNext: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.4)', marginTop: 3 },
-  logoutIcon: { padding: 4 },
+  logoutIcon: { padding: 4, marginLeft: 6 },
+  lieuxCountBadge: {
+    backgroundColor: colors.terraPale + '40', borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2, marginRight: 2,
+  },
+  lieuxCountBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
+  lieuSuggestRow: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10 },
+  lieuSuggestNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMid },
+  lieuSuggestVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  lieuSuggestStatus: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
+  lieuSuggestStatusText: { fontFamily: 'DMSans_500Medium', fontSize: 10 },
   pendingSection: {
     backgroundColor: 'rgba(196,105,58,0.07)', borderBottomWidth: 1, borderBottomColor: 'rgba(196,105,58,0.15)',
     paddingHorizontal: 16, paddingVertical: 10,
