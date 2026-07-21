@@ -152,6 +152,7 @@ export default function MessagerieScreen() {
   const [storyGroupe, setStoryGroupe] = useState<Groupe | null>(null);
   const [myMuted, setMyMuted] = useState(false);
   const storyCardRef = useRef<View>(null);
+  const [pendingGroupeId, setPendingGroupeId] = useState<string | null>(null);
 
   // ── Derived ──
   function convDisplayName(conv: Conversation): string {
@@ -167,6 +168,37 @@ export default function MessagerieScreen() {
 
   // ── Effects ──
   useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
+
+  // Deep link: thepack://groupe?id=xxx
+  useEffect(() => {
+    const handle = (url: string) => {
+      const m = url.match(/thepack:\/\/groupe\?id=([^&]+)/);
+      if (m) { setActiveTab('groupes'); setPendingGroupeId(m[1]); }
+    };
+    Linking.getInitialURL().then(url => { if (url) handle(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
+    return () => sub.remove();
+  }, []);
+
+  // Auto-join prompt when group data is ready
+  useEffect(() => {
+    if (!pendingGroupeId || groupes.length === 0) return;
+    const g = groupes.find(gr => gr.id === pendingGroupeId);
+    if (!g) return;
+    setPendingGroupeId(null);
+    if (myConvIds.has(g.conversation_id)) {
+      openGroupeChat(g);
+    } else {
+      Alert.alert(
+        `Rejoindre "${g.nom}" ?`,
+        g.description || `Groupe The Pack${g.ville ? ` · ${g.ville}` : ''}`,
+        [
+          { text: 'Rejoindre', onPress: () => joinGroupe(g) },
+          { text: 'Annuler', style: 'cancel' },
+        ]
+      );
+    }
+  }, [pendingGroupeId, groupes]);
 
   useEffect(() => {
     if (selectedConv) {
@@ -454,7 +486,8 @@ export default function MessagerieScreen() {
   }
 
   function shareWhatsApp(groupe: Groupe) {
-    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 thepackclub.fr`;
+    const deepLink = `thepack://groupe?id=${groupe.id}`;
+    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 Ouvre The Pack et tape ce lien pour rejoindre directement :\n${deepLink}`;
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(text)}`).catch(() => {
       Share.share({ message: text });
     });

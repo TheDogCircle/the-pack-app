@@ -427,6 +427,16 @@ export default function ProfilScreen() {
     }
   }
 
+  async function shareLink() {
+    if (!profil?.id) return;
+    const name = profil.prenom || 'moi';
+    const url = `thepack://profil?id=${profil.id}`;
+    const webUrl = `https://thepackclub.fr/profil-public.html?id=${profil.id}`;
+    try {
+      await Share.share({ message: `Suis ${name} sur The Pack 🐾\n${webUrl}`, url });
+    } catch {}
+  }
+
   async function openFollowModal(type: 'followers' | 'following') {
     setFollowModal(type);
     setFollowListLoading(true);
@@ -536,10 +546,16 @@ export default function ProfilScreen() {
       </View>
 
       {/* Partager */}
-      <TouchableOpacity style={styles.shareBtn} onPress={shareProfile}>
-        <Ionicons name="share-outline" size={15} color={colors.bordeaux} />
-        <Text style={styles.shareBtnText}>Partager mon profil</Text>
-      </TouchableOpacity>
+      <View style={styles.shareBtnRow}>
+        <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={shareProfile}>
+          <Ionicons name="image-outline" size={15} color={colors.bordeaux} />
+          <Text style={styles.shareBtnText}>Story / Image</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={shareLink}>
+          <Ionicons name="link-outline" size={15} color={colors.bordeaux} />
+          <Text style={styles.shareBtnText}>Lien de profil</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Demandes en attente */}
       {pendingRequests.length > 0 && (
@@ -1130,12 +1146,13 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   tabTextActive: { fontFamily: 'DMSans_500Medium', color: colors.bordeaux },
   tabContent: { padding: 16, gap: 12, paddingBottom: 40 },
+  shareBtnRow: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginBottom: 10 },
   shareBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.white, borderRadius: 12, padding: 14,
+    backgroundColor: colors.white, borderRadius: 12, padding: 13,
     borderWidth: 1, borderColor: colors.border,
   },
-  shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   explorateurCard: {
     marginHorizontal: 16, marginBottom: 16, height: 100, borderRadius: 16, overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,

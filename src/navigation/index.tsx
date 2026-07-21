@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, View, Image } from 'react-native';
+import { ActivityIndicator, View, Image, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { savePushToken } from '../lib/notifications';
@@ -153,6 +153,19 @@ export default function Navigation() {
   const { session, loading } = useSession();
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+
+  // Deep link: thepack://profil?id=xxx → ouvre ProfilPublic
+  useEffect(() => {
+    const handle = (url: string) => {
+      const m = url.match(/thepack:\/\/profil\?id=([^&]+)/);
+      if (m && navigationRef.isReady()) {
+        navigationRef.navigate('ProfilPublic', { userId: m[1], prenom: '' });
+      }
+    };
+    Linking.getInitialURL().then(url => { if (url) handle(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (!session) {
