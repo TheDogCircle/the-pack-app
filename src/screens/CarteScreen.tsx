@@ -2410,7 +2410,7 @@ export default function CarteScreen() {
                 <View style={styles.onboardingProposeBubble}>
                   <Ionicons name="add" size={32} color={colors.ivory} />
                 </View>
-                <Text style={styles.onboardingTitle}>The Pack a besoin de toi !</Text>
+                <Text style={styles.onboardingTitle}>Ajoute ta patte à la carte !</Text>
                 <Text style={styles.onboardingDesc}>
                   Tu connais un super spot dog-friendly dans ta ville ? Ajoute-le avec le bouton{' '}
                   <Text style={{ fontFamily: 'DMSans_500Medium', color: colors.terra }}>+</Text>{' '}

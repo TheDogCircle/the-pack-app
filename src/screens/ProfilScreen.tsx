@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal, FlatList, Dimensions, Share,
-  Keyboard, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -258,23 +257,12 @@ export default function ProfilScreen() {
 
   const [profil, setProfil] = useState<Profil | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profil' | 'favoris' | 'avis' | 'photos'>('favoris');
+  const [activeTab, setActiveTab] = useState<'contributions' | 'favoris' | 'avis' | 'photos'>('favoris');
   const [favoris, setFavoris] = useState<FavItem[]>([]);
   const [avis, setAvis] = useState<AvisItem[]>([]);
   const [myPhotos, setMyPhotos] = useState<PhotoItem[]>([]);
-  const [raceModal, setRaceModal] = useState(false);
-  const [raceCustomMode, setRaceCustomMode] = useState<'croisé' | 'autre' | null>(null);
-  const [raceCustomInput, setRaceCustomInput] = useState('');
-  const [raceSearch, setRaceSearch] = useState('');
-  const filteredRaces = useMemo(
-    () => RACES.filter(r => r.toLowerCase().includes(raceSearch.toLowerCase())),
-    [raceSearch],
-  );
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [accordionOpen, setAccordionOpen] = useState(false);
   const [favFilter, setFavFilter] = useState<'tous' | 'favori' | 'a_tester' | 'deja_teste'>('tous');
   const [followModal, setFollowModal] = useState<'followers' | 'following' | null>(null);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
@@ -284,13 +272,6 @@ export default function ProfilScreen() {
   const [lieuxOpen, setLieuxOpen] = useState(false);
   const cardRef = useRef<View>(null);
 
-  const [prenom, setPrenom] = useState('');
-  const [ville, setVille] = useState('');
-  const [nomChien, setNomChien] = useState('');
-  const [raceChien, setRaceChien] = useState('');
-  const [bio, setBio] = useState('');
-  const [instagram, setInstagramProfil] = useState('');
-  const [tiktok, setTiktokProfil] = useState('');
   const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
   const [showExplorEdit, setShowExplorEdit] = useState(false);
 
@@ -324,13 +305,6 @@ export default function ProfilScreen() {
 
     if (p) {
       setProfil(p);
-      setPrenom(p.prenom || '');
-      setVille(p.ville || '');
-      setNomChien(p.nom_chien || '');
-      setRaceChien(p.race_chien || '');
-      setBio(p.bio || '');
-      setInstagramProfil(p.instagram_url || '');
-      setTiktokProfil(p.tiktok_url || '');
     }
 
     const favLieuIds = [...new Set((favsRaw || []).map((f: any) => f.lieu_id).filter(Boolean))];
@@ -366,23 +340,6 @@ export default function ProfilScreen() {
     }
 
     setLoading(false);
-  }
-
-  async function save() {
-    setSaving(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-    const { error } = await supabase.from('profils').upsert({
-      id: session.user.id,
-      prenom: prenom.trim() || null, ville: ville.trim() || null,
-      nom_chien: nomChien.trim() || null, race_chien: raceChien.trim() || null,
-      bio: bio.trim() || null,
-      instagram_url: instagram.trim() || null, tiktok_url: tiktok.trim() || null,
-    });
-    setSaving(false);
-    if (error) { Alert.alert('Erreur', error.message); return; }
-    setEditing(false);
-    load();
   }
 
   async function pickAvatar() {
@@ -518,10 +475,6 @@ export default function ProfilScreen() {
               <Text style={styles.statNum}>{followingCount}</Text>
               <Text style={styles.statLabel}>Abonnements</Text>
             </TouchableOpacity>
-            <View style={styles.statItem}>
-              <Text style={styles.statNum}>{avis.length + myPhotos.filter((ph: any) => ph.validee).length}</Text>
-              <Text style={styles.statLabel}>Contributions</Text>
-            </View>
           </View>
           {(() => {
             const pts = profil?.points || 0;
@@ -584,10 +537,10 @@ export default function ProfilScreen() {
       {/* Tabs */}
       <View style={styles.tabs}>
         {([
-          { key: 'favoris', label: 'Mes adresses' },
-          { key: 'avis',    label: 'Avis' },
-          { key: 'photos',  label: 'Photos' },
-          { key: 'profil',  label: 'Profil' },
+          { key: 'favoris',       label: 'Mes adresses' },
+          { key: 'avis',          label: 'Avis' },
+          { key: 'photos',        label: 'Photos' },
+          { key: 'contributions', label: 'Contributions' },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, activeTab === t.key && styles.tabActive]} onPress={() => setActiveTab(t.key)}>
             <Text style={[styles.tabText, activeTab === t.key && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
@@ -595,7 +548,7 @@ export default function ProfilScreen() {
         ))}
       </View>
 
-      {activeTab === 'profil' && (
+      {activeTab === 'contributions' && (
         <ScrollView contentContainerStyle={styles.tabContent}>
 
           {/* Espace Explorateur */}
@@ -613,83 +566,6 @@ export default function ProfilScreen() {
               </View>
             </TouchableOpacity>
           )}
-
-          <View style={styles.accordionWrap}>
-            <TouchableOpacity style={styles.accordionHeader} onPress={() => setAccordionOpen(o => !o)} activeOpacity={0.8}>
-              <Ionicons name="person-outline" size={15} color={colors.bordeaux} />
-              <Text style={styles.accordionTitle}>Mes informations</Text>
-              <Ionicons name={accordionOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
-            </TouchableOpacity>
-
-            {accordionOpen && (
-              <View style={styles.accordionBody}>
-                <TouchableOpacity style={styles.editBtn} onPress={() => editing ? save() : setEditing(true)} disabled={saving}>
-                  {saving ? <ActivityIndicator color={colors.ivory} size="small" /> : <Text style={styles.editBtnText}>{editing ? '✓ Enregistrer' : 'Modifier'}</Text>}
-                </TouchableOpacity>
-                {editing && (
-                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)}>
-                    <Text style={styles.cancelBtnText}>Annuler</Text>
-                  </TouchableOpacity>
-                )}
-
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Mes infos</Text>
-                  {[
-                    { label: 'Prénom', value: prenom, setter: setPrenom, placeholder: 'Ex : Marie' },
-                    { label: 'Ville', value: ville, setter: setVille, placeholder: 'Ex : Paris' },
-                  ].map(f => (
-                    <View key={f.label} style={styles.field}>
-                      <Text style={styles.fieldLabel}>{f.label}</Text>
-                      {editing
-                        ? <TextInput style={styles.input} value={f.value} onChangeText={f.setter} placeholder={f.placeholder} placeholderTextColor={colors.textMuted} />
-                        : <Text style={styles.fieldValue}>{f.value || '—'}</Text>}
-                    </View>
-                  ))}
-                  <View style={styles.field}>
-                    <Text style={styles.fieldLabel}>Bio</Text>
-                    {editing
-                      ? <TextInput style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]} value={bio} onChangeText={setBio} placeholder="Quelques mots sur toi…" placeholderTextColor={colors.textMuted} multiline />
-                      : <Text style={styles.fieldValue}>{bio || '—'}</Text>}
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={styles.fieldLabel}>Instagram</Text>
-                    {editing
-                      ? <TextInput style={styles.input} value={instagram} onChangeText={setInstagramProfil} placeholder="https://instagram.com/ton_compte" placeholderTextColor={colors.textMuted} autoCapitalize="none" keyboardType="url" />
-                      : <Text style={styles.fieldValue}>{instagram || '—'}</Text>}
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={styles.fieldLabel}>TikTok</Text>
-                    {editing
-                      ? <TextInput style={styles.input} value={tiktok} onChangeText={setTiktokProfil} placeholder="https://tiktok.com/@ton_compte" placeholderTextColor={colors.textMuted} autoCapitalize="none" keyboardType="url" />
-                      : <Text style={styles.fieldValue}>{tiktok || '—'}</Text>}
-                  </View>
-                </View>
-
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Mon chien 🐾</Text>
-                  <View style={styles.field}>
-                    <Text style={styles.fieldLabel}>Nom du chien</Text>
-                    {editing
-                      ? <TextInput style={styles.input} value={nomChien} onChangeText={setNomChien} placeholder="Ex : Albus" placeholderTextColor={colors.textMuted} />
-                      : <Text style={styles.fieldValue}>{nomChien || '—'}</Text>}
-                  </View>
-                  <View style={styles.field}>
-                    <Text style={styles.fieldLabel}>Race</Text>
-                    {editing ? (
-                      <TouchableOpacity style={styles.racePicker} onPress={() => setRaceModal(true)}>
-                        <Text style={[styles.racePickerText, !raceChien && { color: colors.textMuted }]}>
-                          {raceChien || 'Choisir une race…'}
-                        </Text>
-                        <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
-                      </TouchableOpacity>
-                    ) : (
-                      <Text style={styles.fieldValue}>{raceChien || '—'}</Text>
-                    )}
-                  </View>
-                </View>
-              </View>
-            )}
-          </View>
 
           {/* Mes suggestions de lieux */}
           <View style={styles.accordionWrap}>
@@ -963,97 +839,6 @@ export default function ProfilScreen() {
             )}
           </View>
         </View>
-      </Modal>
-
-      {/* Race picker modal */}
-      <Modal visible={raceModal} animationType="slide" transparent onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}>
-        <KeyboardAvoidingView style={styles.raceModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.raceModalCard}>
-            <View style={styles.raceModalHeader}>
-              <Text style={styles.raceModalTitle}>{raceCustomMode ? (raceCustomMode === 'croisé' ? 'Chien croisé' : 'Autre race') : 'Choisir une race'}</Text>
-              <TouchableOpacity onPress={() => { if (raceCustomMode) { setRaceCustomMode(null); setRaceCustomInput(''); } else { Keyboard.dismiss(); setRaceModal(false); setRaceSearch(''); } }}>
-                <Ionicons name={raceCustomMode ? 'arrow-back' : 'close'} size={22} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            {raceCustomMode ? (
-              <View style={{ padding: 16 }}>
-                <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginBottom: 10 }}>
-                  {raceCustomMode === 'croisé' ? 'Précise les races mélangées (ex : Labrador / Berger)' : 'Précise la race de ton chien'}
-                </Text>
-                <TextInput
-                  style={{ borderWidth: 1.5, borderColor: colors.border, borderRadius: 10, padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: 'white' }}
-                  placeholder={raceCustomMode === 'croisé' ? 'Ex : Labrador / Berger Allemand' : 'Ex : Pomsky'}
-                  placeholderTextColor={colors.textMuted}
-                  value={raceCustomInput}
-                  onChangeText={setRaceCustomInput}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => {
-                    const val = raceCustomInput.trim();
-                    if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
-                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
-                  }}
-                />
-                <TouchableOpacity
-                  style={{ backgroundColor: raceCustomInput.trim() ? colors.bordeaux : colors.border, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }}
-                  onPress={() => {
-                    const val = raceCustomInput.trim();
-                    if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
-                    setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
-                  }}
-                  disabled={!raceCustomInput.trim()}
-                >
-                  <Text style={{ fontFamily: 'DMSans_500Medium', fontSize: 14, color: 'white' }}>Confirmer</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <View style={styles.raceSearchWrap}>
-                  <Ionicons name="search" size={15} color={colors.textMuted} />
-                  <TextInput
-                    style={styles.raceSearchInput}
-                    placeholder="Rechercher une race…"
-                    placeholderTextColor={colors.textMuted}
-                    value={raceSearch}
-                    onChangeText={setRaceSearch}
-                    autoCorrect={false}
-                    returnKeyType="search"
-                  />
-                  {raceSearch.length > 0 && (
-                    <TouchableOpacity onPress={() => setRaceSearch('')}>
-                      <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <FlatList
-                  data={filteredRaces}
-                  extraData={raceSearch}
-                  keyExtractor={r => r}
-                  keyboardShouldPersistTaps="handled"
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
-                      onPress={() => {
-                        if (item === 'Croisé') { setRaceCustomMode('croisé'); setRaceCustomInput(''); setRaceSearch(''); return; }
-                        if (item === 'Autre race') { setRaceCustomMode('autre'); setRaceCustomInput(''); setRaceSearch(''); return; }
-                        Keyboard.dismiss();
-                        setRaceChien(item); setRaceModal(false); setRaceSearch('');
-                      }}
-                    >
-                      <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
-                      {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
-                    </TouchableOpacity>
-                  )}
-                  ListEmptyComponent={
-                    <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
-                      Aucune race trouvée
-                    </Text>
-                  }
-                />
-              </>
-            )}
-          </View>
-        </KeyboardAvoidingView>
       </Modal>
 
       {showExplorEdit && explorateur && session && (

@@ -57,7 +57,7 @@ export default function FeedScreen() {
 
     const [{ data: membresData }, { data: myFollowsData }, { data: explorateurRows }] = await Promise.all([
       supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur')
-        .neq('id', myId).not('prenom', 'is', null).limit(50),
+        .neq('id', myId).range(0, 999),
       supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
       supabase.from('explorateurs').select('user_id').eq('statut', 'actif').not('user_id', 'is', null),
     ]);
@@ -111,10 +111,14 @@ export default function FeedScreen() {
   }
 
   const filtered = search.length > 0
-    ? membres.filter(m =>
-        m.user.prenom.toLowerCase().includes(search.toLowerCase()) ||
-        (m.ville || '').toLowerCase().includes(search.toLowerCase())
-      )
+    ? membres.filter(m => {
+        const q = search.toLowerCase();
+        return (
+          (m.user.prenom || '').toLowerCase().includes(q) ||
+          (m.nomChien || '').toLowerCase().includes(q) ||
+          (m.ville || '').toLowerCase().includes(q)
+        );
+      })
     : membres;
 
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;

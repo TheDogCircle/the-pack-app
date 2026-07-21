@@ -82,11 +82,15 @@ export default function OnboardingScreen() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [ville, setVille] = useState('');
+  const [dateMode, setDateMode] = useState<'date' | 'age'>('date');
+  const [dateNaissance, setDateNaissance] = useState('');
+  const [ageVal, setAgeVal] = useState('');
   const [prenomError, setPrenomError] = useState(false);
   const [nomError, setNomError] = useState(false);
   const [emailError, setEmailError] = useState(false);
   const [usernameError, setUsernameError] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
+  const [dateNaissanceError, setDateNaissanceError] = useState(false);
 
   // Step 2 — dog
   const [nomChien, setNomChien] = useState('');
@@ -94,6 +98,10 @@ export default function OnboardingScreen() {
   const [genre, setGenre] = useState('');
   const [trancheAge, setTrancheAge] = useState('');
   const [statutAmoureux, setStatutAmoureux] = useState('');
+  const [dateChienMode, setDateChienMode] = useState<'date' | 'age'>('date');
+  const [dateNaissanceChien, setDateNaissanceChien] = useState('');
+  const [ageChienVal, setAgeChienVal] = useState('');
+  const [dateNaissanceChienError, setDateNaissanceChienError] = useState(false);
   const [nomChienError, setNomChienError] = useState(false);
   const [raceError, setRaceError] = useState(false);
   const [genreError, setGenreError] = useState(false);
@@ -131,16 +139,26 @@ export default function OnboardingScreen() {
     return () => clearTimeout(t);
   }, [username]);
 
+  function formatDate(text: string, prev: string): string {
+    const digits = text.replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
   function goStep2() {
     const p = !prenom.trim();
     const n = !nom.trim();
     const e = !email.trim();
     const u = !!username && (usernameStatus === 'taken' || usernameStatus === 'invalid');
+    const humanBirth = dateMode === 'date' ? dateNaissance.trim() : ageVal.trim();
+    const d = !humanBirth;
     setPrenomError(p);
     setNomError(n);
     setEmailError(e);
     setUsernameError(u);
-    if (p || n || e || u) return;
+    setDateNaissanceError(d);
+    if (p || n || e || u || d) return;
     setStep(2);
   }
 
@@ -150,11 +168,17 @@ export default function OnboardingScreen() {
     const rc = !raceChien;
     const g = !genre;
     const ta = !trancheAge;
+    const dogBirthRaw = dateChienMode === 'date' ? dateNaissanceChien.trim() : ageChienVal.trim();
+    const dc = !dogBirthRaw;
     setNomChienError(nc);
     setRaceError(rc);
     setGenreError(g);
     setTrancheAgeError(ta);
-    if (nc || rc || g || ta) return;
+    setDateNaissanceChienError(dc);
+    if (nc || rc || g || ta || dc) return;
+
+    const humanBirth = dateMode === 'date' ? dateNaissance.trim() : `${ageVal.trim()} ans`;
+    const dogBirth   = dateChienMode === 'date' ? dateNaissanceChien.trim() : `${ageChienVal.trim()} ans`;
 
     setSaving(true);
     const { error: upsertError } = await supabase.from('profils').upsert({
@@ -164,11 +188,13 @@ export default function OnboardingScreen() {
       email: email.trim(),
       username: username.trim() || null,
       ville: ville.trim() || null,
+      date_naissance_humain: humanBirth,
       nom_chien: nomChien.trim(),
       race_chien: raceChien,
       genre_chien: genre,
       tranche_age_chien: trancheAge,
       statut_amoureux_chien: statutAmoureux || null,
+      date_naissance_chien: dogBirth,
     });
     setSaving(false);
     if (upsertError) { Alert.alert('Erreur', upsertError.message); return; }
@@ -306,9 +332,51 @@ export default function OnboardingScreen() {
                 value={ville}
                 onChangeText={setVille}
                 autoCapitalize="words"
-                returnKeyType="done"
-                onSubmitEditing={goStep2}
+                returnKeyType="next"
               />
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Ton anniversaire *</Text>
+              <View style={styles.modeToggle}>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dateMode === 'date' && styles.modeBtnActive]}
+                  onPress={() => { setDateMode('date'); setAgeVal(''); setDateNaissanceError(false); }}
+                >
+                  <Text style={[styles.modeBtnText, dateMode === 'date' && styles.modeBtnTextActive]}>📅 Date</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dateMode === 'age' && styles.modeBtnActive]}
+                  onPress={() => { setDateMode('age'); setDateNaissance(''); setDateNaissanceError(false); }}
+                >
+                  <Text style={[styles.modeBtnText, dateMode === 'age' && styles.modeBtnTextActive]}>🔢 Âge</Text>
+                </TouchableOpacity>
+              </View>
+              {dateMode === 'date' ? (
+                <TextInput
+                  style={[styles.input, dateNaissanceError && styles.inputError]}
+                  placeholder="JJ/MM/AAAA"
+                  placeholderTextColor={colors.textMuted}
+                  value={dateNaissance}
+                  onChangeText={t => { setDateNaissance(formatDate(t, dateNaissance)); setDateNaissanceError(false); }}
+                  keyboardType="numeric"
+                  returnKeyType="done"
+                  onSubmitEditing={goStep2}
+                  maxLength={10}
+                />
+              ) : (
+                <View style={styles.ageRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }, dateNaissanceError && styles.inputError]}
+                    placeholder="Ex : 28"
+                    placeholderTextColor={colors.textMuted}
+                    value={ageVal}
+                    onChangeText={t => { setAgeVal(t.replace(/\D/g, '')); setDateNaissanceError(false); }}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.ageUnit}>ans</Text>
+                </View>
+              )}
+              {dateNaissanceError && <Text style={styles.errorText}>L'anniversaire est requis</Text>}
             </View>
 
             <TouchableOpacity style={styles.btn} onPress={goStep2}>
@@ -403,6 +471,47 @@ export default function OnboardingScreen() {
                   );
                 })}
               </View>
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Anniversaire du chien *</Text>
+              <View style={styles.modeToggle}>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dateChienMode === 'date' && styles.modeBtnActive]}
+                  onPress={() => { setDateChienMode('date'); setAgeChienVal(''); setDateNaissanceChienError(false); }}
+                >
+                  <Text style={[styles.modeBtnText, dateChienMode === 'date' && styles.modeBtnTextActive]}>📅 Date</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dateChienMode === 'age' && styles.modeBtnActive]}
+                  onPress={() => { setDateChienMode('age'); setDateNaissanceChien(''); setDateNaissanceChienError(false); }}
+                >
+                  <Text style={[styles.modeBtnText, dateChienMode === 'age' && styles.modeBtnTextActive]}>🔢 Âge</Text>
+                </TouchableOpacity>
+              </View>
+              {dateChienMode === 'date' ? (
+                <TextInput
+                  style={[styles.input, dateNaissanceChienError && styles.inputError]}
+                  placeholder="JJ/MM/AAAA"
+                  placeholderTextColor={colors.textMuted}
+                  value={dateNaissanceChien}
+                  onChangeText={t => { setDateNaissanceChien(formatDate(t, dateNaissanceChien)); setDateNaissanceChienError(false); }}
+                  keyboardType="numeric"
+                  maxLength={10}
+                />
+              ) : (
+                <View style={styles.ageRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }, dateNaissanceChienError && styles.inputError]}
+                    placeholder="Ex : 3"
+                    placeholderTextColor={colors.textMuted}
+                    value={ageChienVal}
+                    onChangeText={t => { setAgeChienVal(t.replace(/\D/g, '')); setDateNaissanceChienError(false); }}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.ageUnit}>ans</Text>
+                </View>
+              )}
+              {dateNaissanceChienError && <Text style={styles.errorText}>L'anniversaire du chien est requis</Text>}
             </View>
 
             <TouchableOpacity
@@ -576,6 +685,17 @@ const styles = StyleSheet.create({
   statutLabel: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
   statutLabelActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
   statutSub: { fontFamily: 'DMSans_300Light', fontSize: 10, color: colors.textMuted },
+
+  modeToggle: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  modeBtn: {
+    borderRadius: 20, borderWidth: 1.5, borderColor: colors.border,
+    paddingVertical: 6, paddingHorizontal: 14, backgroundColor: 'white',
+  },
+  modeBtnActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  modeBtnText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  modeBtnTextActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
+  ageRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  ageUnit: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: 'rgba(245,239,224,0.6)' },
 
   btn: { backgroundColor: colors.terra, borderRadius: 14, padding: 16, alignItems: 'center' },
   btnDisabled: { opacity: 0.6 },
