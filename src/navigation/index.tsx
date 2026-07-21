@@ -149,21 +149,30 @@ function MainTabs() {
   );
 }
 
+function parseProfilLink(url: string): string | null {
+  const m = url.match(/thepack:\/\/profil\?id=([^&]+)/);
+  return m ? m[1] : null;
+}
+
 export default function Navigation() {
   const { session, loading } = useSession();
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  // Stores a profil userId to navigate to once NavigationContainer is ready
+  const [pendingProfilId, setPendingProfilId] = useState<string | null>(null);
 
-  // Deep link: thepack://profil?id=xxx → ouvre ProfilPublic
   useEffect(() => {
-    const handle = (url: string) => {
-      const m = url.match(/thepack:\/\/profil\?id=([^&]+)/);
-      if (m && navigationRef.isReady()) {
-        navigationRef.navigate('ProfilPublic', { userId: m[1], prenom: '' });
+    // Cold start: store the URL, navigate in onReady
+    Linking.getInitialURL().then(url => {
+      if (url) { const id = parseProfilLink(url); if (id) setPendingProfilId(id); }
+    });
+    // App in foreground/background: nav is already ready
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const id = parseProfilLink(url);
+      if (id && navigationRef.isReady()) {
+        navigationRef.navigate('ProfilPublic', { userId: id, prenom: '' });
       }
-    };
-    Linking.getInitialURL().then(url => { if (url) handle(url); });
-    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
+    });
     return () => sub.remove();
   }, []);
 
@@ -192,7 +201,12 @@ export default function Navigation() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} onReady={() => {
+        if (pendingProfilId) {
+          navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
+          setPendingProfilId(null);
+        }
+      }}>
       <Stack.Navigator
         screenOptions={{ headerShown: false }}
         initialRouteName={session && needsOnboarding ? 'Onboarding' : 'Tabs'}
