@@ -441,13 +441,13 @@ export default function CarteScreen() {
         const [{ data: allLikes }, { data: myLikes }, { data: photoAuthors }] = await Promise.all([
           supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
           userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
-          photoUserIds.length > 0 ? supabase.from('profils').select('id,username').in('id', photoUserIds) : Promise.resolve({ data: [] }),
+          photoUserIds.length > 0 ? supabase.from('profils').select('id,username,prenom').in('id', photoUserIds) : Promise.resolve({ data: [] }),
         ]);
         const countMap: Record<string, number> = {};
         (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
         const mySet = new Set((myLikes || []).map((l: any) => l.photo_id));
         const authorMap: Record<string, string | null> = {};
-        (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username || null; });
+        (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username ? `@${p.username}` : (p.prenom || null); });
         setPhotos((photosRaw || []).map((p: any) => ({
           id: p.id, url: p.url,
           likeCount: countMap[p.id] || 0,
@@ -1370,7 +1370,7 @@ export default function CarteScreen() {
                   </View>
                 )}
                 {currentPhoto.authorUsername && (
-                  <Text style={styles.fichePhotoAuthor}>@{currentPhoto.authorUsername}</Text>
+                  <Text style={styles.fichePhotoAuthor}>{currentPhoto.authorUsername}</Text>
                 )}
                 <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
                   <Ionicons

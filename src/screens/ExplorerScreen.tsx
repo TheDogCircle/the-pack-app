@@ -58,6 +58,7 @@ type RecentPhoto = {
   id: string; url: string;
   lieuId: string; lieu: { nom: string; cat: string; ville: string };
   nomChien: string | null;
+  authorDisplay: string | null;
 };
 
 type Explorateur = {
@@ -376,7 +377,12 @@ function PhotoMiniCard({
         ) : null}
         <View style={styles.photoCardBottom}>
           <View style={[styles.photoCardCatDot, { backgroundColor: color }]} />
-          <Text style={styles.photoCardLieu} numberOfLines={1}>{photo.lieu.nom}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.photoCardLieu} numberOfLines={1}>{photo.lieu.nom}</Text>
+            {photo.authorDisplay ? (
+              <Text style={styles.photoCardAuthor} numberOfLines={1}>{photo.authorDisplay}</Text>
+            ) : null}
+          </View>
         </View>
       </View>
       <TouchableOpacity style={styles.photoCardLike} onPress={e => { e.stopPropagation?.(); onLike(); }}>
@@ -635,22 +641,27 @@ export default function ExplorerScreen() {
 
   async function loadRecentPhotos() {
     const { data: photoData } = await supabase
-      .from('photos').select('id,url,lieu_id,nom_chien')
+      .from('photos').select('id,url,lieu_id,nom_chien,user_id')
       .eq('validee', true).order('created_at', { ascending: false }).limit(15);
     if (!photoData?.length) { setRecentPhotos([]); return; }
 
     const lieuIds = [...new Set((photoData as any[]).map(p => p.lieu_id).filter(Boolean))];
-    const { data: lieuxData } = lieuIds.length > 0
-      ? await supabase.from('lieux').select('id,nom,cat,ville').in('id', lieuIds)
-      : { data: [] };
+    const userIds = [...new Set((photoData as any[]).map(p => p.user_id).filter(Boolean))];
+    const [{ data: lieuxData }, { data: profilsData }] = await Promise.all([
+      lieuIds.length > 0 ? supabase.from('lieux').select('id,nom,cat,ville').in('id', lieuIds) : Promise.resolve({ data: [] }),
+      userIds.length > 0 ? supabase.from('profils').select('id,username,prenom').in('id', userIds) : Promise.resolve({ data: [] }),
+    ]);
     const lieuMap: Record<string, any> = {};
     (lieuxData || []).forEach((l: any) => { lieuMap[l.id] = l; });
+    const authorMap: Record<string, string | null> = {};
+    (profilsData || []).forEach((p: any) => { authorMap[p.id] = p.username ? `@${p.username}` : (p.prenom || null); });
 
     const mapped: RecentPhoto[] = (photoData as any[]).map(p => ({
       id: p.id, url: p.url,
       lieuId: p.lieu_id,
       lieu: lieuMap[p.lieu_id] || { nom: '?', cat: 'autre', ville: '' },
       nomChien: p.nom_chien || null,
+      authorDisplay: authorMap[p.user_id] || null,
     }));
     setRecentPhotos(mapped);
 
@@ -1084,9 +1095,10 @@ const styles = StyleSheet.create({
     borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3,
   },
   photoCardDogText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory },
-  photoCardBottom: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  photoCardCatDot: { width: 6, height: 6, borderRadius: 3 },
-  photoCardLieu: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory, flex: 1 },
+  photoCardBottom: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
+  photoCardCatDot: { width: 6, height: 6, borderRadius: 3, marginTop: 3 },
+  photoCardLieu: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory },
+  photoCardAuthor: { fontFamily: 'DMSans_300Light', fontSize: 9, color: 'rgba(245,239,224,0.65)', marginTop: 1 },
   photoCardLike: {
     position: 'absolute', top: 8, right: 8,
     flexDirection: 'row', alignItems: 'center', gap: 3,
