@@ -46,6 +46,27 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   autre:         { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
 
+const CAT_BY_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(CAT_CONFIG).map(([k, v]) => [v.label, k])
+);
+
+function parseTypoLabels(description: string | null): string[] {
+  if (!description) return [];
+  const match = description.match(/^\[([^\]]*)\]/);
+  if (!match) return [];
+  for (const part of match[1].split(' | ')) {
+    if (part.startsWith('Typologies:')) {
+      return part.replace('Typologies:', '').trim().split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function stripTypoPrefix(description: string | null): string {
+  if (!description) return '';
+  return description.replace(/^\[[^\]]*\]\n?/, '').trim();
+}
+
 const PROPOSE_CATS = [
   'restaurant', 'cafe', 'bar', 'hotel', 'parc', 'parc_chien', 'plage',
   'boutique', 'concept_store', 'toiletteur', 'veto', 'educateur', 'autre',
@@ -1390,11 +1411,22 @@ export default function CarteScreen() {
 
           {/* ====== INFO BLOC ====== */}
           <View style={styles.ficheInfoBlock}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
               <View style={[styles.catBadge, { backgroundColor: cfg.color + '18' }]}>
                 <Ionicons name={cfg.icon} size={11} color={cfg.color} />
                 <Text style={[styles.catLabel, { color: cfg.color }]}>{cfg.label}</Text>
               </View>
+              {parseTypoLabels(selectedLieu.description).filter(l => l !== cfg.label).map(label => {
+                const key = CAT_BY_LABEL[label];
+                const c = key ? CAT_CONFIG[key] : null;
+                if (!c) return null;
+                return (
+                  <View key={label} style={[styles.catBadge, { backgroundColor: c.color + '18' }]}>
+                    <Ionicons name={c.icon} size={11} color={c.color} />
+                    <Text style={[styles.catLabel, { color: c.color }]}>{c.label}</Text>
+                  </View>
+                );
+              })}
               {(selectedLieu as any).manager_user_id && (
                 <View style={styles.certBadgeIcon}>
                   <Ionicons name="checkmark" size={10} color="#fff" />
@@ -1457,7 +1489,7 @@ export default function CarteScreen() {
                   </View>
                 )}
 
-                {selectedLieu.description ? <Text style={styles.description}>{selectedLieu.description}</Text> : null}
+                {(() => { const d = stripTypoPrefix(selectedLieu.description); return d ? <Text style={styles.description}>{d}</Text> : null; })()}
 
                 {selectedLieu.tel ? (
                   <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(`tel:${selectedLieu.tel}`)}>
