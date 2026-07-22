@@ -360,7 +360,7 @@ export default function CarteScreen() {
       .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse').eq('actif', true)
       .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
       .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
-      .limit(500);
+      .limit(1000);
     if (cat) query = (query as any).eq('cat', cat);
     const { data } = await query;
     const newPlaces = data || [];
@@ -1129,7 +1129,7 @@ export default function CarteScreen() {
     ];
     try {
       const all = clusterIndex.getClusters(bbox, zoom);
-      return all.slice(0, 80);
+      return all.slice(0, 300);
     } catch {
       return [];
     }
