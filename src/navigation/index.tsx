@@ -4,8 +4,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View, Image, Linking, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { savePushToken } from '../lib/notifications';
+import { mapNavigation } from '../lib/mapNavigation';
 
 import { useSession } from '../hooks/useSession';
 import AuthScreen from '../screens/AuthScreen';
@@ -167,13 +169,33 @@ export default function Navigation() {
       if (url) { const id = parseProfilLink(url); if (id) setPendingProfilId(id); }
     });
     // App in foreground/background: nav is already ready
-    const sub = Linking.addEventListener('url', ({ url }) => {
+    const linkSub = Linking.addEventListener('url', ({ url }) => {
       const id = parseProfilLink(url);
       if (id && navigationRef.isReady()) {
         navigationRef.navigate('ProfilPublic', { userId: id, prenom: '' });
       }
     });
-    return () => sub.remove();
+
+    // Tap on push notification → deep link
+    const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data as any;
+      if (!data || !navigationRef.isReady()) return;
+
+      if (data.type === 'new_lieu' || data.type === 'suggestion_validee') {
+        if (data.lieuId) {
+          mapNavigation.setPendingLieu(data.lieuId);
+          navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
+        }
+      } else if (data.type === 'new_event') {
+        navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+      } else if (data.type === 'follow') {
+        if (data.userId) {
+          navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
+        }
+      }
+    });
+
+    return () => { linkSub.remove(); notifSub.remove(); };
   }, []);
 
   useEffect(() => {
