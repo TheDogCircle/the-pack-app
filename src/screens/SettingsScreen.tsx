@@ -517,7 +517,7 @@ export default function SettingsScreen() {
 
       {/* Username */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Nom d'utilisateur</Text>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Nom d'utilisateur</Text></View>
         <View style={styles.usernameRow}>
           <Text style={styles.atSign}>@</Text>
           <TextInput
@@ -542,7 +542,7 @@ export default function SettingsScreen() {
 
       {/* Notifications */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Notifications</Text>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Notifications</Text></View>
         <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
             <Text style={styles.toggleLabel}>Nouvel abonné</Text>
@@ -579,7 +579,7 @@ export default function SettingsScreen() {
 
       {/* Compte */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Mon compte</Text>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Mon compte</Text></View>
         <TouchableOpacity style={styles.menuRow} onPress={confirmLogout}>
           <Ionicons name="log-out-outline" size={20} color={colors.bordeaux} />
           <Text style={styles.menuRowText}>Se déconnecter</Text>
@@ -594,7 +594,7 @@ export default function SettingsScreen() {
 
       {/* À propos */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>À propos</Text>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>À propos</Text></View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Version</Text>
           <Text style={styles.infoValue}>1.0.0</Text>
@@ -885,6 +885,10 @@ const styles = StyleSheet.create({
   },
   sectionSummary: {
     fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux, marginTop: 3,
+  },
+  sectionTitleWrap: {
+    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   field: {
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
