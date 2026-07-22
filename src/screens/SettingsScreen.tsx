@@ -43,6 +43,18 @@ const RACES = [
   'Westie (West Highland White Terrier)', 'Yorkshire Terrier', 'Autre race',
 ];
 
+const GENRES = [
+  { key: 'male',    label: 'Mâle',    emoji: '♂️' },
+  { key: 'femelle', label: 'Femelle', emoji: '♀️' },
+];
+
+const TRANCHES_AGE = [
+  { key: 'chiot',  label: 'Chiot',  emoji: '🐣', sub: '0 – 1 an'  },
+  { key: 'jeune',  label: 'Jeune',  emoji: '🐕', sub: '1 – 3 ans' },
+  { key: 'adulte', label: 'Adulte', emoji: '🦮', sub: '3 – 8 ans' },
+  { key: 'senior', label: 'Senior', emoji: '🐾', sub: '8+ ans'    },
+];
+
 const STATUTS_AMOUREUX = [
   { key: 'celibataire',   label: 'Célibataire',     emoji: '🐾' },
   { key: 'en_couple',     label: 'En couple',        emoji: '❤️' },
@@ -61,6 +73,16 @@ function detectMode(value: string): 'date' | 'age' {
   return value.includes('/') ? 'date' : 'age';
 }
 
+type Dog = {
+  id: string;
+  nom: string;
+  race: string | null;
+  genre: string | null;
+  tranche_age: string | null;
+  statut_amoureux: string | null;
+  date_naissance: string | null;
+};
+
 export default function SettingsScreen() {
   const navigation = useNavigation<any>();
 
@@ -75,27 +97,36 @@ export default function SettingsScreen() {
   const [notifMessages, setNotifMessages] = useState(true);
   const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
 
-  // Profil info
+  // Profil (human info only)
   const [prenom, setPrenom] = useState('');
   const [ville, setVille] = useState('');
-  const [nomChien, setNomChien] = useState('');
-  const [raceChien, setRaceChien] = useState('');
   const [bio, setBio] = useState('');
   const [instagram, setInstagram] = useState('');
   const [tiktok, setTiktok] = useState('');
-  const [statutAmoureux, setStatutAmoureux] = useState('');
 
-  // Anniversaires (mode date ou âge)
+  // Human birthday
   const [dateMode, setDateMode] = useState<'date' | 'age'>('date');
   const [dateNaissance, setDateNaissance] = useState('');
   const [ageVal, setAgeVal] = useState('');
-  const [dateChienMode, setDateChienMode] = useState<'date' | 'age'>('date');
-  const [dateNaissanceChien, setDateNaissanceChien] = useState('');
-  const [ageChienVal, setAgeChienVal] = useState('');
 
   const [savingProfil, setSavingProfil] = useState(false);
 
-  // Race picker
+  // Chiens / Passeports
+  const [chiens, setChiens] = useState<Dog[]>([]);
+  const [dogModal, setDogModal] = useState(false);
+  const [editingDog, setEditingDog] = useState<Dog | null>(null);
+  const [dogNom, setDogNom] = useState('');
+  const [dogRace, setDogRace] = useState('');
+  const [dogGenre, setDogGenre] = useState('');
+  const [dogTrancheAge, setDogTrancheAge] = useState('');
+  const [dogStatut, setDogStatut] = useState('');
+  const [dogDateMode, setDogDateMode] = useState<'date' | 'age'>('date');
+  const [dogDateNaiss, setDogDateNaiss] = useState('');
+  const [dogAge, setDogAge] = useState('');
+  const [savingDog, setSavingDog] = useState(false);
+  const [dogNomError, setDogNomError] = useState(false);
+
+  // Race picker (used inside dog modal)
   const [raceModal, setRaceModal] = useState(false);
   const [raceCustomMode, setRaceCustomMode] = useState<'croisé' | 'autre' | null>(null);
   const [raceCustomInput, setRaceCustomInput] = useState('');
@@ -114,9 +145,17 @@ export default function SettingsScreen() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setLoading(false); return; }
     setUserId(session.user.id);
-    const { data } = await supabase.from('profils')
-      .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,prenom,ville,nom_chien,race_chien,bio,instagram_url,tiktok_url,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
-      .eq('id', session.user.id).single();
+
+    const [{ data }, { data: chiensData }] = await Promise.all([
+      supabase.from('profils')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .eq('id', session.user.id).single(),
+      supabase.from('chiens')
+        .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: true }),
+    ]);
+
     if (data) {
       if (data.username) { setUsername(data.username); setCurrentUsername(data.username); }
       setNotifFollow(data.notif_follow ?? true);
@@ -125,12 +164,9 @@ export default function SettingsScreen() {
       setNotifSuggestionValidee(data.notif_suggestion_validee ?? true);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
-      setNomChien(data.nom_chien || '');
-      setRaceChien(data.race_chien || '');
       setBio(data.bio || '');
       setInstagram(data.instagram_url || '');
       setTiktok(data.tiktok_url || '');
-      setStatutAmoureux(data.statut_amoureux_chien || '');
 
       const dh = data.date_naissance_humain || '';
       if (dh) {
@@ -139,12 +175,21 @@ export default function SettingsScreen() {
         if (mode === 'date') setDateNaissance(dh);
         else setAgeVal(dh.replace(' ans', ''));
       }
-      const dc = data.date_naissance_chien || '';
-      if (dc) {
-        const mode = detectMode(dc);
-        setDateChienMode(mode);
-        if (mode === 'date') setDateNaissanceChien(dc);
-        else setAgeChienVal(dc.replace(' ans', ''));
+
+      // Auto-migrate dog from profils to chiens if chiens table is empty
+      if ((!chiensData || chiensData.length === 0) && data.nom_chien) {
+        const { data: newDog } = await supabase.from('chiens').insert({
+          user_id: session.user.id,
+          nom: data.nom_chien,
+          race: data.race_chien || null,
+          genre: data.genre_chien || null,
+          tranche_age: data.tranche_age_chien || null,
+          statut_amoureux: data.statut_amoureux_chien || null,
+          date_naissance: data.date_naissance_chien || null,
+        }).select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance').single();
+        if (newDog) setChiens([newDog]);
+      } else {
+        setChiens(chiensData || []);
       }
     }
     setLoading(false);
@@ -182,27 +227,126 @@ export default function SettingsScreen() {
   async function saveProfil() {
     if (!userId) return;
     const humanBirth = dateMode === 'date' ? dateNaissance.trim() : (ageVal.trim() ? `${ageVal.trim()} ans` : '');
-    const dogBirth   = dateChienMode === 'date' ? dateNaissanceChien.trim() : (ageChienVal.trim() ? `${ageChienVal.trim()} ans` : '');
-
     if (!humanBirth) { Alert.alert('Champ requis', 'Ajoute ton anniversaire.'); return; }
-    if (!dogBirth)   { Alert.alert('Champ requis', "Ajoute l'anniversaire de ton chien."); return; }
 
     setSavingProfil(true);
     const { error } = await supabase.from('profils').update({
       prenom: prenom.trim() || null,
       ville: ville.trim() || null,
-      nom_chien: nomChien.trim() || null,
-      race_chien: raceChien.trim() || null,
       bio: bio.trim() || null,
       instagram_url: instagram.trim() || null,
       tiktok_url: tiktok.trim() || null,
-      statut_amoureux_chien: statutAmoureux || null,
       date_naissance_humain: humanBirth,
-      date_naissance_chien: dogBirth,
     }).eq('id', userId);
     setSavingProfil(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
     Alert.alert('Enregistré', 'Tes informations ont été mises à jour.');
+  }
+
+  function openDogModal(dog: Dog | null) {
+    setEditingDog(dog);
+    if (dog) {
+      setDogNom(dog.nom);
+      setDogRace(dog.race || '');
+      setDogGenre(dog.genre || '');
+      setDogTrancheAge(dog.tranche_age || '');
+      setDogStatut(dog.statut_amoureux || '');
+      const dn = dog.date_naissance || '';
+      if (dn) {
+        const m = detectMode(dn);
+        setDogDateMode(m);
+        if (m === 'date') setDogDateNaiss(dn);
+        else setDogAge(dn.replace(' ans', ''));
+      } else {
+        setDogDateMode('date'); setDogDateNaiss(''); setDogAge('');
+      }
+    } else {
+      setDogNom(''); setDogRace(''); setDogGenre(''); setDogTrancheAge('');
+      setDogStatut(''); setDogDateMode('date'); setDogDateNaiss(''); setDogAge('');
+    }
+    setDogNomError(false);
+    setDogModal(true);
+  }
+
+  async function saveDog() {
+    if (!userId) return;
+    if (!dogNom.trim()) { setDogNomError(true); return; }
+    const dn = dogDateMode === 'date' ? dogDateNaiss.trim() || null : (dogAge.trim() ? `${dogAge.trim()} ans` : null);
+
+    setSavingDog(true);
+    if (editingDog) {
+      await supabase.from('chiens').update({
+        nom: dogNom.trim(),
+        race: dogRace || null,
+        genre: dogGenre || null,
+        tranche_age: dogTrancheAge || null,
+        statut_amoureux: dogStatut || null,
+        date_naissance: dn,
+      }).eq('id', editingDog.id);
+    } else {
+      await supabase.from('chiens').insert({
+        user_id: userId,
+        nom: dogNom.trim(),
+        race: dogRace || null,
+        genre: dogGenre || null,
+        tranche_age: dogTrancheAge || null,
+        statut_amoureux: dogStatut || null,
+        date_naissance: dn,
+      });
+    }
+
+    const { data: updated } = await supabase.from('chiens')
+      .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    const list = updated || [];
+    setChiens(list);
+
+    if (list[0]) {
+      await supabase.from('profils').update({
+        nom_chien: list[0].nom,
+        race_chien: list[0].race || null,
+        genre_chien: list[0].genre || null,
+        tranche_age_chien: list[0].tranche_age || null,
+        statut_amoureux_chien: list[0].statut_amoureux || null,
+        date_naissance_chien: list[0].date_naissance || null,
+      }).eq('id', userId);
+    }
+
+    setSavingDog(false);
+    setDogModal(false);
+  }
+
+  async function deleteDog(dog: Dog) {
+    if (!userId) return;
+    Alert.alert(
+      'Supprimer ce chien ?',
+      `Le passeport de ${dog.nom} sera supprimé définitivement.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Supprimer', style: 'destructive', onPress: async () => {
+          await supabase.from('chiens').delete().eq('id', dog.id);
+          const updated = chiens.filter(c => c.id !== dog.id);
+          setChiens(updated);
+          if (updated[0]) {
+            await supabase.from('profils').update({
+              nom_chien: updated[0].nom,
+              race_chien: updated[0].race || null,
+              genre_chien: updated[0].genre || null,
+              tranche_age_chien: updated[0].tranche_age || null,
+              statut_amoureux_chien: updated[0].statut_amoureux || null,
+              date_naissance_chien: updated[0].date_naissance || null,
+            }).eq('id', userId!);
+          } else {
+            await supabase.from('profils').update({
+              nom_chien: null, race_chien: null, genre_chien: null,
+              tranche_age_chien: null, statut_amoureux_chien: null, date_naissance_chien: null,
+            }).eq('id', userId!);
+          }
+        }},
+      ]
+    );
   }
 
   async function confirmLogout() {
@@ -267,9 +411,8 @@ export default function SettingsScreen() {
             autoCapitalize="none" keyboardType="url" />
         </View>
 
-        {/* Anniversaire humain */}
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Ton anniversaire 🎂 *</Text>
+          <Text style={styles.fieldLabel}>Ton anniversaire *</Text>
           <View style={styles.modeToggle}>
             <TouchableOpacity
               style={[styles.modeBtn, dateMode === 'date' && styles.modeBtnActive]}
@@ -299,79 +442,59 @@ export default function SettingsScreen() {
           )}
         </View>
 
-        <View style={styles.fieldDivider} />
-
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Nom du chien</Text>
-          <TextInput style={styles.fieldInput} value={nomChien} onChangeText={setNomChien}
-            placeholder="Ex : Albus" placeholderTextColor={colors.textMuted} />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Race</Text>
-          <TouchableOpacity style={styles.racePicker} onPress={() => setRaceModal(true)}>
-            <Text style={[styles.racePickerText, !raceChien && { color: colors.textMuted }]}>
-              {raceChien || 'Choisir une race…'}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Anniversaire chien */}
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Anniversaire du chien 🎂 *</Text>
-          <View style={styles.modeToggle}>
-            <TouchableOpacity
-              style={[styles.modeBtn, dateChienMode === 'date' && styles.modeBtnActive]}
-              onPress={() => { setDateChienMode('date'); setAgeChienVal(''); }}
-            >
-              <Text style={[styles.modeBtnText, dateChienMode === 'date' && styles.modeBtnTextActive]}>📅 Date</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeBtn, dateChienMode === 'age' && styles.modeBtnActive]}
-              onPress={() => { setDateChienMode('age'); setDateNaissanceChien(''); }}
-            >
-              <Text style={[styles.modeBtnText, dateChienMode === 'age' && styles.modeBtnTextActive]}>🔢 Âge</Text>
-            </TouchableOpacity>
-          </View>
-          {dateChienMode === 'date' ? (
-            <TextInput style={styles.fieldInput} value={dateNaissanceChien}
-              onChangeText={t => setDateNaissanceChien(formatDate(t))}
-              placeholder="JJ/MM/AAAA" placeholderTextColor={colors.textMuted}
-              keyboardType="numeric" maxLength={10} />
-          ) : (
-            <View style={styles.ageRow}>
-              <TextInput style={[styles.fieldInput, { flex: 1 }]} value={ageChienVal}
-                onChangeText={setAgeChienVal} placeholder="Ex : 3"
-                placeholderTextColor={colors.textMuted} keyboardType="numeric" maxLength={3} />
-              <Text style={styles.ageUnit}>ans</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Situation amoureuse */}
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Situation amoureuse du chien</Text>
-          <View style={styles.pillGrid}>
-            {STATUTS_AMOUREUX.map(s => {
-              const active = statutAmoureux === s.key;
-              return (
-                <TouchableOpacity
-                  key={s.key}
-                  style={[styles.pill, active && styles.pillActive]}
-                  onPress={() => setStatutAmoureux(active ? '' : s.key)}
-                >
-                  <Text style={styles.pillEmoji}>{s.emoji}</Text>
-                  <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{s.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
         <TouchableOpacity style={styles.saveBtn} onPress={saveProfil} disabled={savingProfil}>
           {savingProfil
             ? <ActivityIndicator color={colors.ivory} size="small" />
             : <Text style={styles.saveBtnText}>Enregistrer les modifications</Text>}
+        </TouchableOpacity>
+      </View>
+
+      {/* Mes chiens / Passeports */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Mes chiens — Passeports</Text>
+          <TouchableOpacity onPress={() => openDogModal(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="add-circle-outline" size={22} color={colors.terra} />
+          </TouchableOpacity>
+        </View>
+
+        {chiens.length === 0 ? (
+          <View style={styles.dogsEmpty}>
+            <Text style={styles.dogsEmptyText}>Aucun chien ajouté pour l'instant.</Text>
+          </View>
+        ) : (
+          chiens.map((dog, idx) => (
+            <View key={dog.id} style={[styles.dogCard, idx < chiens.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+              <View style={styles.dogCardLeft}>
+                <View style={styles.dogCardNameRow}>
+                  <Text style={styles.dogCardNom}>{dog.nom}</Text>
+                  {idx === 0 && <View style={styles.dogPrimaryBadge}><Text style={styles.dogPrimaryBadgeText}>Principal</Text></View>}
+                </View>
+                <Text style={styles.dogCardMeta}>
+                  {[dog.race, dog.genre ? GENRES.find(g => g.key === dog.genre)?.label : null, dog.tranche_age ? TRANCHES_AGE.find(t => t.key === dog.tranche_age)?.label : null].filter(Boolean).join(' · ')}
+                </Text>
+                {dog.date_naissance && (
+                  <Text style={styles.dogCardMeta}>{dog.date_naissance.includes('/') && dog.date_naissance.length === 10 ? `Né(e) le ${dog.date_naissance}` : dog.date_naissance}</Text>
+                )}
+                {dog.statut_amoureux && (
+                  <Text style={styles.dogCardMeta}>{STATUTS_AMOUREUX.find(s => s.key === dog.statut_amoureux)?.emoji} {STATUTS_AMOUREUX.find(s => s.key === dog.statut_amoureux)?.label}</Text>
+                )}
+              </View>
+              <View style={styles.dogCardActions}>
+                <TouchableOpacity onPress={() => openDogModal(dog)} style={styles.dogCardBtn}>
+                  <Ionicons name="create-outline" size={18} color={colors.bordeaux} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteDog(dog)} style={styles.dogCardBtn}>
+                  <Ionicons name="trash-outline" size={18} color="#C62828" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+
+        <TouchableOpacity style={styles.addDogBtn} onPress={() => openDogModal(null)}>
+          <Ionicons name="paw-outline" size={16} color={colors.terra} />
+          <Text style={styles.addDogBtnText}>Ajouter un passeport</Text>
         </TouchableOpacity>
       </View>
 
@@ -467,8 +590,174 @@ export default function SettingsScreen() {
 
     </ScrollView>
 
+    {/* Dog modal (passeport form) */}
+    <Modal
+      visible={dogModal}
+      animationType="slide"
+      transparent
+      onRequestClose={() => setDogModal(false)}
+    >
+      <KeyboardAvoidingView style={styles.dogModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={styles.dogModalCard}>
+          <View style={styles.dogModalHeader}>
+            <Text style={styles.dogModalTitle}>{editingDog ? 'Modifier le passeport' : 'Nouveau passeport'}</Text>
+            <TouchableOpacity onPress={() => setDogModal(false)}>
+              <Ionicons name="close" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.dogModalContent} keyboardShouldPersistTaps="handled">
+            {/* Nom */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Nom du chien *</Text>
+              <TextInput
+                style={[styles.dogFieldInput, dogNomError && styles.dogFieldInputError]}
+                value={dogNom}
+                onChangeText={t => { setDogNom(t); setDogNomError(false); }}
+                placeholder="Ex : Albus"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="words"
+              />
+              {dogNomError && <Text style={styles.dogFieldError}>Le nom est requis</Text>}
+            </View>
+
+            {/* Race */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Race</Text>
+              <TouchableOpacity
+                style={styles.dogRacePicker}
+                onPress={() => { setRaceSearch(''); setRaceCustomMode(null); setRaceModal(true); }}
+              >
+                <Text style={[styles.dogRacePickerText, !dogRace && { color: colors.textMuted }]}>
+                  {dogRace || 'Choisir une race…'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Genre */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Genre</Text>
+              <View style={styles.pillGrid}>
+                {GENRES.map(g => {
+                  const active = dogGenre === g.key;
+                  return (
+                    <TouchableOpacity
+                      key={g.key}
+                      style={[styles.pill, active && styles.pillActive]}
+                      onPress={() => setDogGenre(active ? '' : g.key)}
+                    >
+                      <Text style={styles.pillEmoji}>{g.emoji}</Text>
+                      <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Tranche d'âge */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Tranche d'âge</Text>
+              <View style={styles.pillGrid}>
+                {TRANCHES_AGE.map(t => {
+                  const active = dogTrancheAge === t.key;
+                  return (
+                    <TouchableOpacity
+                      key={t.key}
+                      style={[styles.pill, active && styles.pillActive]}
+                      onPress={() => setDogTrancheAge(active ? '' : t.key)}
+                    >
+                      <Text style={styles.pillEmoji}>{t.emoji}</Text>
+                      <View>
+                        <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{t.label}</Text>
+                        <Text style={[styles.pillSub, active && styles.pillLabelActive]}>{t.sub}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Situation amoureuse */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Situation amoureuse</Text>
+              <View style={styles.pillGrid}>
+                {STATUTS_AMOUREUX.map(s => {
+                  const active = dogStatut === s.key;
+                  return (
+                    <TouchableOpacity
+                      key={s.key}
+                      style={[styles.pill, active && styles.pillActive]}
+                      onPress={() => setDogStatut(active ? '' : s.key)}
+                    >
+                      <Text style={styles.pillEmoji}>{s.emoji}</Text>
+                      <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{s.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Anniversaire */}
+            <View style={styles.dogField}>
+              <Text style={styles.dogFieldLabel}>Anniversaire</Text>
+              <View style={styles.modeToggle}>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dogDateMode === 'date' && styles.modeBtnActive]}
+                  onPress={() => { setDogDateMode('date'); setDogAge(''); }}
+                >
+                  <Text style={[styles.modeBtnText, dogDateMode === 'date' && styles.modeBtnTextActive]}>📅 Date</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, dogDateMode === 'age' && styles.modeBtnActive]}
+                  onPress={() => { setDogDateMode('age'); setDogDateNaiss(''); }}
+                >
+                  <Text style={[styles.modeBtnText, dogDateMode === 'age' && styles.modeBtnTextActive]}>🔢 Âge</Text>
+                </TouchableOpacity>
+              </View>
+              {dogDateMode === 'date' ? (
+                <TextInput
+                  style={styles.dogFieldInput}
+                  value={dogDateNaiss}
+                  onChangeText={t => setDogDateNaiss(formatDate(t))}
+                  placeholder="JJ/MM/AAAA"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  maxLength={10}
+                />
+              ) : (
+                <View style={styles.ageRow}>
+                  <TextInput
+                    style={[styles.dogFieldInput, { flex: 1 }]}
+                    value={dogAge}
+                    onChangeText={t => setDogAge(t.replace(/\D/g, ''))}
+                    placeholder="Ex : 3"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.ageUnit}>ans</Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity style={styles.saveBtn} onPress={saveDog} disabled={savingDog}>
+              {savingDog
+                ? <ActivityIndicator color={colors.ivory} size="small" />
+                : <Text style={styles.saveBtnText}>Enregistrer le passeport</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+
     {/* Race picker modal */}
-    <Modal visible={raceModal} animationType="slide" transparent onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}>
+    <Modal
+      visible={raceModal}
+      animationType="slide"
+      transparent
+      onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}
+    >
       <KeyboardAvoidingView style={styles.raceModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.raceModalCard}>
           <View style={styles.raceModalHeader}>
@@ -492,7 +781,7 @@ export default function SettingsScreen() {
                 returnKeyType="done"
                 onSubmitEditing={() => {
                   const val = raceCustomInput.trim();
-                  if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
+                  if (val) setDogRace(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
                   setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
                 }}
               />
@@ -500,7 +789,7 @@ export default function SettingsScreen() {
                 style={{ backgroundColor: raceCustomInput.trim() ? colors.bordeaux : colors.border, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }}
                 onPress={() => {
                   const val = raceCustomInput.trim();
-                  if (val) setRaceChien(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
+                  if (val) setDogRace(raceCustomMode === 'croisé' ? `Croisé ${val}` : val);
                   setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch('');
                 }}
                 disabled={!raceCustomInput.trim()}
@@ -534,16 +823,16 @@ export default function SettingsScreen() {
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
                   <TouchableOpacity
-                    style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
+                    style={[styles.raceItem, dogRace === item && styles.raceItemActive]}
                     onPress={() => {
                       if (item === 'Croisé') { setRaceCustomMode('croisé'); setRaceCustomInput(''); setRaceSearch(''); return; }
                       if (item === 'Autre race') { setRaceCustomMode('autre'); setRaceCustomInput(''); setRaceSearch(''); return; }
                       Keyboard.dismiss();
-                      setRaceChien(item); setRaceModal(false); setRaceSearch('');
+                      setDogRace(item); setRaceModal(false); setRaceSearch('');
                     }}
                   >
-                    <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
-                    {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                    <Text style={[styles.raceItemText, dogRace === item && styles.raceItemTextActive]}>{item}</Text>
+                    {dogRace === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={
@@ -571,6 +860,9 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted,
     textTransform: 'uppercase', letterSpacing: 0.8,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
@@ -587,22 +879,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10,
     backgroundColor: colors.ivoryPale,
   },
-  fieldDivider: { height: 1, backgroundColor: colors.border },
-  // Mode toggle (date vs âge)
-  modeToggle: {
-    flexDirection: 'row', gap: 8, marginBottom: 10,
-  },
+  // Mode toggle
+  modeToggle: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   modeBtn: {
     borderRadius: 20, borderWidth: 1.5, borderColor: colors.border,
-    paddingVertical: 6, paddingHorizontal: 14,
-    backgroundColor: colors.ivoryPale,
+    paddingVertical: 6, paddingHorizontal: 14, backgroundColor: colors.ivoryPale,
   },
   modeBtnActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
   modeBtnText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   modeBtnTextActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
   ageRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   ageUnit: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.textMuted },
-  // Statut amoureux pills
+  // Pills
   pillGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   pill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -614,14 +902,32 @@ const styles = StyleSheet.create({
   pillEmoji: { fontSize: 14 },
   pillLabel: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
   pillLabelActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
-  // Race picker
-  racePicker: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 11,
-    backgroundColor: colors.ivoryPale,
+  pillSub: { fontFamily: 'DMSans_300Light', fontSize: 10, color: colors.textMuted },
+  // Dog cards
+  dogCard: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    paddingHorizontal: 16, paddingVertical: 14, gap: 12,
   },
-  racePickerText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux, flex: 1 },
+  dogCardLeft: { flex: 1 },
+  dogCardNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  dogCardNom: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux },
+  dogPrimaryBadge: {
+    backgroundColor: colors.terra + '22', borderRadius: 8,
+    paddingHorizontal: 7, paddingVertical: 2,
+  },
+  dogPrimaryBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra },
+  dogCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  dogCardActions: { flexDirection: 'row', gap: 4, alignItems: 'center', marginTop: 2 },
+  dogCardBtn: { padding: 6 },
+  dogsEmpty: { padding: 20, alignItems: 'center' },
+  dogsEmptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  addDogBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    margin: 16, marginTop: 8, justifyContent: 'center',
+    borderWidth: 1.5, borderColor: colors.terra, borderRadius: 12,
+    borderStyle: 'dashed', padding: 12,
+  },
+  addDogBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.terra },
   // Username
   usernameRow: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -664,6 +970,36 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted },
   infoValue: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  // Dog modal
+  dogModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  dogModalCard: {
+    backgroundColor: colors.ivoryPale, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: '92%', overflow: 'hidden',
+  },
+  dogModalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  dogModalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  dogModalContent: { padding: 16, gap: 4, paddingBottom: 32 },
+  dogField: { paddingVertical: 10 },
+  dogFieldLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  dogFieldInput: {
+    fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux,
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 11,
+    backgroundColor: colors.white,
+  },
+  dogFieldInputError: { borderColor: '#C43A3A' },
+  dogFieldError: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: '#C43A3A', marginTop: 4 },
+  dogRacePicker: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 11, backgroundColor: colors.white,
+  },
+  dogRacePickerText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux, flex: 1 },
   // Race modal
   raceModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   raceModalCard: {

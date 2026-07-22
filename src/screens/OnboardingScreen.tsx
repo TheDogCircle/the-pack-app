@@ -120,6 +120,13 @@ export default function OnboardingScreen() {
   const [followed, setFollowed] = useState<Set<string>>(new Set());
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Extra dogs (additional dogs added during onboarding)
+  const [extraDogs, setExtraDogs] = useState<{ nom: string; race: string }[]>([]);
+  const [showExtraForm, setShowExtraForm] = useState(false);
+  const [extraNom, setExtraNom] = useState('');
+  const [extraRace, setExtraRace] = useState('');
+  const [extraNomError, setExtraNomError] = useState(false);
+
   const [saving, setSaving] = useState(false);
 
   // Pre-fill email from Google/auth session
@@ -196,8 +203,31 @@ export default function OnboardingScreen() {
       statut_amoureux_chien: statutAmoureux || null,
       date_naissance_chien: dogBirth,
     });
+    if (upsertError) { setSaving(false); Alert.alert('Erreur', upsertError.message); return; }
+
+    // Insert first dog into chiens table
+    await supabase.from('chiens').insert({
+      user_id: session.user.id,
+      nom: nomChien.trim(),
+      race: raceChien || null,
+      genre: genre || null,
+      tranche_age: trancheAge || null,
+      statut_amoureux: statutAmoureux || null,
+      date_naissance: dogBirth || null,
+    });
+
+    // Insert extra dogs
+    if (extraDogs.length > 0) {
+      await supabase.from('chiens').insert(
+        extraDogs.map(d => ({
+          user_id: session.user.id,
+          nom: d.nom,
+          race: d.race || null,
+        }))
+      );
+    }
+
     setSaving(false);
-    if (upsertError) { Alert.alert('Erreur', upsertError.message); return; }
 
     const { data } = await supabase.from('profils')
       .select('id,prenom,avatar_url,ville,nom_chien')
@@ -514,6 +544,77 @@ export default function OnboardingScreen() {
               {dateNaissanceChienError && <Text style={styles.errorText}>L'anniversaire du chien est requis</Text>}
             </View>
 
+            {/* Extra dogs section */}
+            {extraDogs.length > 0 && (
+              <View style={styles.extraDogsWrap}>
+                <Text style={styles.extraDogsLabel}>Chiens ajoutés :</Text>
+                <View style={styles.extraDogsChips}>
+                  {extraDogs.map((d, i) => (
+                    <View key={i} style={styles.extraDogChip}>
+                      <Text style={styles.extraDogChipText}>🐾 {d.nom}</Text>
+                      <TouchableOpacity onPress={() => setExtraDogs(prev => prev.filter((_, idx) => idx !== i))}>
+                        <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {showExtraForm ? (
+              <View style={[styles.card, { marginTop: 0 }]}>
+                <Text style={styles.label}>Nom du chien *</Text>
+                <TextInput
+                  style={[styles.input, extraNomError && styles.inputError]}
+                  placeholder="Ex : Rex"
+                  placeholderTextColor={colors.textMuted}
+                  value={extraNom}
+                  onChangeText={t => { setExtraNom(t); setExtraNomError(false); }}
+                  autoCapitalize="words"
+                  autoFocus
+                />
+                {extraNomError && <Text style={styles.errorText}>Le nom est requis</Text>}
+                <Text style={[styles.label, { marginTop: 16 }]}>Race (optionnel)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Ex : Labrador"
+                  placeholderTextColor={colors.textMuted}
+                  value={extraRace}
+                  onChangeText={setExtraRace}
+                  autoCapitalize="words"
+                />
+                <Text style={{ fontFamily: 'DMSans_300Light', fontSize: 11, color: 'rgba(245,239,224,0.4)', marginTop: 8 }}>
+                  Tu pourras compléter le profil depuis les paramètres.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, { flex: 1, backgroundColor: 'rgba(245,239,224,0.15)' }]}
+                    onPress={() => { setShowExtraForm(false); setExtraNom(''); setExtraRace(''); setExtraNomError(false); }}
+                  >
+                    <Text style={[styles.btnText, { color: 'rgba(245,239,224,0.7)' }]}>Annuler</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { flex: 1 }]}
+                    onPress={() => {
+                      if (!extraNom.trim()) { setExtraNomError(true); return; }
+                      setExtraDogs(prev => [...prev, { nom: extraNom.trim(), race: extraRace.trim() }]);
+                      setExtraNom(''); setExtraRace(''); setShowExtraForm(false);
+                    }}
+                  >
+                    <Text style={styles.btnText}>Ajouter</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.addExtraDogBtn}
+                onPress={() => { setShowExtraForm(true); setExtraNom(''); setExtraRace(''); }}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="rgba(245,239,224,0.6)" />
+                <Text style={styles.addExtraDogText}>Ajouter un autre chien</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={[styles.btn, saving && styles.btnDisabled]}
               onPress={finish}
@@ -771,4 +872,22 @@ const styles = StyleSheet.create({
   suggestCtaText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
   suggestSkip: { alignItems: 'center', paddingTop: 14 },
   suggestSkipText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+
+  // Extra dogs
+  extraDogsWrap: { marginBottom: 16 },
+  extraDogsLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: 'rgba(245,239,224,0.6)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  extraDogsChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  extraDogChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(245,239,224,0.12)', borderRadius: 20,
+    paddingVertical: 6, paddingHorizontal: 12,
+    borderWidth: 1, borderColor: 'rgba(245,239,224,0.2)',
+  },
+  extraDogChipText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.ivory },
+  addExtraDogBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: 'rgba(245,239,224,0.25)', borderRadius: 12,
+    borderStyle: 'dashed', padding: 12, marginBottom: 16,
+  },
+  addExtraDogText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: 'rgba(245,239,224,0.6)' },
 });
