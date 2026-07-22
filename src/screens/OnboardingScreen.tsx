@@ -293,11 +293,22 @@ export default function OnboardingScreen() {
     >
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
 
-        {/* Progress */}
-        <View style={styles.progress}>
-          <View style={[styles.progressDot, styles.progressDotActive]} />
-          <View style={styles.progressLine} />
-          <View style={[styles.progressDot, step === 2 && styles.progressDotActive]} />
+        {/* Progress + back */}
+        <View style={styles.topRow}>
+          <TouchableOpacity
+            style={styles.backArrow}
+            onPress={() => setStep(1)}
+            disabled={step === 1}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            {step === 2 && <Ionicons name="arrow-back" size={22} color={colors.ivory} />}
+          </TouchableOpacity>
+          <View style={styles.progress}>
+            <View style={[styles.progressDot, styles.progressDotActive]} />
+            <View style={styles.progressLine} />
+            <View style={[styles.progressDot, step === 2 && styles.progressDotActive]} />
+          </View>
+          <View style={styles.backArrow} />
         </View>
 
         {step === 1 && (
@@ -863,7 +874,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bordeaux },
   inner: { flexGrow: 1, padding: 28, paddingTop: 64 },
 
-  progress: { flexDirection: 'row', alignItems: 'center', marginBottom: 40, alignSelf: 'center' },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 40 },
+  backArrow: { width: 32 },
+  progress: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center' },
   progressDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'rgba(245,239,224,0.2)' },
   progressDotActive: { backgroundColor: colors.terraPale },
   progressLine: { width: 40, height: 1, backgroundColor: 'rgba(245,239,224,0.15)', marginHorizontal: 8 },
