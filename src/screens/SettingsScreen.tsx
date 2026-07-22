@@ -110,6 +110,7 @@ export default function SettingsScreen() {
   const [ageVal, setAgeVal] = useState('');
 
   const [savingProfil, setSavingProfil] = useState(false);
+  const [profilOpen, setProfilOpen] = useState(false);
 
   // Chiens / Passeports
   const [chiens, setChiens] = useState<Dog[]>([]);
@@ -240,6 +241,7 @@ export default function SettingsScreen() {
     }).eq('id', userId);
     setSavingProfil(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
+    setProfilOpen(false);
     Alert.alert('Enregistré', 'Tes informations ont été mises à jour.');
   }
 
@@ -380,9 +382,23 @@ export default function SettingsScreen() {
 
       {/* Mon profil */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Mon profil</Text>
+        <TouchableOpacity
+          style={[styles.sectionHeaderRow, !profilOpen && { borderBottomWidth: 0 }]}
+          onPress={() => setProfilOpen(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>Mon profil</Text>
+            {!profilOpen && (prenom || ville) ? (
+              <Text style={styles.sectionSummary} numberOfLines={1}>
+                {[prenom, ville].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+          </View>
+          <Ionicons name={profilOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+        </TouchableOpacity>
 
-        <View style={styles.field}>
+        {profilOpen && <><View style={styles.field}>
           <Text style={styles.fieldLabel}>Prénom</Text>
           <TextInput style={styles.fieldInput} value={prenom} onChangeText={setPrenom}
             placeholder="Ex : Marie" placeholderTextColor={colors.textMuted} />
@@ -447,6 +463,7 @@ export default function SettingsScreen() {
             ? <ActivityIndicator color={colors.ivory} size="small" />
             : <Text style={styles.saveBtnText}>Enregistrer les modifications</Text>}
         </TouchableOpacity>
+        </>}
       </View>
 
       {/* Mes chiens / Passeports */}
@@ -749,15 +766,14 @@ export default function SettingsScreen() {
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
 
-    {/* Race picker modal */}
-    <Modal
-      visible={raceModal}
-      animationType="slide"
-      transparent
-      onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}
-    >
+      {/* Race picker — nested inside dog modal to fix Android touch issues */}
+      <Modal
+        visible={raceModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => { Keyboard.dismiss(); setRaceModal(false); setRaceCustomMode(null); setRaceCustomInput(''); setRaceSearch(''); }}
+      >
       <KeyboardAvoidingView style={styles.raceModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.raceModalCard}>
           <View style={styles.raceModalHeader}>
@@ -846,6 +862,7 @@ export default function SettingsScreen() {
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    </Modal>
     </>
   );
 }
@@ -865,6 +882,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  sectionSummary: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux, marginTop: 3,
   },
   field: {
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
