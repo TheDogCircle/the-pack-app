@@ -121,11 +121,19 @@ export default function OnboardingScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Extra dogs (additional dogs added during onboarding)
-  const [extraDogs, setExtraDogs] = useState<{ nom: string; race: string }[]>([]);
+  type ExtraDog = { nom: string; race: string; genre: string; trancheAge: string; statutAmoureux: string; dateNaissance: string };
+  const [extraDogs, setExtraDogs] = useState<ExtraDog[]>([]);
   const [showExtraForm, setShowExtraForm] = useState(false);
   const [extraNom, setExtraNom] = useState('');
   const [extraRace, setExtraRace] = useState('');
+  const [extraGenre, setExtraGenre] = useState('');
+  const [extraTrancheAge, setExtraTrancheAge] = useState('');
+  const [extraStatut, setExtraStatut] = useState('');
+  const [extraDateMode, setExtraDateMode] = useState<'date' | 'age'>('date');
+  const [extraDateNaiss, setExtraDateNaiss] = useState('');
+  const [extraAgeVal, setExtraAgeVal] = useState('');
   const [extraNomError, setExtraNomError] = useState(false);
+  const [racePickerFor, setRacePickerFor] = useState<'main' | 'extra'>('main');
 
   const [saving, setSaving] = useState(false);
 
@@ -223,6 +231,10 @@ export default function OnboardingScreen() {
           user_id: session.user.id,
           nom: d.nom,
           race: d.race || null,
+          genre: d.genre || null,
+          tranche_age: d.trancheAge || null,
+          statut_amoureux: d.statutAmoureux || null,
+          date_naissance: d.dateNaissance || null,
         }))
       );
     }
@@ -437,7 +449,7 @@ export default function OnboardingScreen() {
               <Text style={[styles.label, { marginTop: 16 }]}>Race *</Text>
               <TouchableOpacity
                 style={[styles.racePicker, raceError && styles.inputError]}
-                onPress={() => { setRaceSearch(''); setRaceModal(true); }}
+                onPress={() => { setRacePickerFor('main'); setRaceSearch(''); setRaceModal(true); }}
               >
                 <Text style={[styles.racePickerText, !raceChien && { color: colors.textMuted }]}>
                   {raceChien || 'Choisir une race…'}
@@ -485,7 +497,7 @@ export default function OnboardingScreen() {
               </View>
               {trancheAgeError && <Text style={styles.errorText}>La tranche d'âge est requise</Text>}
 
-              <Text style={[styles.label, { marginTop: 16 }]}>Situation amoureuse</Text>
+              <Text style={[styles.label, { marginTop: 16 }]}>Situation amoureuse du chien</Text>
               <View style={styles.statutGrid}>
                 {STATUTS_AMOUREUX.map(s => {
                   const active = statutAmoureux === s.key;
@@ -574,22 +586,121 @@ export default function OnboardingScreen() {
                   autoFocus
                 />
                 {extraNomError && <Text style={styles.errorText}>Le nom est requis</Text>}
-                <Text style={[styles.label, { marginTop: 16 }]}>Race (optionnel)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Ex : Labrador"
-                  placeholderTextColor={colors.textMuted}
-                  value={extraRace}
-                  onChangeText={setExtraRace}
-                  autoCapitalize="words"
-                />
-                <Text style={{ fontFamily: 'DMSans_300Light', fontSize: 11, color: 'rgba(245,239,224,0.4)', marginTop: 8 }}>
-                  Tu pourras compléter le profil depuis les paramètres.
-                </Text>
+
+                <Text style={[styles.label, { marginTop: 16 }]}>Race</Text>
+                <TouchableOpacity
+                  style={styles.racePicker}
+                  onPress={() => { setRacePickerFor('extra'); setRaceSearch(''); setRaceModal(true); }}
+                >
+                  <Text style={[styles.racePickerText, !extraRace && { color: colors.textMuted }]}>
+                    {extraRace || 'Choisir une race…'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <Text style={[styles.label, { marginTop: 16 }]}>Genre</Text>
+                <View style={styles.statutGrid}>
+                  {GENRES.map(g => {
+                    const active = extraGenre === g.key;
+                    return (
+                      <TouchableOpacity
+                        key={g.key}
+                        style={[styles.statutPill, active && styles.statutPillActive]}
+                        onPress={() => setExtraGenre(active ? '' : g.key)}
+                      >
+                        <Text style={styles.statutEmoji}>{g.emoji}</Text>
+                        <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{g.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 16 }]}>Tranche d'âge</Text>
+                <View style={styles.statutGrid}>
+                  {TRANCHES_AGE.map(t => {
+                    const active = extraTrancheAge === t.key;
+                    return (
+                      <TouchableOpacity
+                        key={t.key}
+                        style={[styles.statutPill, active && styles.statutPillActive]}
+                        onPress={() => setExtraTrancheAge(active ? '' : t.key)}
+                      >
+                        <Text style={styles.statutEmoji}>{t.emoji}</Text>
+                        <View>
+                          <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{t.label}</Text>
+                          <Text style={[styles.statutSub, active && styles.statutLabelActive]}>{t.sub}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 16 }]}>Situation amoureuse du chien</Text>
+                <View style={styles.statutGrid}>
+                  {STATUTS_AMOUREUX.map(s => {
+                    const active = extraStatut === s.key;
+                    return (
+                      <TouchableOpacity
+                        key={s.key}
+                        style={[styles.statutPill, active && styles.statutPillActive]}
+                        onPress={() => setExtraStatut(active ? '' : s.key)}
+                      >
+                        <Text style={styles.statutEmoji}>{s.emoji}</Text>
+                        <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{s.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 16 }]}>Anniversaire</Text>
+                <View style={styles.modeToggle}>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, extraDateMode === 'date' && styles.modeBtnActive]}
+                    onPress={() => { setExtraDateMode('date'); setExtraAgeVal(''); }}
+                  >
+                    <Text style={[styles.modeBtnText, extraDateMode === 'date' && styles.modeBtnTextActive]}>📅 Date</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, extraDateMode === 'age' && styles.modeBtnActive]}
+                    onPress={() => { setExtraDateMode('age'); setExtraDateNaiss(''); }}
+                  >
+                    <Text style={[styles.modeBtnText, extraDateMode === 'age' && styles.modeBtnTextActive]}>🔢 Âge</Text>
+                  </TouchableOpacity>
+                </View>
+                {extraDateMode === 'date' ? (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="JJ/MM/AAAA"
+                    placeholderTextColor={colors.textMuted}
+                    value={extraDateNaiss}
+                    onChangeText={t => setExtraDateNaiss(formatDate(t, extraDateNaiss))}
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                ) : (
+                  <View style={styles.ageRow}>
+                    <TextInput
+                      style={[styles.input, { flex: 1 }]}
+                      placeholder="Ex : 3"
+                      placeholderTextColor={colors.textMuted}
+                      value={extraAgeVal}
+                      onChangeText={t => setExtraAgeVal(t.replace(/\D/g, ''))}
+                      keyboardType="numeric"
+                      maxLength={3}
+                    />
+                    <Text style={styles.ageUnit}>ans</Text>
+                  </View>
+                )}
+
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
                   <TouchableOpacity
                     style={[styles.btn, { flex: 1, backgroundColor: 'rgba(245,239,224,0.15)' }]}
-                    onPress={() => { setShowExtraForm(false); setExtraNom(''); setExtraRace(''); setExtraNomError(false); }}
+                    onPress={() => {
+                      setShowExtraForm(false);
+                      setExtraNom(''); setExtraRace(''); setExtraGenre(''); setExtraTrancheAge('');
+                      setExtraStatut(''); setExtraDateMode('date'); setExtraDateNaiss(''); setExtraAgeVal('');
+                      setExtraNomError(false);
+                    }}
                   >
                     <Text style={[styles.btnText, { color: 'rgba(245,239,224,0.7)' }]}>Annuler</Text>
                   </TouchableOpacity>
@@ -597,8 +708,14 @@ export default function OnboardingScreen() {
                     style={[styles.btn, { flex: 1 }]}
                     onPress={() => {
                       if (!extraNom.trim()) { setExtraNomError(true); return; }
-                      setExtraDogs(prev => [...prev, { nom: extraNom.trim(), race: extraRace.trim() }]);
-                      setExtraNom(''); setExtraRace(''); setShowExtraForm(false);
+                      const dn = extraDateMode === 'date' ? extraDateNaiss.trim() : (extraAgeVal.trim() ? `${extraAgeVal.trim()} ans` : '');
+                      setExtraDogs(prev => [...prev, {
+                        nom: extraNom.trim(), race: extraRace, genre: extraGenre,
+                        trancheAge: extraTrancheAge, statutAmoureux: extraStatut, dateNaissance: dn,
+                      }]);
+                      setExtraNom(''); setExtraRace(''); setExtraGenre(''); setExtraTrancheAge('');
+                      setExtraStatut(''); setExtraDateMode('date'); setExtraDateNaiss(''); setExtraAgeVal('');
+                      setShowExtraForm(false);
                     }}
                   >
                     <Text style={styles.btnText}>Ajouter</Text>
@@ -608,7 +725,11 @@ export default function OnboardingScreen() {
             ) : (
               <TouchableOpacity
                 style={styles.addExtraDogBtn}
-                onPress={() => { setShowExtraForm(true); setExtraNom(''); setExtraRace(''); }}
+                onPress={() => {
+                  setExtraNom(''); setExtraRace(''); setExtraGenre(''); setExtraTrancheAge('');
+                  setExtraStatut(''); setExtraDateMode('date'); setExtraDateNaiss(''); setExtraAgeVal('');
+                  setShowExtraForm(true);
+                }}
               >
                 <Ionicons name="add-circle-outline" size={18} color="rgba(245,239,224,0.6)" />
                 <Text style={styles.addExtraDogText}>Ajouter un autre chien</Text>
@@ -662,15 +783,23 @@ export default function OnboardingScreen() {
               extraData={raceSearch}
               keyExtractor={r => r}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.raceItem, raceChien === item && styles.raceItemActive]}
-                  onPress={() => { Keyboard.dismiss(); setRaceChien(item); setRaceError(false); setRaceModal(false); }}
-                >
-                  <Text style={[styles.raceItemText, raceChien === item && styles.raceItemTextActive]}>{item}</Text>
-                  {raceChien === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) => {
+                const currentRace = racePickerFor === 'main' ? raceChien : extraRace;
+                return (
+                  <TouchableOpacity
+                    style={[styles.raceItem, currentRace === item && styles.raceItemActive]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      if (racePickerFor === 'main') { setRaceChien(item); setRaceError(false); }
+                      else setExtraRace(item);
+                      setRaceModal(false);
+                    }}
+                  >
+                    <Text style={[styles.raceItemText, currentRace === item && styles.raceItemTextActive]}>{item}</Text>
+                    {currentRace === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                  </TouchableOpacity>
+                );
+              }}
               ListEmptyComponent={
                 <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
                   Aucune race trouvée

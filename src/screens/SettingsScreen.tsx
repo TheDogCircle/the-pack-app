@@ -680,7 +680,7 @@ export default function SettingsScreen() {
 
             {/* Situation amoureuse */}
             <View style={styles.dogField}>
-              <Text style={styles.dogFieldLabel}>Situation amoureuse</Text>
+              <Text style={styles.dogFieldLabel}>Situation amoureuse du chien</Text>
               <View style={styles.pillGrid}>
                 {STATUTS_AMOUREUX.map(s => {
                   const active = dogStatut === s.key;
