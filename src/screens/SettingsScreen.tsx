@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Switch,
-  Modal, FlatList, KeyboardAvoidingView, Platform, Keyboard,
+  Modal, FlatList, KeyboardAvoidingView, Platform, Keyboard, Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
+import { savePushToken } from '../lib/notifications';
 
 const RACES = [
   'Affenpinscher', 'Airedale Terrier', 'Akita Américain', 'Akita Inu', 'Alaskan Malamute',
@@ -96,6 +98,7 @@ export default function SettingsScreen() {
   const [notifLieuNearby, setNotifLieuNearby] = useState(true);
   const [notifMessages, setNotifMessages] = useState(true);
   const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
+  const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
   // Profil (human info only)
   const [prenom, setPrenom] = useState('');
@@ -146,6 +149,12 @@ export default function SettingsScreen() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setLoading(false); return; }
     setUserId(session.user.id);
+
+    // Check push permission status and refresh token
+    Notifications.getPermissionsAsync().then(({ status }) => {
+      setNotifPermission(status as 'granted' | 'denied' | 'undetermined');
+    });
+    savePushToken(session.user.id);
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
@@ -543,6 +552,14 @@ export default function SettingsScreen() {
       {/* Notifications */}
       <View style={styles.section}>
         <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Notifications</Text></View>
+        {notifPermission === 'denied' && (
+          <TouchableOpacity style={styles.notifWarning} onPress={() => Linking.openSettings()}>
+            <Ionicons name="notifications-off-outline" size={16} color="#B71C1C" />
+            <Text style={styles.notifWarningText}>
+              Les notifications sont désactivées dans les réglages de ton téléphone. Appuie ici pour les activer.
+            </Text>
+          </TouchableOpacity>
+        )}
         <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
             <Text style={styles.toggleLabel}>Nouvel abonné</Text>
@@ -889,6 +906,15 @@ const styles = StyleSheet.create({
   sectionTitleWrap: {
     paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  notifWarning: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: '#FFEBEE', marginHorizontal: 16, marginTop: 10, marginBottom: 2,
+    borderRadius: 10, padding: 12,
+  },
+  notifWarningText: {
+    flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 12,
+    color: '#B71C1C', lineHeight: 17,
   },
   field: {
     paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,

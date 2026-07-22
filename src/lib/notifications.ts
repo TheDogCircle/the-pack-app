@@ -36,7 +36,13 @@ export async function registerForPushNotifications(): Promise<string | null> {
       });
     }
 
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    // easConfig?.projectId is more reliable in EAS production builds
+    const projectId =
+      (Constants.easConfig as any)?.projectId ??
+      Constants.expoConfig?.extra?.eas?.projectId;
+
+    if (!projectId) return null;
+
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     return token;
   } catch {

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, View, Image, Linking } from 'react-native';
+import { ActivityIndicator, View, Image, Linking, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { savePushToken } from '../lib/notifications';
@@ -184,12 +184,20 @@ export default function Navigation() {
     }
     // Enregistre le token dès la connexion, quel que soit l'écran ouvert
     savePushToken(session.user.id);
+
+    // Renouvelle le token chaque fois que l'app revient au premier plan
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') savePushToken(session.user.id);
+    });
+
     setOnboardingChecked(false);
     supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle()
       .then(({ data }) => {
         setNeedsOnboarding(!data?.prenom);
         setOnboardingChecked(true);
       });
+
+    return () => sub.remove();
   }, [session?.user.id]);
 
   if (loading || (session && !onboardingChecked)) {
