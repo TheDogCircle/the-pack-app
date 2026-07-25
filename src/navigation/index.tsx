@@ -14,7 +14,7 @@ import AuthScreen from '../screens/AuthScreen';
 import CarteScreen from '../screens/CarteScreen';
 import FeedScreen from '../screens/FeedScreen';
 import PartenairesScreen from '../screens/PartenairesScreen';
-import ExplorerScreen from '../screens/ExplorerScreen';
+
 import EvenementsScreen from '../screens/EvenementsScreen';
 import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
@@ -134,7 +134,6 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
-      <Tab.Screen name="Explorer"   component={ExplorerScreen}   options={{ title: 'Explorer', headerShown: false }} />
       <Tab.Screen
         name="Meute" component={FeedScreen}
         options={{ title: 'Meute', tabBarBadge: meuteBadge ? ' ' : undefined }}
