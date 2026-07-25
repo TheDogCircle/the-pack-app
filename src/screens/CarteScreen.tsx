@@ -261,7 +261,7 @@ export default function CarteScreen() {
       onPanResponderRelease: (_, g) => {
         if (g.dy > 100 || g.vy > 0.5) {
           Animated.timing(sheetAnim, { toValue: SCREEN_H, duration: 220, useNativeDriver: true }).start(() => {
-            setSelectedLieu(null); setPhotos([]); setFicheAvis([]); setFichePhotoIdx(0); setFavListe(null); setMyAvis(null); setGooglePhotoUrl(null); sheetPanY.setValue(0);
+            setSelectedLieu(null); setPhotos([]); setFicheAvis([]); setFichePhotoIdx(0); setFavListe(null); setMyAvis(null); setGooglePhotoUrl(null); setLightboxIdx(null); sheetPanY.setValue(0);
           });
         } else {
           Animated.spring(sheetPanY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
@@ -415,6 +415,7 @@ export default function CarteScreen() {
 
   async function openFiche(lieu: Lieu) {
     Keyboard.dismiss();
+    setLightboxIdx(null);
     setSheetLoading(true);
     setPrevSelectedId(selectedLieu?.id ?? null);
     if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
@@ -525,6 +526,7 @@ export default function CarteScreen() {
 
   function closeFiche() {
     const returnCallback = mapNavigation.consumeReturn();
+    setLightboxIdx(null);
     setPrevSelectedId(selectedLieu?.id ?? null);
     if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
     markerResetTimer.current = setTimeout(() => setPrevSelectedId(null), 600);
@@ -1720,9 +1722,9 @@ export default function CarteScreen() {
         style={styles.map}
         initialRegion={region}
         onRegionChangeComplete={r => {
+          setRegion(r);
           if (regionTimer.current) clearTimeout(regionTimer.current);
           regionTimer.current = setTimeout(() => {
-            setRegion(r);
             if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
             if (!favFilter) fetchLieux(r, activeCat);
           }, 300);
