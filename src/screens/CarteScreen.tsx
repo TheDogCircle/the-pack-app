@@ -143,7 +143,7 @@ type LieuFull = Lieu & {
   petits_chiens: boolean | null; moyens_chiens: boolean | null; grands_chiens: boolean | null;
   manager_user_id: string | null; google_photo_url: string | null;
 };
-type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null };
+type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null; fromCommunity?: boolean };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null; ambassadeur?: boolean | null };
 type CityResult = { nom: string; lat: number; lng: number };
 type EventMarker = {
@@ -430,7 +430,7 @@ export default function CarteScreen() {
     skipNextFetchRef.current = true;
     mapRef.current?.animateToRegion({ latitude: lieu.lat, longitude: lieu.lng, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
 
-    let lieuData: any = null, favData: any = null, myAvisData: any = null, photosRaw: any[] = [], avisRaw: any[] = [];
+    let lieuData: any = null, favData: any = null, myAvisData: any = null, photosRaw: any[] = [], avisRaw: any[] = [], communityPostsRaw: any[] = [];
     try {
       const results = await Promise.all([
         supabase.from('lieux').select('*').eq('id', lieu.id).single(),
@@ -438,12 +438,14 @@ export default function CarteScreen() {
         userId ? supabase.from('avis').select('id,note,commentaire').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).eq('validee', true).order('created_at', { ascending: true }).limit(20),
         supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
+        supabase.from('community_posts').select('id,image_url,user_id').eq('lieu_id', lieu.id).eq('hidden', false).order('created_at', { ascending: false }).limit(10),
       ]);
       lieuData = results[0].data;
       favData = results[1];
       myAvisData = results[2];
       photosRaw = results[3].data || [];
       avisRaw = results[4].data || [];
+      communityPostsRaw = results[5].data || [];
     } catch (e) {
       setSheetLoading(false);
       return;
@@ -456,27 +458,41 @@ export default function CarteScreen() {
       const myAvisRow = (myAvisData as any)?.data;
       setMyAvis(myAvisRow ? { note: myAvisRow.note, commentaire: myAvisRow.commentaire } : null);
 
-      // Photos avec likes + auteur
+      // Photos avec likes + auteur + posts communauté tagués sur ce lieu
       const photoIds = (photosRaw || []).map((p: any) => p.id);
-      if (photoIds.length > 0) {
-        const photoUserIds = [...new Set((photosRaw || []).map((p: any) => p.user_id).filter(Boolean))];
+      const allPhotoUserIds = [...new Set([
+        ...(photosRaw || []).map((p: any) => p.user_id),
+        ...communityPostsRaw.map((p: any) => p.user_id),
+      ].filter(Boolean))];
+      if (photoIds.length > 0 || communityPostsRaw.length > 0) {
         const [{ data: allLikes }, { data: myLikes }, { data: photoAuthors }] = await Promise.all([
-          supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
-          userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
-          photoUserIds.length > 0 ? supabase.from('profils').select('id,username,prenom').in('id', photoUserIds) : Promise.resolve({ data: [] }),
+          photoIds.length > 0 ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds) : Promise.resolve({ data: [] }),
+          photoIds.length > 0 && userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
+          allPhotoUserIds.length > 0 ? supabase.from('profils').select('id,username,prenom').in('id', allPhotoUserIds) : Promise.resolve({ data: [] }),
         ]);
         const countMap: Record<string, number> = {};
         (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
         const mySet = new Set((myLikes || []).map((l: any) => l.photo_id));
         const authorMap: Record<string, string | null> = {};
         (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username ? `@${p.username}` : (p.prenom || null); });
-        setPhotos((photosRaw || []).map((p: any) => ({
+        const regularPhotos: PhotoFiche[] = (photosRaw || []).map((p: any) => ({
           id: p.id, url: p.url,
           likeCount: countMap[p.id] || 0,
           likedByMe: mySet.has(p.id),
           authorUsername: authorMap[p.user_id] || null,
           nomChien: p.nom_chien || null,
-        })));
+          fromCommunity: false,
+        }));
+        const communityPhotos: PhotoFiche[] = communityPostsRaw.map((p: any) => ({
+          id: 'cp-' + p.id,
+          url: p.image_url,
+          likeCount: 0,
+          likedByMe: false,
+          authorUsername: authorMap[p.user_id] || null,
+          nomChien: null,
+          fromCommunity: true,
+        }));
+        setPhotos([...regularPhotos, ...communityPhotos]);
       } else {
         setPhotos([]);
         // Fallback photo Google pour les lieux sans photo communauté
@@ -584,7 +600,7 @@ export default function CarteScreen() {
   async function togglePhotoLike(photoId: string) {
     if (!userId) { showLoginPrompt(); return; }
     const current = photos.find(p => p.id === photoId);
-    if (!current) return;
+    if (!current || current.fromCommunity) return;
     const wasLiked = current.likedByMe;
     setPhotos(prev => prev.map(p => {
       if (p.id !== photoId) return p;
@@ -1395,18 +1411,20 @@ export default function CarteScreen() {
                 {currentPhoto.authorUsername && (
                   <Text style={styles.fichePhotoAuthor}>{currentPhoto.authorUsername}</Text>
                 )}
-                <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
-                  <Ionicons
-                    name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
-                    size={14}
-                    color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
-                  />
-                  {currentPhoto.likeCount > 0 && (
-                    <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
-                      {currentPhoto.likeCount}
-                    </Text>
-                  )}
-                </TouchableOpacity>
+                {!currentPhoto.fromCommunity && (
+                  <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
+                    <Ionicons
+                      name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
+                      size={14}
+                      color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
+                    />
+                    {currentPhoto.likeCount > 0 && (
+                      <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
+                        {currentPhoto.likeCount}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>

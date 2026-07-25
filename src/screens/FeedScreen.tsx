@@ -1,20 +1,52 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, TextInput, Alert,
+  Modal, Keyboard, Platform, Dimensions, ScrollView, KeyboardAvoidingView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
+import { mapNavigation } from '../lib/mapNavigation';
 import MessagerieScreen from './MessagerieScreen';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type CommunityPost = {
+  id: string;
+  user_id: string;
+  image_url: string;
+  caption: string | null;
+  lieu_id: string | null;
+  auto_generated: boolean;
+  created_at: string;
+  profils: { prenom: string; avatar_url: string | null } | null;
+  lieux: { id: string; nom: string; cat: string; ville: string } | null;
+  community_post_likes: { user_id: string }[];
+  community_post_comments: { id: string }[];
+};
+
+type Comment = {
+  id: string;
+  content: string;
+  created_at: string;
+  user_id: string;
+  profils: { prenom: string; avatar_url: string | null } | null;
+};
+
+type LieuResult = { id: string; nom: string; cat: string; ville: string };
 
 type MembreItem = {
   id: string;
-  type: 'membre';
   user: {
     id: string;
     prenom: string;
@@ -26,91 +58,533 @@ type MembreItem = {
   nomChien: string | null;
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeAgo(date: string): string {
+  const m = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
+  if (m < 1) return 'À l\'instant';
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}j`;
+  return new Date(date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+function PostAvatar({ prenom, avatarUrl }: { prenom: string; avatarUrl: string | null }) {
+  return avatarUrl ? (
+    <Image source={{ uri: avatarUrl }} style={styles.postAvatarImg} />
+  ) : (
+    <View style={styles.postAvatarFallback}>
+      <Text style={styles.postAvatarLetter}>{(prenom || '?')[0].toUpperCase()}</Text>
+    </View>
+  );
+}
+
+// ─── PostCard ─────────────────────────────────────────────────────────────────
+
+type PostCardProps = {
+  post: CommunityPost;
+  myUserId: string;
+  onLike: (postId: string) => void;
+  onCommentPress: (post: CommunityPost) => void;
+  onLieuPress: (lieuId: string) => void;
+};
+
+function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostCardProps) {
+  const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
+  const likeCount = post.community_post_likes.length;
+  const commentCount = post.community_post_comments.length;
+  const author = post.profils?.prenom || 'Membre';
+
+  return (
+    <View style={styles.postCard}>
+      <View style={styles.postHeader}>
+        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.postAuthor}>{author}</Text>
+          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+        </View>
+      </View>
+
+      <Image source={{ uri: post.image_url }} style={styles.postImage} resizeMode="cover" />
+
+      <View style={styles.postActions}>
+        <TouchableOpacity style={styles.postActionBtn} onPress={() => onLike(post.id)}>
+          <Ionicons
+            name={likedByMe ? 'heart' : 'heart-outline'}
+            size={22}
+            color={likedByMe ? '#E05070' : colors.bordeaux}
+          />
+          {likeCount > 0 && (
+            <Text style={[styles.postActionCount, likedByMe && { color: '#E05070' }]}>
+              {likeCount}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.postActionBtn} onPress={() => onCommentPress(post)}>
+          <Ionicons name="chatbubble-outline" size={20} color={colors.bordeaux} />
+          {commentCount > 0 && <Text style={styles.postActionCount}>{commentCount}</Text>}
+        </TouchableOpacity>
+      </View>
+
+      {post.lieux && (
+        <TouchableOpacity style={styles.lieuTag} onPress={() => onLieuPress(post.lieux!.id)}>
+          <Ionicons name="location-outline" size={12} color={colors.terra} />
+          <Text style={styles.lieuTagText} numberOfLines={1}>
+            {post.lieux.nom}{post.lieux.ville ? `, ${post.lieux.ville}` : ''}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {post.caption ? (
+        <Text style={styles.postCaption}>
+          <Text style={styles.postCaptionBold}>{author} </Text>
+          {post.caption}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+// ─── CommentsModal ────────────────────────────────────────────────────────────
+
+function CommentsModal({
+  post, visible, onClose, myUserId,
+}: {
+  post: CommunityPost | null;
+  visible: boolean;
+  onClose: () => void;
+  myUserId: string;
+}) {
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (visible && post) fetchComments(post.id);
+    else setComments([]);
+  }, [visible, post?.id]);
+
+  async function fetchComments(postId: string) {
+    setLoadingComments(true);
+    const { data } = await supabase
+      .from('community_post_comments')
+      .select('id, content, created_at, user_id')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true });
+
+    const userIds = [...new Set((data || []).map((c: any) => c.user_id))];
+    let profileMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profils').select('id, prenom, avatar_url').in('id', userIds);
+      profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
+    }
+    setComments((data || []).map((c: any) => ({ ...c, profils: profileMap[c.user_id] || null })));
+    setLoadingComments(false);
+  }
+
+  async function sendComment() {
+    if (!text.trim() || !post || !myUserId) return;
+    setSending(true);
+    const { error } = await supabase.from('community_post_comments').insert({
+      post_id: post.id, user_id: myUserId, content: text.trim(),
+    });
+    if (error) { Alert.alert('Erreur', error.message); setSending(false); return; }
+    setText('');
+    await fetchComments(post.id);
+    setSending(false);
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.commentsModal}>
+          <View style={styles.commentsHeader}>
+            <Text style={styles.commentsTitle}>Commentaires</Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={24} color={colors.bordeaux} />
+            </TouchableOpacity>
+          </View>
+
+          {loadingComments ? (
+            <ActivityIndicator color={colors.terra} style={{ flex: 1 }} />
+          ) : (
+            <FlatList
+              data={comments}
+              keyExtractor={c => c.id}
+              contentContainerStyle={styles.commentsList}
+              ListEmptyComponent={
+                <Text style={styles.commentsEmpty}>Aucun commentaire. Sois le premier !</Text>
+              }
+              renderItem={({ item: c }) => (
+                <View style={styles.commentRow}>
+                  <PostAvatar prenom={c.profils?.prenom || '?'} avatarUrl={c.profils?.avatar_url ?? null} />
+                  <View style={styles.commentBubble}>
+                    <Text style={styles.commentAuthor}>{c.profils?.prenom || 'Membre'}</Text>
+                    <Text style={styles.commentContent}>{c.content}</Text>
+                  </View>
+                </View>
+              )}
+            />
+          )}
+
+          <View style={styles.commentInputRow}>
+            <TextInput
+              style={styles.commentTextInput}
+              placeholder="Ajouter un commentaire…"
+              placeholderTextColor={colors.textMuted}
+              value={text}
+              onChangeText={setText}
+              multiline
+            />
+            <TouchableOpacity onPress={sendComment} disabled={!text.trim() || sending}>
+              {sending ? (
+                <ActivityIndicator color={colors.terra} size="small" />
+              ) : (
+                <Ionicons name="send" size={20} color={text.trim() ? colors.terra : colors.textMuted} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ─── NewPostModal ─────────────────────────────────────────────────────────────
+
+function NewPostModal({
+  visible, onClose, myUserId, onPosted,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  myUserId: string;
+  onPosted: () => void;
+}) {
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [caption, setCaption] = useState('');
+  const [lieuSearch, setLieuSearch] = useState('');
+  const [lieuResults, setLieuResults] = useState<LieuResult[]>([]);
+  const [selectedLieu, setSelectedLieu] = useState<LieuResult | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function reset() {
+    setImageUri(null);
+    setCaption('');
+    setLieuSearch('');
+    setLieuResults([]);
+    setSelectedLieu(null);
+    setUploading(false);
+  }
+
+  async function pickImage() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission refusée', 'Autorise l\'accès à ta galerie dans les Réglages.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
+    });
+    if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+  }
+
+  function onLieuSearchChange(q: string) {
+    setLieuSearch(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.length < 2) { setLieuResults([]); return; }
+    searchTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('lieux').select('id, nom, cat, ville').eq('actif', true).ilike('nom', `%${q}%`).limit(5);
+      setLieuResults(data || []);
+    }, 300);
+  }
+
+  async function publish() {
+    if (!imageUri) return;
+    setUploading(true);
+    try {
+      const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `community/${myUserId}/${Date.now()}.${ext}`;
+      const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const { error: upErr } = await supabase.storage
+        .from('lieu-photos').upload(path, decode(base64), { contentType });
+      if (upErr) throw new Error(upErr.message);
+      const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+      const { error: dbErr } = await supabase.from('community_posts').insert({
+        user_id: myUserId,
+        image_url: publicUrl,
+        caption: caption.trim() || null,
+        lieu_id: selectedLieu?.id || null,
+        auto_generated: false,
+      });
+      if (dbErr) throw new Error(dbErr.message);
+      reset();
+      onClose();
+      onPosted();
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || 'Impossible de publier.');
+      setUploading(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => { reset(); onClose(); }}
+    >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          style={styles.newPostModal}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.newPostHeader}>
+            <TouchableOpacity onPress={() => { reset(); onClose(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={24} color={colors.bordeaux} />
+            </TouchableOpacity>
+            <Text style={styles.newPostTitle}>Nouveau post</Text>
+            <TouchableOpacity
+              style={[styles.publishBtn, (!imageUri || uploading) && styles.publishBtnDisabled]}
+              onPress={publish}
+              disabled={!imageUri || uploading}
+            >
+              {uploading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.publishBtnText}>Publier</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
+            ) : (
+              <View style={styles.imagePickerEmpty}>
+                <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
+                <Text style={styles.imagePickerHint}>Appuyer pour ajouter une photo</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.newPostSection}>
+            <TextInput
+              style={styles.captionInput}
+              placeholder="Ajouter une légende (optionnel)…"
+              placeholderTextColor={colors.textMuted}
+              value={caption}
+              onChangeText={setCaption}
+              multiline
+              maxLength={500}
+            />
+          </View>
+
+          <View style={styles.newPostSection}>
+            <View style={styles.lieuSearchRow}>
+              <Ionicons name="location-outline" size={16} color={colors.terra} />
+              {selectedLieu ? (
+                <View style={styles.selectedLieuChip}>
+                  <Text style={styles.selectedLieuText} numberOfLines={1}>
+                    {selectedLieu.nom}, {selectedLieu.ville}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => { setSelectedLieu(null); setLieuSearch(''); }}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <Ionicons name="close-circle" size={16} color={colors.terra} />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TextInput
+                  style={styles.lieuSearchInput}
+                  placeholder="Taguer un lieu (optionnel)…"
+                  placeholderTextColor={colors.textMuted}
+                  value={lieuSearch}
+                  onChangeText={onLieuSearchChange}
+                />
+              )}
+            </View>
+            {lieuResults.length > 0 && !selectedLieu && (
+              <View style={styles.lieuResultsList}>
+                {lieuResults.map(l => (
+                  <TouchableOpacity
+                    key={l.id}
+                    style={styles.lieuResultRow}
+                    onPress={() => {
+                      setSelectedLieu(l);
+                      setLieuSearch('');
+                      setLieuResults([]);
+                      Keyboard.dismiss();
+                    }}
+                  >
+                    <Text style={styles.lieuResultName}>{l.nom}</Text>
+                    <Text style={styles.lieuResultVille}>{l.ville}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ─── FeedScreen ───────────────────────────────────────────────────────────────
+
 export default function FeedScreen() {
   const navigation = useNavigation<any>();
   const { session, loading: sessionLoading } = useSession();
-  const [membres, setMembres] = useState<MembreItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<'messages' | 'membres'>('messages');
-  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'feed' | 'messages' | 'membres'>('feed');
   const [myUserId, setMyUserId] = useState<string | null>(null);
+
+  // Feed
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedRefreshing, setFeedRefreshing] = useState(false);
+  const [commentPost, setCommentPost] = useState<CommunityPost | null>(null);
+  const [newPostVisible, setNewPostVisible] = useState(false);
+
+  // Membres
+  const [membres, setMembres] = useState<MembreItem[]>([]);
+  const [membresLoading, setMembresLoading] = useState(false);
+  const [membresRefreshing, setMembresRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (tab !== 'messages') loadMembres();
-  }, [tab, session?.user?.id]);
+    if (session?.user?.id) setMyUserId(session.user.id);
+  }, [session?.user?.id]);
 
   useEffect(() => {
-    if (tab !== 'messages') {
-      navigation.setOptions({ title: 'Meute', headerLeft: undefined });
+    if (tab === 'feed') loadFeed();
+    else if (tab === 'membres') loadMembres();
+  }, [tab, session?.user?.id]);
+
+  // ── Feed ──
+
+  async function loadFeed() {
+    setFeedLoading(true);
+    const { data, error } = await supabase
+      .from('community_posts')
+      .select('id, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+      .eq('hidden', false)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error || !data) { setFeedLoading(false); return; }
+
+    const userIds = [...new Set(data.map((p: any) => p.user_id))] as string[];
+    const lieuIds = [...new Set(data.filter((p: any) => p.lieu_id).map((p: any) => p.lieu_id))] as string[];
+
+    const [profilesRes, lieuxRes] = await Promise.all([
+      userIds.length > 0
+        ? supabase.from('profils').select('id, prenom, avatar_url').in('id', userIds)
+        : Promise.resolve({ data: [] as any[] }),
+      lieuIds.length > 0
+        ? supabase.from('lieux').select('id, nom, cat, ville').in('id', lieuIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const profileMap = Object.fromEntries((profilesRes.data || []).map((p: any) => [p.id, p]));
+    const lieuMap = Object.fromEntries((lieuxRes.data || []).map((l: any) => [l.id, l]));
+
+    setPosts(data.map((p: any) => ({
+      ...p,
+      profils: profileMap[p.user_id] || null,
+      lieux: p.lieu_id ? (lieuMap[p.lieu_id] || null) : null,
+    })));
+    setFeedLoading(false);
+  }
+
+  function toggleLike(postId: string) {
+    if (!myUserId) {
+      Alert.alert('Connexion requise', 'Connecte-toi pour liker une photo.');
+      return;
     }
-  }, [tab]);
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+    const liked = post.community_post_likes.some(l => l.user_id === myUserId);
+    setPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      const newLikes = liked
+        ? p.community_post_likes.filter(l => l.user_id !== myUserId)
+        : [...p.community_post_likes, { user_id: myUserId! }];
+      return { ...p, community_post_likes: newLikes };
+    }));
+    if (liked) {
+      supabase.from('community_post_likes').delete()
+        .eq('post_id', postId).eq('user_id', myUserId).then(() => {});
+    } else {
+      supabase.from('community_post_likes').insert({ post_id: postId, user_id: myUserId }).then(() => {});
+    }
+  }
+
+  function openLieu(lieuId: string) {
+    mapNavigation.setPendingLieu(lieuId);
+    navigation.navigate('Carte' as any);
+  }
+
+  // ── Membres ──
 
   async function loadMembres() {
-    setLoading(true);
+    setMembresLoading(true);
     const { data: { session: s } } = await supabase.auth.getSession();
-    if (!s) { setLoading(false); return; }
+    if (!s) { setMembresLoading(false); return; }
     const myId = s.user.id;
     setMyUserId(myId);
 
     const [{ data: membresData }, { data: myFollowsData }, { data: explorateurRows }] = await Promise.all([
-      supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur')
-        .neq('id', myId).range(0, 999),
+      supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur').neq('id', myId).range(0, 999),
       supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
       supabase.from('explorateurs').select('user_id').eq('statut', 'actif').not('user_id', 'is', null),
     ]);
     const expIds = new Set((explorateurRows || []).map((e: any) => e.user_id));
-    if (!membresData?.length) { setMembres([]); setLoading(false); return; }
+    if (!membresData?.length) { setMembres([]); setMembresLoading(false); return; }
 
     const myFollowingSet = new Set((myFollowsData || []).map((f: any) => f.following_id));
     const memberIds = membresData.map((m: any) => m.id);
-
     const { data: memberFollowsData } = await supabase.from('follows')
       .select('follower_id,following_id').in('follower_id', memberIds).eq('statut', 'accepte');
 
     const mutualMap: Record<string, number> = {};
     (memberFollowsData || []).forEach((f: any) => {
-      if (myFollowingSet.has(f.following_id))
-        mutualMap[f.follower_id] = (mutualMap[f.follower_id] || 0) + 1;
+      if (myFollowingSet.has(f.following_id)) mutualMap[f.follower_id] = (mutualMap[f.follower_id] || 0) + 1;
     });
 
     setFollowing(new Set(memberIds.filter((id: string) => myFollowingSet.has(id))));
     setMutuals(mutualMap);
     setMembres(membresData.map((p: any) => ({
-      id: p.id, type: 'membre' as const,
+      id: p.id,
       user: { id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ambassadeur: p.ambassadeur || null, explorateur: expIds.has(p.id) },
       ville: p.ville || null,
       nomChien: p.nom_chien || null,
     })));
-    setLoading(false);
+    setMembresLoading(false);
   }
 
   async function toggleFollow(memberId: string) {
     if (!myUserId) return;
     if (following.has(memberId)) {
-      const { error } = await supabase.from('follows').delete().eq('follower_id', myUserId).eq('following_id', memberId);
-      if (error) { Alert.alert('Erreur', error.message); return; }
+      await supabase.from('follows').delete().eq('follower_id', myUserId).eq('following_id', memberId);
       setFollowing(prev => { const s = new Set(prev); s.delete(memberId); return s; });
     } else {
-      const { error } = await supabase.from('follows').insert({ follower_id: myUserId, following_id: memberId, statut: 'accepte' });
-      if (error) { Alert.alert('Erreur', error.message); return; }
+      await supabase.from('follows').insert({ follower_id: myUserId, following_id: memberId, statut: 'accepte' });
       setFollowing(prev => new Set([...prev, memberId]));
     }
   }
 
-  function Avatar({ user }: { user: MembreItem['user'] }) {
-    return user.avatar_url ? (
-      <Image source={{ uri: user.avatar_url }} style={styles.avatarImg} />
-    ) : (
-      <View style={styles.avatarFallback}>
-        <Text style={styles.avatarLetter}>{(user.prenom || '?')[0].toUpperCase()}</Text>
-      </View>
-    );
-  }
-
-  const filtered = search.length > 0
+  const filteredMembres = search.length > 0
     ? membres.filter(m => {
         const q = search.toLowerCase();
         return (
@@ -121,6 +595,8 @@ export default function FeedScreen() {
       })
     : membres;
 
+  // ── Render ──
+
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return (
     <AuthGate navigation={navigation} message="Connecte-toi pour rejoindre la meute, chatter et découvrir d'autres membres." />
@@ -128,8 +604,10 @@ export default function FeedScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Tab bar */}
       <View style={styles.tabsWrap}>
         {([
+          { key: 'feed',     label: 'Feed' },
           { key: 'messages', label: 'Chat' },
           { key: 'membres',  label: 'Membres' },
         ] as const).map(t => (
@@ -143,19 +621,63 @@ export default function FeedScreen() {
         ))}
       </View>
 
+      {/* Chat */}
       {tab === 'messages' ? (
         <MessagerieScreen />
-      ) : loading ? (
+
+      /* Feed */
+      ) : tab === 'feed' ? (
+        <>
+          {feedLoading ? (
+            <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
+          ) : (
+            <FlatList
+              data={posts}
+              keyExtractor={p => p.id}
+              contentContainerStyle={styles.feedList}
+              refreshControl={
+                <RefreshControl
+                  refreshing={feedRefreshing}
+                  onRefresh={async () => { setFeedRefreshing(true); await loadFeed(); setFeedRefreshing(false); }}
+                  tintColor={colors.terra}
+                />
+              }
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyIcon}>📸</Text>
+                  <Text style={styles.emptyText}>Aucune photo pour l'instant.</Text>
+                  <Text style={styles.emptySubText}>Sois le premier à partager un moment avec la meute !</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <PostCard
+                  post={item}
+                  myUserId={myUserId || ''}
+                  onLike={toggleLike}
+                  onCommentPress={setCommentPost}
+                  onLieuPress={openLieu}
+                />
+              )}
+            />
+          )}
+
+          <TouchableOpacity style={styles.fab} onPress={() => setNewPostVisible(true)} activeOpacity={0.85}>
+            <Ionicons name="camera" size={22} color="#fff" />
+          </TouchableOpacity>
+        </>
+
+      /* Membres */
+      ) : membresLoading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
         <FlatList
-          data={filtered}
+          data={filteredMembres}
           keyExtractor={m => m.id}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={async () => { setRefreshing(true); await loadMembres(); setRefreshing(false); }}
+              refreshing={membresRefreshing}
+              onRefresh={async () => { setMembresRefreshing(true); await loadMembres(); setMembresRefreshing(false); }}
               tintColor={colors.terra}
             />
           }
@@ -190,8 +712,13 @@ export default function FeedScreen() {
                 userId: m.user.id, prenom: m.user.prenom, avatarUrl: m.user.avatar_url,
               })}
             >
-              <Avatar user={m.user} />
-
+              {m.user.avatar_url ? (
+                <Image source={{ uri: m.user.avatar_url }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Text style={styles.avatarLetter}>{(m.user.prenom || '?')[0].toUpperCase()}</Text>
+                </View>
+              )}
               <View style={styles.body}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Text style={styles.memberName}>{m.user.prenom}</Text>
@@ -209,7 +736,6 @@ export default function FeedScreen() {
                   </View>
                 )}
               </View>
-
               <TouchableOpacity
                 style={[styles.followBtn, following.has(m.user.id) && styles.followBtnActive]}
                 onPress={e => { e.stopPropagation?.(); toggleFollow(m.user.id); }}
@@ -223,50 +749,121 @@ export default function FeedScreen() {
           )}
         />
       )}
+
+      {/* Modals */}
+      {myUserId && (
+        <>
+          <NewPostModal
+            visible={newPostVisible}
+            onClose={() => setNewPostVisible(false)}
+            myUserId={myUserId}
+            onPosted={() => { setTab('feed'); loadFeed(); }}
+          />
+          <CommentsModal
+            post={commentPost}
+            visible={!!commentPost}
+            onClose={() => setCommentPost(null)}
+            myUserId={myUserId}
+          />
+        </>
+      )}
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.ivoryPale },
+  container:    { flex: 1, backgroundColor: colors.ivoryPale },
   tabsWrap: {
     flexDirection: 'row', backgroundColor: colors.white,
     borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
     marginHorizontal: 16, marginVertical: 12,
   },
-  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
-  tabActive: { backgroundColor: colors.bordeaux },
-  tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
-  tabTextActive: { color: colors.ivory },
-  list: { paddingHorizontal: 16, gap: 10, paddingBottom: 20 },
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: colors.white, borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: colors.border, marginBottom: 4,
+  tab:          { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
+  tabActive:    { backgroundColor: colors.bordeaux },
+  tabText:      { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  tabTextActive:{ color: colors.ivory },
+
+  // Feed
+  feedList: { paddingBottom: 90 },
+  postCard: { backgroundColor: colors.white, marginBottom: 8 },
+  postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
+  postAvatarImg:     { width: 36, height: 36, borderRadius: 18 },
+  postAvatarFallback:{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
+  postAvatarLetter:  { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.ivory },
+  postAuthor:  { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  postTime:    { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  postImage:   { width: SCREEN_WIDTH, height: SCREEN_WIDTH * 0.75 },
+  postActions: { flexDirection: 'row', gap: 16, paddingHorizontal: 14, paddingTop: 10 },
+  postActionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  postActionCount:{ fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  lieuTag:     { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingTop: 6 },
+  lieuTagText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, flex: 1 },
+  postCaption: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux, paddingHorizontal: 14, paddingTop: 5, paddingBottom: 12, lineHeight: 19 },
+  postCaptionBold: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  fab: {
+    position: 'absolute', bottom: 20, right: 20,
+    width: 54, height: 54, borderRadius: 27,
+    backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 6, elevation: 6,
   },
-  searchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
-  card: {
-    backgroundColor: colors.white, borderRadius: 14, padding: 14,
-    flexDirection: 'row', gap: 12, alignItems: 'center',
-    borderWidth: 1, borderColor: colors.border,
-  },
-  avatarImg: { width: 44, height: 44, borderRadius: 22 },
-  avatarFallback: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center',
-  },
+
+  // Comments modal
+  commentsModal:  { flex: 1, backgroundColor: colors.white },
+  commentsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  commentsTitle:  { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
+  commentsList:   { padding: 16, gap: 12 },
+  commentsEmpty:  { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 32 },
+  commentRow:     { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  commentBubble:  { flex: 1, backgroundColor: colors.ivoryPale, borderRadius: 12, padding: 10 },
+  commentAuthor:  { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux, marginBottom: 2 },
+  commentContent: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux, lineHeight: 18 },
+  commentInputRow:{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.white },
+  commentTextInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, maxHeight: 80 },
+
+  // New post modal
+  newPostModal:    { flex: 1, backgroundColor: colors.white },
+  newPostHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  newPostTitle:    { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
+  publishBtn:      { backgroundColor: colors.terra, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 7 },
+  publishBtnDisabled: { backgroundColor: colors.textMuted },
+  publishBtnText:  { fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#fff' },
+  imagePicker:     { margin: 16, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, height: (SCREEN_WIDTH - 32) * 0.75 },
+  imagePickerEmpty:{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ivoryPale, gap: 8 },
+  imagePickerHint: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  imagePreview:    { width: '100%', height: '100%' },
+  newPostSection:  { paddingHorizontal: 16, paddingTop: 12 },
+  captionInput:    { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, padding: 12, backgroundColor: colors.ivoryPale, borderRadius: 10, minHeight: 60 },
+  lieuSearchRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: colors.ivoryPale, borderRadius: 10 },
+  lieuSearchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  selectedLieuChip:{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectedLieuText:{ fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra, flex: 1 },
+  lieuResultsList: { marginTop: 4, backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+  lieuResultRow:   { padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  lieuResultName:  { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  lieuResultVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+
+  // Membres
+  list:       { paddingHorizontal: 16, gap: 10, paddingBottom: 20 },
+  searchBar:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.white, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 4 },
+  searchInput:{ flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  card:       { backgroundColor: colors.white, borderRadius: 14, padding: 14, flexDirection: 'row', gap: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  avatarImg:  { width: 44, height: 44, borderRadius: 22 },
+  avatarFallback: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   avatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
-  body: { flex: 1 },
+  body:       { flex: 1 },
   memberName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
-  ville: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
-  dogInfo: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 1 },
-  mutualRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  ville:      { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  dogInfo:    { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  mutualRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   mutualText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
-  followBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: colors.bordeaux },
-  followBtnActive: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.bordeaux },
-  followBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#fff' },
-  followBtnTextActive: { color: colors.bordeaux },
-  empty: { alignItems: 'center', padding: 48 },
-  emptyIcon: { fontSize: 40, marginBottom: 12 },
-  emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  followBtn:  { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: colors.bordeaux },
+  followBtnActive:    { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.bordeaux },
+  followBtnText:      { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#fff' },
+  followBtnTextActive:{ color: colors.bordeaux },
+  empty:      { alignItems: 'center', padding: 48 },
+  emptyIcon:  { fontSize: 40, marginBottom: 12 },
+  emptyText:  { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  emptySubText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: 4 },
 });
