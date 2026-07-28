@@ -137,7 +137,7 @@ export default function MessagerieScreen() {
   const { session, loading: sessionLoading } = useSession();
   const myUserId = session?.user?.id ?? null;
 
-  const [activeTab, setActiveTab] = useState<'messages' | 'groupes'>('messages');
+  const [activeTab, setActiveTab] = useState<'messages' | 'groupes'>('groupes');
 
   // ── Messages state ──
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -171,7 +171,7 @@ export default function MessagerieScreen() {
 
   // ── Groupe edit state ──
   const [editGroupeModal, setEditGroupeModal] = useState(false);
-  const [editForm, setEditForm] = useState<{ id: string; nom: string; ville: string; photoUri: string | null; existingImageUrl: string | null }>({ id: '', nom: '', ville: '', photoUri: null, existingImageUrl: null });
+  const [editForm, setEditForm] = useState<{ id: string; nom: string; ville: string; type: GroupeType; photoUri: string | null; existingImageUrl: string | null }>({ id: '', nom: '', ville: '', type: 'balade', photoUri: null, existingImageUrl: null });
   const [savingEditGroupe, setSavingEditGroupe] = useState(false);
 
   // ── Derived ──
@@ -538,14 +538,14 @@ export default function MessagerieScreen() {
   }
 
   function openEditGroupe(groupe: Groupe) {
-    setEditForm({ id: groupe.id, nom: groupe.nom, ville: groupe.ville || '', photoUri: null, existingImageUrl: groupe.image_url });
+    setEditForm({ id: groupe.id, nom: groupe.nom, ville: groupe.ville || '', type: groupe.type, photoUri: null, existingImageUrl: groupe.image_url });
     setEditGroupeModal(true);
   }
 
   async function submitEditGroupe() {
     if (!editForm.nom.trim()) { Alert.alert('Donne un nom au groupe'); return; }
     setSavingEditGroupe(true);
-    const update: any = { nom: editForm.nom.trim(), ville: editForm.ville.trim() || null };
+    const update: any = { nom: editForm.nom.trim(), type: editForm.type, ville: editForm.ville.trim() || null };
     if (editForm.photoUri) {
       const url = await uploadGroupePhoto(editForm.photoUri);
       if (url) update.image_url = url;
@@ -660,13 +660,23 @@ export default function MessagerieScreen() {
 
       {/* Tabs */}
       <View style={s.tabs}>
-        <TouchableOpacity style={[s.tab, activeTab === 'messages' && s.tabActive]} onPress={() => setActiveTab('messages')}>
-          <Ionicons name="chatbubbles-outline" size={15} color={activeTab === 'messages' ? colors.bordeaux : colors.textMuted} />
-          <Text style={[s.tabText, activeTab === 'messages' && s.tabTextActive]}>Messages</Text>
-        </TouchableOpacity>
         <TouchableOpacity style={[s.tab, activeTab === 'groupes' && s.tabActive]} onPress={() => { setActiveTab('groupes'); if (!groupes.length) loadGroupes(); }}>
-          <Ionicons name="people-outline" size={15} color={activeTab === 'groupes' ? colors.bordeaux : colors.textMuted} />
-          <Text style={[s.tabText, activeTab === 'groupes' && s.tabTextActive]}>Groupes</Text>
+          <View style={[s.tabIcon, activeTab === 'groupes' && s.tabIconActive]}>
+            <Ionicons name="people-outline" size={18} color={activeTab === 'groupes' ? colors.ivory : colors.textMuted} />
+          </View>
+          <View>
+            <Text style={[s.tabTitle, activeTab === 'groupes' && s.tabTitleActive]}>Groupes</Text>
+            <Text style={[s.tabSub, activeTab === 'groupes' && s.tabSubActive]}>Balades, éducation, rencontres</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.tab, activeTab === 'messages' && s.tabActive]} onPress={() => setActiveTab('messages')}>
+          <View style={[s.tabIcon, activeTab === 'messages' && s.tabIconActive]}>
+            <Ionicons name="chatbubbles-outline" size={18} color={activeTab === 'messages' ? colors.ivory : colors.textMuted} />
+          </View>
+          <View>
+            <Text style={[s.tabTitle, activeTab === 'messages' && s.tabTitleActive]}>Messages</Text>
+            <Text style={[s.tabSub, activeTab === 'messages' && s.tabSubActive]}>Tes conversations</Text>
+          </View>
         </TouchableOpacity>
       </View>
 
@@ -903,6 +913,13 @@ export default function MessagerieScreen() {
                 )}
               </TouchableOpacity>
               <TextInput style={s.groupNameInput} value={editForm.nom} onChangeText={t => setEditForm(f => ({ ...f, nom: t }))} placeholder="Nom du groupe" placeholderTextColor={colors.textMuted} />
+              <View style={s.modeToggle}>
+                {GROUPE_TYPES.map(t => (
+                  <TouchableOpacity key={t} style={[s.modeBtn, editForm.type === t && s.modeBtnActive]} onPress={() => setEditForm(f => ({ ...f, type: t }))}>
+                    <Text style={[s.modeBtnText, editForm.type === t && s.modeBtnTextActive]}>{GROUPE_TYPE_LABELS[t]}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TextInput style={s.groupNameInput} value={editForm.ville} onChangeText={t => setEditForm(f => ({ ...f, ville: t }))} placeholder="Ville (ex: Paris, Lyon…)" placeholderTextColor={colors.textMuted} />
               <TouchableOpacity style={[s.createBtn, (!editForm.nom.trim() || savingEditGroupe) && s.createBtnDisabled]} onPress={submitEditGroupe} disabled={!editForm.nom.trim() || savingEditGroupe}>
                 {savingEditGroupe ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>Enregistrer</Text>}
@@ -921,11 +938,15 @@ export default function MessagerieScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
-  tabs: { flexDirection: 'row', backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: colors.bordeaux },
-  tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
-  tabTextActive: { color: colors.bordeaux },
+  tabs: { flexDirection: 'row', gap: 10, padding: 14, paddingBottom: 10, backgroundColor: colors.ivoryPale },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white },
+  tabActive: { borderColor: colors.bordeaux, backgroundColor: colors.bordeaux },
+  tabIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.ivoryPale, alignItems: 'center', justifyContent: 'center' },
+  tabIconActive: { backgroundColor: 'rgba(245,239,224,0.15)' },
+  tabTitle: { fontFamily: 'DMSans_500Medium', fontSize: 14, fontWeight: '600', color: colors.bordeaux },
+  tabTitleActive: { color: colors.ivory },
+  tabSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  tabSubActive: { color: 'rgba(245,239,224,0.65)' },
 
   list: { paddingBottom: 100 },
   groupesList: { padding: 14, paddingBottom: 100, gap: 14 },
