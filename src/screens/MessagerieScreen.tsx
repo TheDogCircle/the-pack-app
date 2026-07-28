@@ -558,8 +558,8 @@ export default function MessagerieScreen() {
   }
 
   function shareWhatsApp(groupe: Groupe) {
-    const deepLink = `thepack://groupe?id=${groupe.id}`;
-    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 Ouvre The Pack et tape ce lien pour rejoindre directement :\n${deepLink}`;
+    const link = `https://thepackclub.fr/groupe/${groupe.id}`;
+    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 ${link}`;
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(text)}`).catch(() => {
       Share.share({ message: text });
     });
