@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
@@ -25,11 +26,15 @@ type Conversation = {
 };
 type Message = { id: string; user_id: string; contenu: string; created_at: string; prenom: string; avatar_url: string | null };
 type Contact = { id: string; prenom: string; avatar_url: string | null; ville: string | null };
+type GroupeType = 'balade' | 'education' | 'rencontre';
 type Groupe = {
   id: string; nom: string; description: string | null; ville: string | null;
   image_url: string | null; created_by: string; conversation_id: string;
-  membre_count?: number;
+  type: GroupeType; membre_count?: number;
 };
+
+const GROUPE_TYPE_LABELS: Record<GroupeType, string> = { balade: 'Balade', education: 'Éducation', rencontre: 'Rencontre' };
+const GROUPE_TYPES: GroupeType[] = ['balade', 'education', 'rencontre'];
 
 function fmtTime(dateStr: string) {
   const d = new Date(dateStr);
@@ -42,10 +47,10 @@ function fmtTime(dateStr: string) {
 // ── Groupe card ──────────────────────────────────────────────────────────────
 
 function GroupeCard({
-  groupe, joined, onJoin, onOpen, onWhatsApp, onStory,
+  groupe, joined, isOwner, onJoin, onOpen, onWhatsApp, onStory, onEdit,
 }: {
-  groupe: Groupe; joined: boolean;
-  onJoin: () => void; onOpen: () => void; onWhatsApp: () => void; onStory: () => void;
+  groupe: Groupe; joined: boolean; isOwner: boolean;
+  onJoin: () => void; onOpen: () => void; onWhatsApp: () => void; onStory: () => void; onEdit: () => void;
 }) {
   return (
     <TouchableOpacity style={g.card} onPress={joined ? onOpen : undefined} activeOpacity={joined ? 0.7 : 1}>
@@ -67,6 +72,11 @@ function GroupeCard({
             <Ionicons name="people" size={20} color={colors.ivory} />
           </View>
           <View style={{ flex: 1 }}>
+            {groupe.type ? (
+              <View style={g.typePill}>
+                <Text style={g.typePillText}>{GROUPE_TYPE_LABELS[groupe.type]}</Text>
+              </View>
+            ) : null}
             <Text style={g.cardNom} numberOfLines={1}>{groupe.nom}</Text>
             {groupe.ville ? (
               <View style={g.villeInline}>
@@ -75,6 +85,11 @@ function GroupeCard({
               </View>
             ) : null}
           </View>
+          {isOwner ? (
+            <TouchableOpacity style={g.editBtn} onPress={onEdit} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="pencil" size={15} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
         </View>
         {groupe.description ? <Text style={g.cardDesc} numberOfLines={2}>{groupe.description}</Text> : null}
         <View style={g.cardFooter}>
@@ -144,15 +159,20 @@ export default function MessagerieScreen() {
   // ── Groupes state ──
   const [groupes, setGroupes] = useState<Groupe[]>([]);
   const [myConvIds, setMyConvIds] = useState<Set<string>>(new Set());
-  const [villeFilter, setVilleFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<GroupeType | null>(null);
   const [groupesLoading, setGroupesLoading] = useState(false);
   const [createGroupeModal, setCreateGroupeModal] = useState(false);
-  const [groupeForm, setGroupeForm] = useState({ nom: '', description: '', ville: '' });
+  const [groupeForm, setGroupeForm] = useState<{ nom: string; description: string; ville: string; type: GroupeType; photoUri: string | null }>({ nom: '', description: '', ville: '', type: 'balade', photoUri: null });
   const [creatingGroupe, setCreatingGroupe] = useState(false);
   const [storyGroupe, setStoryGroupe] = useState<Groupe | null>(null);
   const [myMuted, setMyMuted] = useState(false);
   const storyCardRef = useRef<View>(null);
   const [pendingGroupeId, setPendingGroupeId] = useState<string | null>(null);
+
+  // ── Groupe edit state ──
+  const [editGroupeModal, setEditGroupeModal] = useState(false);
+  const [editForm, setEditForm] = useState<{ id: string; nom: string; ville: string; photoUri: string | null; existingImageUrl: string | null }>({ id: '', nom: '', ville: '', photoUri: null, existingImageUrl: null });
+  const [savingEditGroupe, setSavingEditGroupe] = useState(false);
 
   // ── Derived ──
   function convDisplayName(conv: Conversation): string {
@@ -163,8 +183,8 @@ export default function MessagerieScreen() {
     return `${others.slice(0, 2).map(m => m.prenom).join(', ')} +${others.length - 2}`;
   }
 
-  const villes = [...new Set(groupes.map(g => g.ville).filter(Boolean) as string[])].sort();
-  const filteredGroupes = villeFilter ? groupes.filter(g => g.ville === villeFilter) : groupes;
+  const typesPresent = GROUPE_TYPES.filter(t => groupes.some(g => g.type === t));
+  const filteredGroupes = typeFilter ? groupes.filter(g => g.type === typeFilter) : groupes;
 
   // ── Effects ──
   useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
@@ -221,14 +241,14 @@ export default function MessagerieScreen() {
                     { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
                   ]),
                 },
-                {
+                ...(isCreator ? [{
                   text: 'Supprimer pour tout le monde',
                   style: 'destructive',
                   onPress: () => Alert.alert('Supprimer ?', 'Supprimée définitivement pour tous.', [
                     { text: 'Annuler', style: 'cancel' },
                     { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
                   ]),
-                },
+                }] : []),
                 { text: myMuted ? 'Activer les notifications' : 'Désactiver les notifications', onPress: toggleMute },
                 { text: 'Annuler', style: 'cancel' },
               ];
@@ -241,7 +261,7 @@ export default function MessagerieScreen() {
         ),
       });
     } else {
-      navigation.setOptions({ title: 'Messagerie', headerLeft: undefined, headerRight: undefined });
+      navigation.setOptions({ title: 'La Meute', headerLeft: undefined, headerRight: undefined });
     }
   }, [selectedConv, myMuted]);
 
@@ -359,7 +379,15 @@ export default function MessagerieScreen() {
 
   async function deleteConversation() {
     if (!myUserId || !selectedConv) return;
-    await supabase.from('conversations').update({ actif: false }).eq('id', selectedConv.id);
+    const { error, count } = await supabase.from('conversations').update({ actif: false }, { count: 'exact' }).eq('id', selectedConv.id);
+    if (error || !count) {
+      Alert.alert('Erreur', error?.message || 'Suppression impossible (droits insuffisants).');
+      return;
+    }
+    // La conversation d'un groupe a une ligne miroir dans `groupes` : il faut aussi la désactiver
+    // sinon le groupe reste visible dans l'onglet Groupes malgré la conversation supprimée.
+    await supabase.from('groupes').update({ actif: false }).eq('conversation_id', selectedConv.id);
+    setGroupes(prev => prev.filter(g => g.conversation_id !== selectedConv.id));
     closeConversation();
   }
 
@@ -472,16 +500,60 @@ export default function MessagerieScreen() {
     });
   }
 
+  async function pickGroupePhoto(target: 'create' | 'edit') {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.85 });
+    if (result.canceled || !result.assets[0]) return;
+    const uri = result.assets[0].uri;
+    if (target === 'create') setGroupeForm(f => ({ ...f, photoUri: uri }));
+    else setEditForm(f => ({ ...f, photoUri: uri }));
+  }
+
+  async function uploadGroupePhoto(uri: string): Promise<string | null> {
+    if (!myUserId) return null;
+    const ext = uri.split('.').pop() || 'jpg';
+    const path = `groupes/${myUserId}-${Date.now()}.${ext}`;
+    const formData = new FormData();
+    formData.append('file', { uri, name: path, type: `image/${ext}` } as any);
+    const { error } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
+    if (error) { Alert.alert('Erreur upload photo', error.message); return null; }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  }
+
   async function createGroupe() {
     if (!myUserId || !groupeForm.nom.trim()) { Alert.alert('Donne un nom au groupe'); return; }
     setCreatingGroupe(true);
+    let image_url: string | null = null;
+    if (groupeForm.photoUri) image_url = await uploadGroupePhoto(groupeForm.photoUri);
     const { data: conv, error: convErr } = await supabase.from('conversations').insert({ nom: groupeForm.nom.trim(), type: 'groupe', created_by: myUserId, actif: true }).select().single();
     if (convErr || !conv) { Alert.alert('Erreur', convErr?.message || ''); setCreatingGroupe(false); return; }
-    await supabase.from('groupes').insert({ nom: groupeForm.nom.trim(), description: groupeForm.description.trim() || null, ville: groupeForm.ville.trim() || null, conversation_id: conv.id, created_by: myUserId });
+    await supabase.from('groupes').insert({ nom: groupeForm.nom.trim(), description: groupeForm.description.trim() || null, ville: groupeForm.ville.trim() || null, type: groupeForm.type, image_url, conversation_id: conv.id, created_by: myUserId });
     await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
     setCreatingGroupe(false);
     setCreateGroupeModal(false);
-    setGroupeForm({ nom: '', description: '', ville: '' });
+    setGroupeForm({ nom: '', description: '', ville: '', type: 'balade', photoUri: null });
+    await loadGroupes();
+  }
+
+  function openEditGroupe(groupe: Groupe) {
+    setEditForm({ id: groupe.id, nom: groupe.nom, ville: groupe.ville || '', photoUri: null, existingImageUrl: groupe.image_url });
+    setEditGroupeModal(true);
+  }
+
+  async function submitEditGroupe() {
+    if (!editForm.nom.trim()) { Alert.alert('Donne un nom au groupe'); return; }
+    setSavingEditGroupe(true);
+    const update: any = { nom: editForm.nom.trim(), ville: editForm.ville.trim() || null };
+    if (editForm.photoUri) {
+      const url = await uploadGroupePhoto(editForm.photoUri);
+      if (url) update.image_url = url;
+    }
+    const { error } = await supabase.from('groupes').update(update).eq('id', editForm.id);
+    setSavingEditGroupe(false);
+    if (error) { Alert.alert('Erreur', error.message); return; }
+    setEditGroupeModal(false);
     await loadGroupes();
   }
 
@@ -594,7 +666,7 @@ export default function MessagerieScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={[s.tab, activeTab === 'groupes' && s.tabActive]} onPress={() => { setActiveTab('groupes'); if (!groupes.length) loadGroupes(); }}>
           <Ionicons name="people-outline" size={15} color={activeTab === 'groupes' ? colors.bordeaux : colors.textMuted} />
-          <Text style={[s.tabText, activeTab === 'groupes' && s.tabTextActive]}>Groupes de balades</Text>
+          <Text style={[s.tabText, activeTab === 'groupes' && s.tabTextActive]}>Groupes</Text>
         </TouchableOpacity>
       </View>
 
@@ -644,16 +716,15 @@ export default function MessagerieScreen() {
       {/* ── Groupes tab ── */}
       {activeTab === 'groupes' && (
         <>
-          {/* Ville filter chips */}
-          {villes.length > 0 && (
+          {/* Type filter chips */}
+          {typesPresent.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.villeScroll} contentContainerStyle={s.villeScrollContent}>
-              <TouchableOpacity style={[s.villeChip, !villeFilter && s.villeChipActive]} onPress={() => setVilleFilter(null)}>
-                <Text style={[s.villeChipText, !villeFilter && s.villeChipTextActive]}>Toutes</Text>
+              <TouchableOpacity style={[s.villeChip, !typeFilter && s.villeChipActive]} onPress={() => setTypeFilter(null)}>
+                <Text style={[s.villeChipText, !typeFilter && s.villeChipTextActive]}>Tous</Text>
               </TouchableOpacity>
-              {villes.map(v => (
-                <TouchableOpacity key={v} style={[s.villeChip, villeFilter === v && s.villeChipActive]} onPress={() => setVilleFilter(villeFilter === v ? null : v)}>
-                  <Ionicons name="location-outline" size={11} color={villeFilter === v ? colors.ivory : colors.textMuted} />
-                  <Text style={[s.villeChipText, villeFilter === v && s.villeChipTextActive]}>{v}</Text>
+              {typesPresent.map(t => (
+                <TouchableOpacity key={t} style={[s.villeChip, typeFilter === t && s.villeChipActive]} onPress={() => setTypeFilter(typeFilter === t ? null : t)}>
+                  <Text style={[s.villeChipText, typeFilter === t && s.villeChipTextActive]}>{GROUPE_TYPE_LABELS[t]}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -670,17 +741,19 @@ export default function MessagerieScreen() {
                 <View style={s.empty}>
                   <Ionicons name="people-outline" size={44} color={colors.border} />
                   <Text style={s.emptyTitle}>Pas encore de groupe</Text>
-                  <Text style={s.emptyText}>Crée le premier groupe de balade pour ta ville !</Text>
+                  <Text style={s.emptyText}>Crée le premier groupe pour ta ville !</Text>
                 </View>
               }
               renderItem={({ item: groupe }) => (
                 <GroupeCard
                   groupe={groupe}
                   joined={myConvIds.has(groupe.conversation_id)}
+                  isOwner={groupe.created_by === myUserId}
                   onJoin={() => joinGroupe(groupe)}
                   onOpen={() => openGroupeChat(groupe)}
                   onWhatsApp={() => shareWhatsApp(groupe)}
                   onStory={() => shareStory(groupe)}
+                  onEdit={() => openEditGroupe(groupe)}
                 />
               )}
             />
@@ -773,7 +846,7 @@ export default function MessagerieScreen() {
         </View>
       )}
 
-      {/* ── Modal créer groupe de balade ── */}
+      {/* ── Modal créer groupe ── */}
       <Modal visible={createGroupeModal} animationType="slide" transparent onRequestClose={() => setCreateGroupeModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <View style={s.createOverlay}>
@@ -782,11 +855,57 @@ export default function MessagerieScreen() {
                 <Text style={s.createTitle}>Créer un groupe</Text>
                 <TouchableOpacity onPress={() => setCreateGroupeModal(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
               </View>
+              <TouchableOpacity style={s.photoPicker} onPress={() => pickGroupePhoto('create')}>
+                {groupeForm.photoUri ? (
+                  <Image source={{ uri: groupeForm.photoUri }} style={s.photoPickerImage} resizeMode="cover" />
+                ) : (
+                  <>
+                    <Ionicons name="image-outline" size={20} color={colors.textMuted} />
+                    <Text style={s.photoPickerText}>Ajouter une photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
               <TextInput style={s.groupNameInput} value={groupeForm.nom} onChangeText={t => setGroupeForm(f => ({ ...f, nom: t }))} placeholder="Nom du groupe (ex: Balade Paris 15e)" placeholderTextColor={colors.textMuted} />
+              <View style={s.modeToggle}>
+                {GROUPE_TYPES.map(t => (
+                  <TouchableOpacity key={t} style={[s.modeBtn, groupeForm.type === t && s.modeBtnActive]} onPress={() => setGroupeForm(f => ({ ...f, type: t }))}>
+                    <Text style={[s.modeBtnText, groupeForm.type === t && s.modeBtnTextActive]}>{GROUPE_TYPE_LABELS[t]}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TextInput style={[s.groupNameInput, { minHeight: 80, textAlignVertical: 'top' }]} value={groupeForm.description} onChangeText={t => setGroupeForm(f => ({ ...f, description: t }))} placeholder="Description (optionnel)" placeholderTextColor={colors.textMuted} multiline />
               <TextInput style={s.groupNameInput} value={groupeForm.ville} onChangeText={t => setGroupeForm(f => ({ ...f, ville: t }))} placeholder="Ville (ex: Paris, Lyon…)" placeholderTextColor={colors.textMuted} />
               <TouchableOpacity style={[s.createBtn, (!groupeForm.nom.trim() || creatingGroupe) && s.createBtnDisabled]} onPress={createGroupe} disabled={!groupeForm.nom.trim() || creatingGroupe}>
                 {creatingGroupe ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>Créer le groupe</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Modal modifier groupe ── */}
+      <Modal visible={editGroupeModal} animationType="slide" transparent onRequestClose={() => setEditGroupeModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={s.createOverlay}>
+            <View style={s.createSheet}>
+              <View style={s.createHeader}>
+                <Text style={s.createTitle}>Modifier le groupe</Text>
+                <TouchableOpacity onPress={() => setEditGroupeModal(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
+              </View>
+              <TouchableOpacity style={s.photoPicker} onPress={() => pickGroupePhoto('edit')}>
+                {(editForm.photoUri || editForm.existingImageUrl) ? (
+                  <Image source={{ uri: editForm.photoUri || editForm.existingImageUrl! }} style={s.photoPickerImage} resizeMode="cover" />
+                ) : (
+                  <>
+                    <Ionicons name="image-outline" size={20} color={colors.textMuted} />
+                    <Text style={s.photoPickerText}>Ajouter une photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TextInput style={s.groupNameInput} value={editForm.nom} onChangeText={t => setEditForm(f => ({ ...f, nom: t }))} placeholder="Nom du groupe" placeholderTextColor={colors.textMuted} />
+              <TextInput style={s.groupNameInput} value={editForm.ville} onChangeText={t => setEditForm(f => ({ ...f, ville: t }))} placeholder="Ville (ex: Paris, Lyon…)" placeholderTextColor={colors.textMuted} />
+              <TouchableOpacity style={[s.createBtn, (!editForm.nom.trim() || savingEditGroupe) && s.createBtnDisabled]} onPress={submitEditGroupe} disabled={!editForm.nom.trim() || savingEditGroupe}>
+                {savingEditGroupe ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>Enregistrer</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -869,6 +988,9 @@ const s = StyleSheet.create({
   modeBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   modeBtnTextActive: { color: colors.ivory },
   groupNameInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.white },
+  photoPicker: { height: 100, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', gap: 6, overflow: 'hidden' },
+  photoPickerImage: { width: '100%', height: '100%' },
+  photoPickerText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   membersLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
   noFollowsWrap: { alignItems: 'center', gap: 8, paddingVertical: 20 },
   noFollowsText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },
@@ -906,6 +1028,9 @@ const g = StyleSheet.create({
   cardBody: { padding: 14, gap: 6 },
   cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   cardIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  typePill: { alignSelf: 'flex-start', backgroundColor: colors.bordeaux + '10', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 2, marginBottom: 3 },
+  typePillText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
+  editBtn: { padding: 4, alignSelf: 'flex-start' },
   cardNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
   villeInline: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
   villeInlineText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
