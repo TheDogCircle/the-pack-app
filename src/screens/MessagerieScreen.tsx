@@ -91,7 +91,6 @@ function GroupeCard({
             </TouchableOpacity>
           ) : null}
         </View>
-        {groupe.description ? <Text style={g.cardDesc} numberOfLines={2}>{groupe.description}</Text> : null}
         <View style={g.cardFooter}>
           {groupe.membre_count != null ? (
             <View style={g.memberCount}>
@@ -730,11 +729,11 @@ export default function MessagerieScreen() {
           {typesPresent.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.villeScroll} contentContainerStyle={s.villeScrollContent}>
               <TouchableOpacity style={[s.villeChip, !typeFilter && s.villeChipActive]} onPress={() => setTypeFilter(null)}>
-                <Text style={[s.villeChipText, !typeFilter && s.villeChipTextActive]}>Tous</Text>
+                <Text style={[s.villeChipText, !typeFilter && s.villeChipTextActive]} numberOfLines={1}>Tous</Text>
               </TouchableOpacity>
               {typesPresent.map(t => (
                 <TouchableOpacity key={t} style={[s.villeChip, typeFilter === t && s.villeChipActive]} onPress={() => setTypeFilter(typeFilter === t ? null : t)}>
-                  <Text style={[s.villeChipText, typeFilter === t && s.villeChipTextActive]}>{GROUPE_TYPE_LABELS[t]}</Text>
+                  <Text style={[s.villeChipText, typeFilter === t && s.villeChipTextActive]} numberOfLines={1}>{GROUPE_TYPE_LABELS[t]}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -955,10 +954,10 @@ const s = StyleSheet.create({
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
 
   villeScroll: { flexGrow: 0, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
-  villeScrollContent: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, flexDirection: 'row' },
-  villeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  villeScrollContent: { paddingHorizontal: 14, paddingVertical: 12, gap: 10, flexDirection: 'row', alignItems: 'center' },
+  villeChip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, paddingHorizontal: 18, borderRadius: 19, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white },
   villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
-  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 14, fontWeight: '600', color: colors.textMuted, lineHeight: 18 },
   villeChipTextActive: { color: colors.ivory },
 
   convRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
@@ -1055,7 +1054,6 @@ const g = StyleSheet.create({
   cardNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
   villeInline: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
   villeInlineText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
-  cardDesc: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, lineHeight: 17 },
   cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, flexWrap: 'wrap', gap: 8 },
   memberCount: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   memberCountText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
