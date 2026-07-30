@@ -7,6 +7,7 @@ export const colors = {
   terra: '#C4693A',
   terraLight: '#D4804F',
   terraPale: '#E8A882',
+  sage: '#2E7D6B',
   textMuted: '#8A6B5A',
   textMid: '#5A3A2E',
   border: 'rgba(61,26,26,0.09)',

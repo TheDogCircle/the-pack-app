@@ -1,5 +1,7 @@
 let _pendingLieuId: string | null = null;
 let _returnCallback: (() => void) | null = null;
+let _pendingProposeName: string | null = null;
+let _pendingBaladeId: string | null = null;
 
 export const mapNavigation = {
   setPendingLieu(id: string, returnCallback?: () => void) {
@@ -10,4 +12,8 @@ export const mapNavigation = {
   consumeReturn(): (() => void) | null {
     const cb = _returnCallback; _returnCallback = null; return cb;
   },
+  setPendingPropose(name: string) { _pendingProposeName = name; },
+  consumePropose(): string | null { const n = _pendingProposeName; _pendingProposeName = null; return n; },
+  setPendingBalade(id: string) { _pendingBaladeId = id; },
+  consumeBalade(): string | null { const id = _pendingBaladeId; _pendingBaladeId = null; return id; },
 };

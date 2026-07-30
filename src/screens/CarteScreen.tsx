@@ -10,16 +10,17 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
-import MapView, { Marker, Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadToR2 } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
+import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
 
 const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
@@ -133,6 +134,7 @@ type Lieu = {
   note_moyenne?: number | null; nb_avis?: number | null;
   chiens_salle?: boolean | null; chiens_terrasse?: boolean | null; espace_dedie?: boolean | null;
   eau?: boolean | null; gamelles?: boolean | null; chiens_laches?: boolean | null; chiens_laisse?: boolean | null;
+  google_photo_url?: string | null; created_at?: string | null; mise_en_avant?: boolean | null;
 };
 type LieuFull = Lieu & {
   departement: string | null; description: string | null; tel: string | null;
@@ -154,6 +156,389 @@ type EventMarker = {
   nb_inscrits: number; je_suis_inscrit: boolean;
   profils: { prenom: string | null; username: string | null } | null;
 };
+type Balade = {
+  id: string; user_id: string; nom: string; description: string | null;
+  depart_lat: number; depart_lng: number; depart_label: string | null;
+  arrivee_texte: string | null; arrivee_lat: number | null; arrivee_lng: number | null;
+  distance_km: number | null; created_at: string;
+  ombragee: boolean; eau_chemin: boolean; fontaine_eau: boolean;
+  sans_laisse: boolean; evite_routes: boolean; sol_naturel: boolean;
+  profils?: { prenom: string | null } | null;
+};
+
+type BaladeFiltres = {
+  ombragee: boolean; eau_chemin: boolean; fontaine_eau: boolean;
+  sans_laisse: boolean; evite_routes: boolean; sol_naturel: boolean;
+};
+const FILTRES_VIDE: BaladeFiltres = {
+  ombragee: false, eau_chemin: false, fontaine_eau: false,
+  sans_laisse: false, evite_routes: false, sol_naturel: false,
+};
+const FILTRES_DEF: { key: keyof BaladeFiltres; label: string; icon: string }[] = [
+  { key: 'ombragee',     label: 'Ombragée',          icon: 'sunny-outline' },
+  { key: 'eau_chemin',   label: 'Eau sur le chemin', icon: 'water-outline' },
+  { key: 'fontaine_eau', label: 'Fontaine à eau',    icon: 'nutrition-outline' },
+  { key: 'sans_laisse',  label: 'Sans laisse',       icon: 'paw-outline' },
+  { key: 'evite_routes', label: 'Évite les routes',  icon: 'footsteps-outline' },
+  { key: 'sol_naturel',  label: 'Sol naturel',       icon: 'leaf-outline' },
+];
+
+// ── Découverte (mode Liste) ─────────────────────────────────────────────────
+// Rangées curatées façon "Explorer", affichées au-dessus de la liste filtrable
+// quand aucune recherche/filtre n'est active. Porté depuis l'ancien
+// ExplorerScreen (retiré de la navigation le 25/07) + rangées personnalisées
+// alimentées par src/lib/recommendations.ts.
+
+const DISCOVER_CARD_W = SCREEN_W * 0.42;
+
+type DiscoverLieu = {
+  id: string; nom: string; cat: string; ville: string;
+  note_moyenne?: number | null; nb_avis?: number | null;
+  created_at?: string | null; mise_en_avant?: boolean | null;
+  lat?: number; lng?: number;
+  photoUrl?: string | null; google_photo_url?: string | null;
+  distance?: number;
+};
+
+type DiscoverPhoto = {
+  id: string; url: string; lieuId: string;
+  lieu: { nom: string; cat: string; ville: string };
+  nomChien: string | null; authorDisplay: string | null;
+};
+
+type Explorateur = {
+  id: string; nom: string; handle: string | null; bio: string | null;
+  photo_profil_url: string | null; photo_banniere_url: string | null;
+  instagram_url: string | null; tiktok_url: string | null;
+  youtube_url: string | null; site_web: string | null;
+  nb_abonnes: number | null;
+  lieux?: { lieu_id: string; nom: string; cat: string; ville: string; commentaire: string | null; photoUrl: string | null }[];
+};
+
+function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
+  const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
+  const photo = lieu.photoUrl || lieu.google_photo_url;
+  if (photo) return <Image source={{ uri: photo }} style={style} resizeMode="cover" />;
+  return (
+    <View style={[style, { backgroundColor: cfg.color + '18', alignItems: 'center', justifyContent: 'center' }]}>
+      <Ionicons name={cfg.icon} size={28} color={cfg.color + '77'} />
+    </View>
+  );
+}
+
+function DiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => void }) {
+  const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
+  return (
+    <TouchableOpacity style={dstyles.card} onPress={onPress} activeOpacity={0.85}>
+      <DiscoverThumb lieu={lieu} style={dstyles.cardPhoto} />
+      <View style={dstyles.cardBody}>
+        <Text style={dstyles.cardNom} numberOfLines={2}>{lieu.nom}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <View style={[dstyles.catDot, { backgroundColor: cfg.color }]} />
+          <Text style={dstyles.cardCat}>{cfg.label}</Text>
+        </View>
+        {lieu.ville ? <Text style={dstyles.cardVille} numberOfLines={1}>{lieu.ville}</Text> : null}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          {lieu.note_moyenne ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <Ionicons name="star" size={10} color={colors.terra} />
+              <Text style={dstyles.cardMeta}>{lieu.note_moyenne.toFixed(1)}</Text>
+            </View>
+          ) : null}
+          {lieu.distance !== undefined ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <Ionicons name="navigate-outline" size={10} color={colors.textMuted} />
+              <Text style={dstyles.cardMeta}>
+                {lieu.distance < 1 ? `${Math.round(lieu.distance * 1000)} m` : `${lieu.distance.toFixed(1)} km`}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function FeaturedDiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => void }) {
+  const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
+  const photo = lieu.photoUrl || lieu.google_photo_url;
+  return (
+    <TouchableOpacity style={dstyles.featured} onPress={onPress} activeOpacity={0.88}>
+      {photo ? (
+        <Image source={{ uri: photo }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: cfg.color + '22', alignItems: 'center', justifyContent: 'center' }]}>
+          <Ionicons name={cfg.icon} size={48} color={cfg.color + '55'} />
+        </View>
+      )}
+      <View style={dstyles.featuredGrad}>
+        <View style={[dstyles.featuredBadge, { backgroundColor: cfg.color }]}>
+          <Text style={dstyles.featuredBadgeLabel}>{cfg.label}</Text>
+        </View>
+        <Text style={dstyles.featuredNom} numberOfLines={2}>{lieu.nom}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="location-outline" size={12} color="rgba(245,239,224,0.8)" />
+          <Text style={dstyles.featuredVille}>{lieu.ville}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function PhotoDiscoverCard({
+  photo, liked, likeCount, onPress, onLike,
+}: { photo: DiscoverPhoto; liked: boolean; likeCount: number; onPress: () => void; onLike: () => void }) {
+  const cfg = CAT_CONFIG[photo.lieu.cat] || CAT_CONFIG.autre;
+  return (
+    <TouchableOpacity style={dstyles.photoCard} onPress={onPress} activeOpacity={0.88}>
+      <Image source={{ uri: photo.url }} style={dstyles.photoCardImg} resizeMode="cover" />
+      <View style={dstyles.photoCardOverlay}>
+        {photo.nomChien ? (
+          <View style={dstyles.photoCardDogTag}><Text style={dstyles.photoCardDogText}>🐾 {photo.nomChien}</Text></View>
+        ) : <View />}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 5 }}>
+          <View style={[dstyles.catDotSmall, { backgroundColor: cfg.color }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={dstyles.photoCardLieu} numberOfLines={1}>{photo.lieu.nom}</Text>
+            {photo.authorDisplay ? <Text style={dstyles.photoCardAuthor} numberOfLines={1}>{photo.authorDisplay}</Text> : null}
+          </View>
+        </View>
+      </View>
+      <TouchableOpacity style={dstyles.photoCardLike} onPress={e => { (e as any).stopPropagation?.(); onLike(); }}>
+        <Ionicons name={liked ? 'heart' : 'heart-outline'} size={15} color={liked ? '#E05070' : 'rgba(255,255,255,0.85)'} />
+        {likeCount > 0 ? <Text style={[dstyles.photoCardLikeCount, liked && { color: '#E05070' }]}>{likeCount}</Text> : null}
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
+function ExplorateurDiscoverCard({ exp, onPress }: { exp: Explorateur; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={dstyles.expCard} onPress={onPress} activeOpacity={0.88}>
+      {exp.photo_banniere_url ? (
+        <Image source={{ uri: exp.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />
+      )}
+      <View style={dstyles.expOverlay}>
+        <View style={dstyles.expStarBadge}>
+          <Ionicons name="star" size={10} color={colors.terra} />
+          <Text style={dstyles.expStarLabel}>Explorateur</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {exp.photo_profil_url ? (
+            <Image source={{ uri: exp.photo_profil_url }} style={dstyles.expAvatar} />
+          ) : (
+            <View style={[dstyles.expAvatar, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="person" size={18} color={colors.ivory} />
+            </View>
+          )}
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={dstyles.expNom}>{exp.nom}</Text>
+            {exp.handle ? <Text style={dstyles.expHandle}>{exp.handle}</Text> : null}
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function ExplorateurDetailModal({
+  exp, onClose, onLieuPress,
+}: { exp: Explorateur; onClose: () => void; onLieuPress: (id: string) => void }) {
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={dstyles.expModalContainer}>
+        <View style={dstyles.expModalBanner}>
+          {exp.photo_banniere_url ? (
+            <Image source={{ uri: exp.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />
+          )}
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(61,26,26,0.35)' }]} />
+          <TouchableOpacity style={dstyles.expModalCloseBtn} onPress={onClose}>
+            <Ionicons name="close" size={20} color={colors.ivory} />
+          </TouchableOpacity>
+        </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={dstyles.expModalHeader}>
+            {exp.photo_profil_url ? (
+              <Image source={{ uri: exp.photo_profil_url }} style={dstyles.expModalAvatar} />
+            ) : (
+              <View style={[dstyles.expModalAvatar, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
+                <Ionicons name="person" size={26} color={colors.ivory} />
+              </View>
+            )}
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={dstyles.expModalNom}>{exp.nom}</Text>
+              {exp.handle ? <Text style={dstyles.expModalHandle}>{exp.handle}</Text> : null}
+              {exp.nb_abonnes ? <Text style={dstyles.expModalAbonnes}>{exp.nb_abonnes.toLocaleString('fr-FR')} abonnés</Text> : null}
+            </View>
+          </View>
+          {exp.bio ? <Text style={dstyles.expModalBio}>{exp.bio}</Text> : null}
+          <View style={dstyles.expModalLinks}>
+            {exp.instagram_url ? (
+              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.instagram_url!)}>
+                <Ionicons name="logo-instagram" size={15} color={colors.ivory} />
+                <Text style={dstyles.expLinkLabel}>Instagram</Text>
+              </TouchableOpacity>
+            ) : null}
+            {exp.tiktok_url ? (
+              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.tiktok_url!)}>
+                <Ionicons name="musical-notes-outline" size={15} color={colors.ivory} />
+                <Text style={dstyles.expLinkLabel}>TikTok</Text>
+              </TouchableOpacity>
+            ) : null}
+            {exp.youtube_url ? (
+              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.youtube_url!)}>
+                <Ionicons name="logo-youtube" size={15} color={colors.ivory} />
+                <Text style={dstyles.expLinkLabel}>YouTube</Text>
+              </TouchableOpacity>
+            ) : null}
+            {exp.site_web ? (
+              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.site_web!)}>
+                <Ionicons name="globe-outline" size={15} color={colors.ivory} />
+                <Text style={dstyles.expLinkLabel}>Site</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          {exp.lieux && exp.lieux.length > 0 && (
+            <View style={dstyles.expModalSection}>
+              <Text style={dstyles.expModalSectionTitle}>Ses coups de cœur</Text>
+              {exp.lieux.map(l => (
+                <TouchableOpacity key={l.lieu_id} style={dstyles.expLieuRow} onPress={() => { onClose(); onLieuPress(l.lieu_id); }}>
+                  {l.photoUrl ? (
+                    <Image source={{ uri: l.photoUrl }} style={dstyles.expLieuThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[dstyles.expLieuThumb, { backgroundColor: (CAT_CONFIG[l.cat]?.color || colors.textMuted) + '18', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                    </View>
+                  )}
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={dstyles.expLieuNom}>{l.nom}</Text>
+                    <Text style={dstyles.expLieuVille}>{l.ville}</Text>
+                    {l.commentaire ? <Text style={dstyles.expLieuComment} numberOfLines={2}>"{l.commentaire}"</Text> : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const dstyles = StyleSheet.create({
+  section: { marginTop: 22, paddingLeft: 16 },
+  sectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 12 },
+  cardsRow: { gap: 12, paddingRight: 16 },
+  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 12, marginTop: 22 },
+
+  card: {
+    width: DISCOVER_CARD_W, backgroundColor: colors.white, borderRadius: 14, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 3,
+  },
+  cardPhoto: { width: DISCOVER_CARD_W, height: DISCOVER_CARD_W * 0.62 },
+  cardBody: { padding: 10, gap: 3 },
+  cardNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, lineHeight: 18 },
+  catDot: { width: 7, height: 7, borderRadius: 4 },
+  cardCat: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  cardVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  cardMeta: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+
+  featured: { width: SCREEN_W - 32, marginLeft: 16, height: 190, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.border },
+  featuredGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 14, backgroundColor: 'rgba(61,26,26,0.62)', gap: 4 },
+  featuredBadge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4 },
+  featuredBadgeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 },
+  featuredNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: '#fff', lineHeight: 22 },
+  featuredVille: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.8)' },
+
+  photoCard: { width: DISCOVER_CARD_W, height: DISCOVER_CARD_W, borderRadius: 14, overflow: 'hidden', backgroundColor: colors.border },
+  photoCardImg: { width: DISCOVER_CARD_W, height: DISCOVER_CARD_W },
+  photoCardOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', padding: 8, backgroundColor: 'rgba(61,26,26,0.28)' },
+  photoCardDogTag: { alignSelf: 'flex-start', backgroundColor: 'rgba(61,26,26,0.55)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+  photoCardDogText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory },
+  catDotSmall: { width: 6, height: 6, borderRadius: 3, marginTop: 3 },
+  photoCardLieu: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.ivory },
+  photoCardAuthor: { fontFamily: 'DMSans_300Light', fontSize: 9, color: 'rgba(245,239,224,0.65)', marginTop: 1 },
+  photoCardLike: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(61,26,26,0.45)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  photoCardLikeCount: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
+
+  expCard: {
+    width: SCREEN_W * 0.7, height: 158, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.bordeaux,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,
+  },
+  expOverlay: { flex: 1, justifyContent: 'space-between', padding: 14, backgroundColor: 'rgba(61,26,26,0.55)' },
+  expStarBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245,239,224,0.15)', borderWidth: 1, borderColor: 'rgba(245,239,224,0.25)',
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20,
+  },
+  expStarLabel: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory, letterSpacing: 0.5 },
+  expAvatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.terraPale },
+  expNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 14, color: colors.ivory },
+  expHandle: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.65)', marginTop: 1 },
+
+  expModalContainer: { flex: 1, backgroundColor: colors.ivoryPale },
+  expModalBanner: { width: '100%', height: 220, backgroundColor: colors.bordeaux },
+  expModalCloseBtn: {
+    position: 'absolute', top: 50, right: 16, width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(61,26,26,0.5)', alignItems: 'center', justifyContent: 'center',
+  },
+  expModalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  expModalAvatar: {
+    width: 64, height: 64, borderRadius: 32, borderWidth: 3, borderColor: colors.ivory, marginTop: -32,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
+  },
+  expModalNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
+  expModalHandle: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  expModalAbonnes: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginTop: 3 },
+  expModalBio: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 21, paddingHorizontal: 20, marginBottom: 16 },
+  expModalLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20, marginBottom: 24 },
+  expLink: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.bordeaux, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
+  expLinkLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  expModalSection: { paddingHorizontal: 20 },
+  expModalSectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 14 },
+  expLieuRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  },
+  expLieuThumb: { width: 52, height: 52, borderRadius: 10 },
+  expLieuNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginBottom: 2 },
+  expLieuVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  expLieuComment: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terra, marginTop: 3, fontStyle: 'italic' },
+});
+
+async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const { data } = await supabase
+    .from('photos').select('lieu_id,url')
+    .in('lieu_id', ids).eq('validee', true)
+    .order('created_at', { ascending: false });
+  const map: Record<string, string> = {};
+  (data || []).forEach((p: any) => { if (!map[p.lieu_id]) map[p.lieu_id] = p.url; });
+  return map;
+}
+
+async function fetchGooglePhotoFor(lieu: { id: string; nom: string; ville: string }): Promise<string | null> {
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
+      body: JSON.stringify({ textQuery: `${lieu.nom} ${lieu.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
+    });
+    const json = await res.json();
+    const photoName = json.places?.[0]?.photos?.[0]?.name;
+    if (!photoName) return null;
+    const photoUrl = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
+    await supabase.from('lieux').update({ google_photo_url: photoUrl }).eq('id', lieu.id);
+    return photoUrl;
+  } catch {
+    return null;
+  }
+}
 
 export default function CarteScreen() {
   const insets = useSafeAreaInsets();
@@ -236,6 +621,7 @@ export default function CarteScreen() {
   const [pendingPhotoUris, setPendingPhotoUris] = useState<string[]>([]);
   const [pendingVideoUri, setPendingVideoUri] = useState<string | null>(null);
   const [showEvents, setShowEvents] = useState(false);
+  const [showBalades, setShowBalades] = useState(false);
   const [mapEvents, setMapEvents] = useState<EventMarker[]>([]);
   const [filterModal, setFilterModal] = useState(false);
   const [filterMinNote, setFilterMinNote] = useState(0);
@@ -243,11 +629,45 @@ export default function CarteScreen() {
   const [filterCat, setFilterCat] = useState<string | null>(null);
   const [filterDistance, setFilterDistance] = useState<number | null>(null);
   const filterAnim = useRef(new Animated.Value(SCREEN_H)).current;
+
+  // ── Découverte (mode Liste, rangées curatées) ──
+  const [discoverLoading, setDiscoverLoading] = useState(true);
+  const [discoverLoaded, setDiscoverLoaded] = useState(false);
+  const [recommendedLieux, setRecommendedLieux] = useState<DiscoverLieu[]>([]);
+  const [friendPickLieux, setFriendPickLieux] = useState<DiscoverLieu[]>([]);
+  const [nearbyDiscoverLieux, setNearbyDiscoverLieux] = useState<DiscoverLieu[]>([]);
+  const [adressesDuMoment, setAdressesDuMoment] = useState<DiscoverLieu[]>([]);
+  const [recentDiscoverLieux, setRecentDiscoverLieux] = useState<DiscoverLieu[]>([]);
+  const [topDiscoverLieux, setTopDiscoverLieux] = useState<DiscoverLieu[]>([]);
+  const [featuredDiscoverLieu, setFeaturedDiscoverLieu] = useState<DiscoverLieu | null>(null);
+  const [discoverPhotos, setDiscoverPhotos] = useState<DiscoverPhoto[]>([]);
+  const [discoverPhotoLikes, setDiscoverPhotoLikes] = useState<Record<string, number>>({});
+  const [discoverPhotoLikedByMe, setDiscoverPhotoLikedByMe] = useState<Set<string>>(new Set());
+  const [explorateurs, setExplorateurs] = useState<Explorateur[]>([]);
+  const [selectedExplorateur, setSelectedExplorateur] = useState<Explorateur | null>(null);
+  const [listPhotoMap, setListPhotoMap] = useState<Record<string, string>>({});
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── Balades ──
+  const [balades, setBalades] = useState<Balade[]>([]);
+  const [selectedBalade, setSelectedBalade] = useState<Balade | null>(null);
+  const [pickingBaladeDepart, setPickingBaladeDepart] = useState(false);
+  const [baladeFormVisible, setBaladeFormVisible] = useState(false);
+  const [baladeDepartLat, setBaladeDepartLat] = useState<number | null>(null);
+  const [baladeDepartLng, setBaladeDepartLng] = useState<number | null>(null);
+  const [baladeNom, setBaladeNom] = useState('');
+  const [baladeArrivee, setBaladeArrivee] = useState('');
+  const [baladeDesc, setBaladeDesc] = useState('');
+  const [baladeDistance, setBaladeDistance] = useState('');
+  const [baladeLoading, setBaladeLoading] = useState(false);
+  const [pickingBaladeArrivee, setPickingBaladeArrivee] = useState(false);
+  const [baladeFinalArriveeCoords, setBaladeFinalArriveeCoords] = useState<{lat: number; lng: number} | null>(null);
+  const [baladeFiltres, setBaladeFiltres] = useState<BaladeFiltres>(FILTRES_VIDE);
+  const [baladePhotoUri, setBaladePhotoUri] = useState<string | null>(null);
+  const [fabOpen, setFabOpen] = useState(false);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextFetchRef = useRef(false);
   const lastFetchedRegionRef = useRef<Region | null>(null);
@@ -321,6 +741,30 @@ export default function CarteScreen() {
         .eq('id', lieuId).single()
         .then(({ data }) => { if (data) openFiche(data as Lieu); });
     }
+    const baladeId = mapNavigation.consumeBalade();
+    if (baladeId) {
+      supabase.from('balades')
+        .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
+        .eq('id', baladeId)
+        .single()
+        .then(({ data, error }) => {
+          if (data && !error) {
+            setShowBalades(true);
+            setSelectedBalade(data as Balade);
+            mapRef.current?.animateToRegion({
+              latitude: data.depart_lat,
+              longitude: data.depart_lng,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            }, 800);
+          }
+        });
+    }
+    const proposeName = mapNavigation.consumePropose();
+    if (proposeName) {
+      setProposeNom(proposeName);
+      setProposeModal(true);
+    }
   }, []));
 
   useEffect(() => {
@@ -345,35 +789,328 @@ export default function CarteScreen() {
     else setMapEvents([]);
   }, [showEvents, userId]);
 
+  useEffect(() => {
+    if (showBalades) fetchBalades(region);
+    else setBalades([]);
+  }, [showBalades]);
+
+  useEffect(() => {
+    if (listView && lieux.length === 0) {
+      fetchLieux(region, activeCat, true);
+    }
+  }, [listView]);
+
+  useEffect(() => {
+    if (listView && !discoverLoaded) {
+      loadDiscoverySections();
+    }
+  }, [listView, discoverLoaded]);
+
+  useEffect(() => {
+    if (!listView || !lieux.length) return;
+    const missing = lieux.filter(l => !listPhotoMap[l.id]).map(l => l.id);
+    if (!missing.length) return;
+    fetchPhotosForLieux(missing).then(map => {
+      if (Object.keys(map).length) setListPhotoMap(prev => ({ ...prev, ...map }));
+    });
+  }, [listView, lieux]);
+
+  // Rafraîchit "Près de toi" une fois la position GPS connue si déjà en liste
+  useEffect(() => {
+    if (listView && discoverLoaded && userLat && userLng && nearbyDiscoverLieux.length === 0) {
+      loadDiscoverySections();
+    }
+  }, [userLat, userLng]);
+
   async function fetchLieux(r: Region, cat: string | null, reset = false) {
     const last = lastFetchedRegionRef.current;
     if (!reset && last) {
       const movedLat = Math.abs(r.latitude - last.latitude);
       const movedLng = Math.abs(r.longitude - last.longitude);
       const deltaChanged = Math.abs(r.latitudeDelta - last.latitudeDelta) / last.latitudeDelta;
-      const threshold = Math.min(r.latitudeDelta, last.latitudeDelta) * 0.35;
+      const threshold = Math.min(r.latitudeDelta, last.latitudeDelta) * 0.5;
       if (movedLat < threshold && movedLng < threshold && deltaChanged < 0.4 && cat === activeCat) return;
     }
     lastFetchedRegionRef.current = r;
     if (lieux.length === 0) setLoading(true);
-    let query = supabase
-      .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse').eq('actif', true)
-      .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
-      .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
-      .limit(1000);
-    if (cat) query = (query as any).eq('cat', cat);
-    const { data } = await query;
-    const newPlaces = data || [];
-    if (reset) {
-      setLieux(newPlaces);
-    } else {
-      setLieux(prev => {
-        const existing = new Set(prev.map(l => l.id));
-        const toAdd = newPlaces.filter(l => !existing.has(l.id));
-        return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-      });
+    try {
+      let query = supabase
+        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,google_photo_url,created_at,mise_en_avant').eq('actif', true)
+        .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
+        .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
+        .limit(500);
+      if (cat) query = (query as any).eq('cat', cat);
+      const { data } = await query;
+      const newPlaces = data || [];
+      if (reset) {
+        setLieux(newPlaces);
+      } else {
+        setLieux(prev => {
+          const existing = new Set(prev.map(l => l.id));
+          const toAdd = newPlaces.filter(l => !existing.has(l.id));
+          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+        });
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  }
+
+  async function loadDiscoverySections() {
+    setDiscoverLoading(true);
+    const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const qMisEnAvant = supabase.from('lieux')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
+      .eq('actif', true).eq('mise_en_avant', true).order('created_at', { ascending: false }).limit(10);
+
+    const qTop = supabase.from('lieux')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
+      .eq('actif', true).not('note_moyenne', 'is', null).order('note_moyenne', { ascending: false }).limit(20);
+
+    const qRecent = supabase.from('lieux')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
+      .eq('actif', true).gte('created_at', since30days).order('created_at', { ascending: false }).limit(10);
+
+    let qNearby = supabase.from('lieux')
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant').eq('actif', true);
+    if (userLat && userLng) {
+      const delta = (10 / 111) * 1.3;
+      qNearby = (qNearby as any)
+        .gte('lat', userLat - delta).lte('lat', userLat + delta)
+        .gte('lng', userLng - delta).lte('lng', userLng + delta);
+    }
+    qNearby = (qNearby as any).limit(60);
+
+    // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
+    const [rMisEnAvant, rTop, rRecent, rNearby, signals] = await Promise.all([
+      qMisEnAvant, qTop, qRecent, qNearby, loadUserSignals(userId),
+    ]);
+
+    let nearbyRaw: DiscoverLieu[] = (rNearby.data || []) as DiscoverLieu[];
+    if (userLat && userLng) {
+      nearbyRaw = nearbyRaw
+        .map(l => ({ ...l, distance: haversine(userLat!, userLng!, l.lat!, l.lng!) }))
+        .filter(l => (l.distance ?? 999) <= 10)
+        .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+    }
+
+    const misEnAvant: DiscoverLieu[] = (rMisEnAvant.data || []) as DiscoverLieu[];
+    const top: DiscoverLieu[] = (rTop.data || []) as DiscoverLieu[];
+    const recent: DiscoverLieu[] = (rRecent.data || []) as DiscoverLieu[];
+    const nearby = nearbyRaw.slice(0, 15);
+
+    // Pool de candidats pour le scoring personnalisé: top-rated + proches + récents, dédupliqués
+    const candidatesMap = new Map<string, DiscoverLieu>();
+    [...top, ...nearbyRaw.slice(0, 40), ...recent].forEach(l => { if (!candidatesMap.has(l.id)) candidatesMap.set(l.id, l); });
+    const candidates = [...candidatesMap.values()];
+
+    const recommended = rankForYou(candidates, signals, 10);
+    const friendPicks = filterFriendPicks(candidates, signals, 10);
+
+    // Une seule requête photo pour toutes les sections
+    const allIds = [...new Set([...misEnAvant, ...top, ...recent, ...nearby, ...recommended, ...friendPicks].map(l => l.id))];
+    const photoMap = await fetchPhotosForLieux(allIds);
+    const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || l.google_photo_url || null });
+
+    const misEnAvantE = misEnAvant.map(enrich);
+    const topE = top.slice(0, 10).map(enrich);
+    const recentE = recent.map(enrich);
+    const nearbyE = nearby.map(enrich);
+    const recommendedE = recommended.map(enrich);
+    const friendPicksE = friendPicks.map(enrich);
+
+    setAdressesDuMoment(misEnAvantE);
+    setTopDiscoverLieux(topE);
+    setRecentDiscoverLieux(recentE);
+    setNearbyDiscoverLieux(nearbyE);
+    setRecommendedLieux(recommendedE);
+    setFriendPickLieux(friendPicksE);
+    setFeaturedDiscoverLieu(nearbyE.find(l => l.photoUrl) || recommendedE.find(l => l.photoUrl) || nearbyE[0] || recommendedE[0] || null);
+
+    await Promise.all([loadExplorateurs(), loadDiscoverPhotos()]);
+
+    setDiscoverLoading(false);
+    setDiscoverLoaded(true);
+
+    // Récupération Google Photos en tâche de fond pour les lieux sans photo, dédupliquée
+    const seen = new Set<string>();
+    [...misEnAvantE, ...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE]
+      .filter(l => !l.photoUrl && !seen.has(l.id) && (seen.add(l.id), true))
+      .forEach(l => fetchGooglePhotoFor(l).then(url => {
+        if (!url) return;
+        const patch = (list: DiscoverLieu[]) => list.map(p => p.id === l.id ? { ...p, photoUrl: url } : p);
+        setAdressesDuMoment(patch); setTopDiscoverLieux(patch); setRecentDiscoverLieux(patch);
+        setNearbyDiscoverLieux(patch); setRecommendedLieux(patch); setFriendPickLieux(patch);
+        setFeaturedDiscoverLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp);
+      }));
+  }
+
+  async function loadExplorateurs() {
+    const { data } = await supabase
+      .from('explorateurs')
+      .select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web,nb_abonnes')
+      .eq('statut', 'actif')
+      .order('ordre', { ascending: true });
+    setExplorateurs(data || []);
+  }
+
+  async function openExplorateurDiscover(exp: Explorateur) {
+    setSelectedExplorateur(exp);
+    const { data: elData } = await supabase
+      .from('explorateur_lieux')
+      .select('lieu_id,commentaire,ordre,lieux(nom,cat,ville,google_photo_url)')
+      .eq('explorateur_id', exp.id)
+      .order('ordre', { ascending: true });
+    if (!elData?.length) { setSelectedExplorateur({ ...exp, lieux: [] }); return; }
+    const lieuIds = elData.map((r: any) => r.lieu_id);
+    const photoMap = await fetchPhotosForLieux(lieuIds);
+    const lieuxList = elData.map((r: any) => ({
+      lieu_id: r.lieu_id, nom: r.lieux?.nom || '', cat: r.lieux?.cat || '', ville: r.lieux?.ville || '',
+      commentaire: r.commentaire, photoUrl: photoMap[r.lieu_id] || r.lieux?.google_photo_url || null,
+    }));
+    setSelectedExplorateur({ ...exp, lieux: lieuxList });
+  }
+
+  async function loadDiscoverPhotos() {
+    const { data: photoData } = await supabase
+      .from('photos').select('id,url,lieu_id,nom_chien,user_id')
+      .eq('validee', true).order('created_at', { ascending: false }).limit(15);
+    if (!photoData?.length) { setDiscoverPhotos([]); return; }
+
+    const lieuIds = [...new Set((photoData as any[]).map(p => p.lieu_id).filter(Boolean))];
+    const userIds = [...new Set((photoData as any[]).map(p => p.user_id).filter(Boolean))];
+    const [{ data: lieuxData }, { data: profilsData }] = await Promise.all([
+      lieuIds.length ? supabase.from('lieux').select('id,nom,cat,ville').in('id', lieuIds) : Promise.resolve({ data: [] }),
+      userIds.length ? supabase.from('profils').select('id,username,prenom').in('id', userIds) : Promise.resolve({ data: [] }),
+    ]);
+    const lieuMap: Record<string, any> = {};
+    (lieuxData || []).forEach((l: any) => { lieuMap[l.id] = l; });
+    const authorMap: Record<string, string | null> = {};
+    (profilsData || []).forEach((p: any) => { authorMap[p.id] = p.username ? `@${p.username}` : (p.prenom || null); });
+
+    const mapped: DiscoverPhoto[] = (photoData as any[]).map(p => ({
+      id: p.id, url: p.url, lieuId: p.lieu_id,
+      lieu: lieuMap[p.lieu_id] || { nom: '?', cat: 'autre', ville: '' },
+      nomChien: p.nom_chien || null,
+      authorDisplay: authorMap[p.user_id] || null,
+    }));
+    setDiscoverPhotos(mapped);
+
+    const photoIds = mapped.map(p => p.id);
+    const [{ data: allLikes }, { data: myLikes }] = await Promise.all([
+      supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds),
+      userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
+    ]);
+    const countMap: Record<string, number> = {};
+    (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
+    setDiscoverPhotoLikes(countMap);
+    setDiscoverPhotoLikedByMe(new Set((myLikes || []).map((l: any) => l.photo_id)));
+  }
+
+  async function toggleDiscoverPhotoLike(photoId: string) {
+    if (!userId) return;
+    const isLiked = discoverPhotoLikedByMe.has(photoId);
+    const { error } = isLiked
+      ? await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId)
+      : await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });
+    if (error) return;
+    if (isLiked) {
+      setDiscoverPhotoLikedByMe(prev => { const s = new Set(prev); s.delete(photoId); return s; });
+      setDiscoverPhotoLikes(prev => ({ ...prev, [photoId]: Math.max(0, (prev[photoId] || 0) - 1) }));
+    } else {
+      setDiscoverPhotoLikedByMe(prev => new Set([...prev, photoId]));
+      setDiscoverPhotoLikes(prev => ({ ...prev, [photoId]: (prev[photoId] || 0) + 1 }));
+    }
+  }
+
+  async function openDiscoverLieu(id: string) {
+    const cached = lieux.find(l => l.id === id);
+    if (cached) { setListView(false); openFiche(cached); return; }
+    const { data } = await supabase.from('lieux')
+      .select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis').eq('id', id).single();
+    if (data) { setListView(false); openFiche(data as Lieu); }
+  }
+
+  async function fetchBalades(r: Region) {
+    const latD = r.latitudeDelta * 0.6;
+    const lngD = r.longitudeDelta * 0.6;
+    const { data } = await supabase
+      .from('balades')
+      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
+      .eq('validee', true)
+      .gte('depart_lat', r.latitude - latD).lte('depart_lat', r.latitude + latD)
+      .gte('depart_lng', r.longitude - lngD).lte('depart_lng', r.longitude + lngD)
+      .order('created_at', { ascending: false }).limit(50);
+    if (!data || !data.length) { setBalades([]); return; }
+    const userIds = [...new Set(data.map((b: any) => b.user_id))] as string[];
+    const { data: profiles } = await supabase.from('profils').select('id, prenom').in('id', userIds);
+    const pm = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
+    setBalades(data.map((b: any) => ({ ...b, profils: pm[b.user_id] || null })));
+  }
+
+  async function submitBalade() {
+    if (!userId || !baladeDepartLat || !baladeDepartLng || !baladeNom.trim()) return;
+    if (!baladeArrivee.trim() && !baladeFinalArriveeCoords) {
+      Alert.alert('Point d\'arrivée manquant', 'Indique l\'arrivée par texte ou sur la carte.');
+      return;
+    }
+    setBaladeLoading(true);
+
+    // Auto-distance via Haversine si GPS disponible, sinon saisie manuelle
+    const dist = baladeFinalArriveeCoords
+      ? parseFloat(haversine(baladeDepartLat, baladeDepartLng, baladeFinalArriveeCoords.lat, baladeFinalArriveeCoords.lng).toFixed(1))
+      : (baladeDistance.trim() ? parseFloat(baladeDistance.replace(',', '.')) : null);
+
+    const { data: baladeRow, error } = await supabase.from('balades').insert({
+      user_id: userId,
+      nom: baladeNom.trim(),
+      description: baladeDesc.trim() || null,
+      depart_lat: baladeDepartLat,
+      depart_lng: baladeDepartLng,
+      arrivee_texte: baladeArrivee.trim() || null,
+      arrivee_lat: baladeFinalArriveeCoords?.lat ?? null,
+      arrivee_lng: baladeFinalArriveeCoords?.lng ?? null,
+      distance_km: dist && !isNaN(dist) ? dist : null,
+      validee: true,
+      ...baladeFiltres,
+    }).select('id').single();
+
+    setBaladeLoading(false);
+    if (error) { Alert.alert('Erreur', error.message); return; }
+
+    // Upload photo si sélectionnée
+    let photoUrl: string | null = null;
+    if (baladePhotoUri) {
+      try {
+        const ext = baladePhotoUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const r2Key = `lieu-photos/community/${userId}/balade-${Date.now()}.${ext}`;
+        photoUrl = await uploadToR2(baladePhotoUri, r2Key);
+      } catch {}
+    }
+
+    // Publication dans le feed
+    const distLabel = dist ? ` · ${dist} km` : '';
+    supabase.from('community_posts').insert({
+      user_id: userId,
+      type: 'balade',
+      image_url: photoUrl,
+      caption: baladeNom.trim() + distLabel,
+      auto_generated: true,
+    }).then(() => {});
+
+    // +25 points
+    supabase.from('profils').select('points').eq('id', userId).single().then(({ data }) => {
+      if (data) supabase.from('profils').update({ points: (data.points || 0) + 25 }).eq('id', userId);
+    });
+
+    setBaladeFormVisible(false);
+    setBaladeNom(''); setBaladeArrivee(''); setBaladeDesc(''); setBaladeDistance('');
+    setBaladeDepartLat(null); setBaladeDepartLng(null);
+    setBaladeFinalArriveeCoords(null); setBaladeFiltres(FILTRES_VIDE);
+    setBaladePhotoUri(null);
+    triggerPointsAnim();
+    setShowBalades(true);
   }
 
   function onCatPress(cat: string | null) {
@@ -436,9 +1173,9 @@ export default function CarteScreen() {
         supabase.from('lieux').select('*').eq('id', lieu.id).single(),
         userId ? supabase.from('favoris').select('id,liste').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
         userId ? supabase.from('avis').select('id,note,commentaire').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
-        supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).eq('validee', true).order('created_at', { ascending: true }).limit(20),
-        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
-        supabase.from('community_posts').select('id,image_url,user_id').eq('lieu_id', lieu.id).eq('hidden', false).order('created_at', { ascending: false }).limit(10),
+        supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).order('created_at', { ascending: true }).limit(20),
+        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
+        supabase.from('community_posts').select('id,image_url,user_id').eq('lieu_id', lieu.id).eq('hidden', false).not('image_url', 'is', null).order('created_at', { ascending: false }).limit(10),
       ]);
       lieuData = results[0].data;
       favData = results[1];
@@ -525,12 +1262,16 @@ export default function CarteScreen() {
       }
 
       if ((avisRaw || []).length > 0) {
+        const avisUserIds = [...new Set(avisRaw.map((a: any) => a.user_id))];
+        const { data: avisProfils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', avisUserIds);
+        const avisProfilMap: Record<string, any> = {};
+        (avisProfils || []).forEach((p: any) => { avisProfilMap[p.id] = p; });
         setFicheAvis((avisRaw || []).map((a: any) => ({
           id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
-          prenom: (a.profils as any)?.prenom || 'Membre',
-          username: (a.profils as any)?.username || null,
+          prenom: avisProfilMap[a.user_id]?.prenom || 'Membre',
+          username: avisProfilMap[a.user_id]?.username || null,
           reponse_pro: a.reponse_pro || null,
-          ambassadeur: (a.profils as any)?.ambassadeur || null,
+          ambassadeur: avisProfilMap[a.user_id]?.ambassadeur || null,
         })));
       }
     } catch (_) {
@@ -705,58 +1446,78 @@ export default function CarteScreen() {
     } catch {}
   }
 
-  async function uploadPhoto() {
+  function uploadPhoto() {
     if (!userId) { showLoginPrompt(); return; }
     if (!selectedLieu) return;
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert(
-          'Accès aux photos requis',
-          "Autorise The Pack à accéder à ta galerie dans les Réglages.",
-          [
-            { text: 'Annuler', style: 'cancel' },
-            { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
-          ]
-        );
-        return;
-      }
-      const photoResult = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 0.7,
-        allowsMultipleSelection: true,
-        selectionLimit: 3,
-      });
-      if (photoResult.canceled || !photoResult.assets?.length) return;
-      const uris = photoResult.assets.map((a: any) => a.uri);
 
-      const proceed = (videoUri: string | null) => {
-        setPendingPhotoUris(uris);
-        setPendingVideoUri(videoUri);
-        setDogTagInput(myDogName || '');
-        setDogTagModal(true);
-      };
+    const proceed = (uris: string[], videoUri: string | null) => {
+      setPendingPhotoUris(uris);
+      setPendingVideoUri(videoUri);
+      setDogTagInput(myDogName || '');
+      setDogTagModal(true);
+    };
 
+    const handlePhotos = async (uris: string[]) => {
       if (ENABLE_VIDEO_UPLOAD) {
-        Alert.alert(
-          'Ajouter une vidéo ?',
-          'Tu peux joindre une courte vidéo en plus (optionnel).',
-          [
-            { text: 'Non, publier', onPress: () => proceed(null) },
-            { text: 'Ajouter une vidéo', onPress: async () => {
-              try {
-                const vid = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 });
-                proceed(!vid.canceled && vid.assets?.[0]?.uri ? vid.assets[0].uri : null);
-              } catch { proceed(null); }
-            }},
-          ]
-        );
+        Alert.alert('Ajouter une vidéo ?', 'Tu peux joindre une courte vidéo en plus (optionnel).', [
+          { text: 'Non, publier', onPress: () => proceed(uris, null) },
+          { text: 'Ajouter une vidéo', onPress: async () => {
+            try {
+              const vid = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], videoMaxDuration: 60 });
+              proceed(uris, !vid.canceled && vid.assets?.[0]?.uri ? vid.assets[0].uri : null);
+            } catch { proceed(uris, null); }
+          }},
+        ]);
       } else {
-        proceed(null);
+        proceed(uris, null);
       }
-    } catch (e: any) {
-      Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la galerie.');
-    }
+    };
+
+    Alert.alert('Ajouter des photos', '', [
+      {
+        text: 'Prendre une photo',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès à la caméra requis', 'Autorise The Pack à accéder à ta caméra dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
+            if (result.canceled || !result.assets?.length) return;
+            await handlePhotos(result.assets.map((a: any) => a.uri));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la caméra.');
+          }
+        },
+      },
+      {
+        text: 'Choisir depuis la galerie',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès aux photos requis', 'Autorise The Pack à accéder à ta galerie dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'], quality: 0.7, allowsMultipleSelection: true, selectionLimit: 3,
+            });
+            if (result.canceled || !result.assets?.length) return;
+            await handlePhotos(result.assets.map((a: any) => a.uri));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || 'Impossible d\'ouvrir la galerie.');
+          }
+        },
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
   }
 
   async function doUploadPhoto(nomChien: string | null) {
@@ -771,15 +1532,14 @@ export default function CarteScreen() {
     try {
       for (const uri of uris) {
         const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
-        const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
-        const path = `${userId}/${selectedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        const { error: upErr } = await supabase.storage.from('lieu-photos').upload(path, decode(base64), { contentType });
-        if (upErr) { Alert.alert('Erreur upload', upErr.message); return; }
-        const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+        const r2Key = `lieu-photos/${userId}/${selectedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const publicUrl = await uploadToR2(uri, r2Key).catch((upErr: any) => {
+          Alert.alert('Erreur upload', upErr.message); return null;
+        });
+        if (!publicUrl) return;
         const { error: insertErr } = await supabase.from('photos').insert({
           lieu_id: selectedLieu.id, user_id: userId, url: publicUrl,
-          nom_chien: nomChien || null,
+          nom_chien: nomChien || null, validee: true,
           ...(groupId ? { group_id: groupId } : {}),
         });
         if (insertErr) { Alert.alert('Erreur', insertErr.message); return; }
@@ -826,9 +1586,13 @@ export default function CarteScreen() {
     }
     const { data } = await supabase.from('lieux').select('*').eq('id', selectedLieu.id).single();
     if (data) setSelectedLieu(data);
-    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro,profils(prenom,username,ambassadeur)').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
+    const { data: avisRaw } = await supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', selectedLieu.id).order('created_at', { ascending: false }).limit(8);
     if ((avisRaw || []).length > 0) {
-      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: (a.profils as any)?.prenom || 'Membre', username: (a.profils as any)?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: (a.profils as any)?.ambassadeur || null })));
+      const avisUserIds = [...new Set((avisRaw || []).map((a: any) => a.user_id))];
+      const { data: avisProfils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', avisUserIds);
+      const avisProfilMap: Record<string, any> = {};
+      (avisProfils || []).forEach((p: any) => { avisProfilMap[p.id] = p; });
+      setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: avisProfilMap[a.user_id]?.prenom || 'Membre', username: avisProfilMap[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: avisProfilMap[a.user_id]?.ambassadeur || null })));
     }
     Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
   }
@@ -1000,7 +1764,7 @@ export default function CarteScreen() {
       })(),
       lat: proposeLat ?? region.latitude,
       lng: proposeLng ?? region.longitude,
-      actif: false,
+      actif: true,
       submitted_by: userId,
       ...proposeAmenities,
     }).select('id').single();
@@ -1015,13 +1779,9 @@ export default function CarteScreen() {
       for (const uri of proposePhotos) {
         try {
           const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
-          const path = `${userId}/${insertedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-          const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-          const { data: up } = await supabase.storage.from('lieu-photos').upload(path, decode(b64), { contentType: ext === 'png' ? 'image/png' : 'image/jpeg' });
-          if (up) {
-            const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
-            await supabase.from('photos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: false });
-          }
+          const r2Key = `lieu-photos/${userId}/${insertedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const publicUrl = await uploadToR2(uri, r2Key);
+          await supabase.from('photos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: true });
         } catch {}
       }
     }
@@ -1034,9 +1794,15 @@ export default function CarteScreen() {
         const { data: up } = await supabase.storage.from('lieu-videos').upload(path, decode(b64), { contentType: `video/${ext}` });
         if (up) {
           const { data: { publicUrl } } = supabase.storage.from('lieu-videos').getPublicUrl(path);
-          await supabase.from('videos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: false });
+          await supabase.from('videos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: true });
         }
       } catch {}
+    }
+    // Créer le post communautaire
+    if (!error && insertedLieu?.id && userId) {
+      supabase.from('community_posts').insert({
+        user_id: userId, type: 'nouveau_lieu', lieu_id: insertedLieu.id, auto_generated: true, image_url: null,
+      }).then(() => {});
     }
     setProposeLoading(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -1079,6 +1845,17 @@ export default function CarteScreen() {
       message: `🐾 ${selectedLieu.nom} (${selectedLieu.ville}) — Lieu dog-friendly sur The Pack`,
       url: `https://thepackclub.fr/carte.html?lieu=${selectedLieu.id}`,
     });
+  }
+
+  async function shareLieuWhatsapp() {
+    if (!selectedLieu) return;
+    const text = `🐾 ${selectedLieu.nom} (${selectedLieu.ville}) — Lieu dog-friendly sur The Pack\nhttps://thepackclub.fr/carte.html?lieu=${selectedLieu.id}`;
+    const waUrl = `whatsapp://send?text=${encodeURIComponent(text)}`;
+    try {
+      const supported = await Linking.canOpenURL(waUrl);
+      if (supported) { await Linking.openURL(waUrl); return; }
+    } catch {}
+    await Share.share({ message: text });
   }
 
   const FICHE_HEADER_H = Math.round(SCREEN_H * 0.42);
@@ -1573,6 +2350,9 @@ export default function CarteScreen() {
                       {myAvis ? 'Mon avis' : 'Avis'}
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionShare} onPress={shareLieuWhatsapp}>
+                    <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.actionShare} onPress={shareLieu}>
                     <Ionicons name="share-outline" size={16} color={colors.bordeaux} />
                   </TouchableOpacity>
@@ -1734,6 +2514,7 @@ export default function CarteScreen() {
   const totalSearchResults = cityResults.length + searchResults.length;
 
   return (
+    <>
     <View style={styles.container}>
       <MapView
         ref={mapRef}
@@ -1745,9 +2526,24 @@ export default function CarteScreen() {
           regionTimer.current = setTimeout(() => {
             if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
             if (!favFilter) fetchLieux(r, activeCat);
-          }, 300);
+            if (showBalades) fetchBalades(r);
+          }, 600);
         }}
         onLongPress={handleMapLongPress}
+        onPress={(e) => {
+          if (pickingBaladeDepart) {
+            const { latitude, longitude } = e.nativeEvent.coordinate;
+            setBaladeDepartLat(latitude);
+            setBaladeDepartLng(longitude);
+            setPickingBaladeDepart(false);
+            setBaladeFormVisible(true);
+          } else if (pickingBaladeArrivee) {
+            const { latitude, longitude } = e.nativeEvent.coordinate;
+            setBaladeFinalArriveeCoords({ lat: latitude, lng: longitude });
+            setPickingBaladeArrivee(false);
+            setBaladeFormVisible(true);
+          }
+        }}
         showsUserLocation
         showsMyLocationButton={false}
       >
@@ -1821,102 +2617,289 @@ export default function CarteScreen() {
             </View>
           </Marker>
         ))}
+        {showBalades && !showEvents && balades.map(b => (
+          <Marker
+            key={`bal-${b.id}`}
+            coordinate={{ latitude: b.depart_lat, longitude: b.depart_lng }}
+            tracksViewChanges={selectedBalade?.id === b.id}
+            anchor={{ x: 0.5, y: 1 }}
+            onPress={() => { setFabOpen(false); setSelectedBalade(b); }}
+          >
+            <View style={styles.baladePin}>
+              <View style={[styles.baladeBubble, selectedBalade?.id === b.id && styles.baladeBubbleSelected]}>
+                <Ionicons name="walk-outline" size={16} color="#fff" />
+              </View>
+              <View style={[styles.baladeTail, selectedBalade?.id === b.id && { borderTopColor: '#2E7D6B' }]} />
+            </View>
+          </Marker>
+        ))}
+        {baladeDepartLat !== null && baladeDepartLng !== null && (
+          <Marker
+            coordinate={{ latitude: baladeDepartLat, longitude: baladeDepartLng }}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <View style={styles.baladePin}>
+              <View style={[styles.baladeBubble, { backgroundColor: colors.terra }]}>
+                <Ionicons name="flag-outline" size={16} color="#fff" />
+              </View>
+              <View style={[styles.baladeTail, { borderTopColor: colors.terra }]} />
+            </View>
+          </Marker>
+        )}
+        {baladeFinalArriveeCoords !== null && (
+          <Marker
+            coordinate={{ latitude: baladeFinalArriveeCoords.lat, longitude: baladeFinalArriveeCoords.lng }}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <View style={styles.baladePin}>
+              <View style={[styles.baladeBubble, { backgroundColor: colors.sage }]}>
+                <Ionicons name="flag" size={16} color="#fff" />
+              </View>
+              <View style={[styles.baladeTail, { borderTopColor: colors.sage }]} />
+            </View>
+          </Marker>
+        )}
+        {selectedBalade?.arrivee_lat != null && selectedBalade?.arrivee_lng != null && (
+          <Polyline
+            coordinates={[
+              { latitude: selectedBalade.depart_lat, longitude: selectedBalade.depart_lng },
+              { latitude: selectedBalade.arrivee_lat, longitude: selectedBalade.arrivee_lng },
+            ]}
+            strokeColor={colors.sage}
+            strokeWidth={3}
+            lineDashPattern={[10, 6]}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )}
       </MapView>
 
       {/* List view */}
       {listView && (
-        <View style={styles.listViewContainer}>
-          {/* Sort + count bar */}
-          <View style={styles.sortBar}>
-            {SORT_OPTS.map(s => (
-              <TouchableOpacity
-                key={s.key}
-                style={[styles.sortPill, sortBy === s.key && styles.sortPillActive]}
-                onPress={() => setSortBy(s.key)}
-              >
-                <Ionicons name={s.icon} size={12} color={sortBy === s.key ? '#fff' : colors.bordeaux} />
-                <Text style={[styles.sortPillLabel, sortBy === s.key && styles.sortPillLabelActive]}>{s.label}</Text>
-              </TouchableOpacity>
-            ))}
-            <Text style={styles.listCount}>{filteredLieux.length} lieu{filteredLieux.length !== 1 ? 'x' : ''}</Text>
-          </View>
+        <View style={[styles.listViewContainer, { paddingTop: 104 }]}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
 
-          {loading ? (
-            <ActivityIndicator color={colors.terra} style={{ marginTop: 48 }} />
-          ) : lieux.length === 0 ? (
-            <View style={styles.listEmpty}>
-              <Ionicons name="paw-outline" size={44} color={colors.border} />
-              <Text style={styles.listEmptyText}>Aucun lieu dans cette zone</Text>
+            {(!filterActive && !searchQuery.trim()) && (
+              <>
+                {featuredDiscoverLieu && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>À découvrir</Text>
+                    <FeaturedDiscoverCard lieu={featuredDiscoverLieu} onPress={() => openDiscoverLieu(featuredDiscoverLieu.id)} />
+                  </View>
+                )}
+
+                {recommendedLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Recommandé pour toi</Text>
+                    <FlatList
+                      data={recommendedLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {friendPickLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Les coups de cœur de tes amis</Text>
+                    <FlatList
+                      data={friendPickLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {explorateurs.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Les Explorateurs</Text>
+                    <FlatList
+                      data={explorateurs} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={e => e.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <ExplorateurDiscoverCard exp={item} onPress={() => openExplorateurDiscover(item)} />}
+                    />
+                  </View>
+                )}
+
+                {nearbyDiscoverLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>{myDogName ? `Près de ${myDogName}` : 'Près de toi'}</Text>
+                    <FlatList
+                      data={nearbyDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {adressesDuMoment.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Adresses du moment</Text>
+                    <FlatList
+                      data={adressesDuMoment} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {recentDiscoverLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Récemment ajoutés</Text>
+                    <FlatList
+                      data={recentDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {discoverPhotos.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Photos de la communauté</Text>
+                    <FlatList
+                      data={discoverPhotos} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={p => p.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => (
+                        <PhotoDiscoverCard
+                          photo={item}
+                          liked={discoverPhotoLikedByMe.has(item.id)}
+                          likeCount={discoverPhotoLikes[item.id] || 0}
+                          onPress={() => openDiscoverLieu(item.lieuId)}
+                          onLike={() => toggleDiscoverPhotoLike(item.id)}
+                        />
+                      )}
+                    />
+                  </View>
+                )}
+
+                {topDiscoverLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Les mieux notés</Text>
+                    <FlatList
+                      data={topDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {discoverLoading && !discoverLoaded && (
+                  <ActivityIndicator color={colors.terra} style={{ marginTop: 20, marginBottom: 8 }} />
+                )}
+
+                <View style={dstyles.divider} />
+              </>
+            )}
+
+            {/* Sort + count bar */}
+            <View style={styles.sortBar}>
+              {SORT_OPTS.map(s => (
+                <TouchableOpacity
+                  key={s.key}
+                  style={[styles.sortPill, sortBy === s.key && styles.sortPillActive]}
+                  onPress={() => setSortBy(s.key)}
+                >
+                  <Ionicons name={s.icon} size={12} color={sortBy === s.key ? '#fff' : colors.bordeaux} />
+                  <Text style={[styles.sortPillLabel, sortBy === s.key && styles.sortPillLabelActive]}>{s.label}</Text>
+                </TouchableOpacity>
+              ))}
+              <Text style={styles.listCount}>{filteredLieux.length} lieu{filteredLieux.length !== 1 ? 'x' : ''}</Text>
             </View>
-          ) : (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-              {[...new Set(filteredLieux.map(l => l.cat))]
-                .sort((a, b) => (CAT_CONFIG[a]?.label || '').localeCompare(CAT_CONFIG[b]?.label || '', 'fr'))
-                .map(cat => {
-                  const cfg = CAT_CONFIG[cat] || CAT_CONFIG.autre;
-                  const catLieux = sortLieux(filteredLieux.filter(l => l.cat === cat));
-                  const expanded = expandedCats.includes(cat);
+
+            {loading ? (
+              <ActivityIndicator color={colors.terra} style={{ marginTop: 48 }} />
+            ) : lieux.length === 0 ? (
+              <View style={styles.listEmpty}>
+                <Ionicons name="location-outline" size={44} color={colors.border} />
+                <Text style={styles.listEmptyText}>Aucun lieu dans cette zone</Text>
+                <Text style={[styles.listEmptyText, { fontSize: 12, marginTop: -4 }]}>Déplace la carte vers une ville pour voir les lieux</Text>
+              </View>
+            ) : (
+              <View style={{ paddingTop: 8 }}>
+                {sortLieux(filteredLieux).map((item) => {
+                  const cfg = CAT_CONFIG[item.cat] || CAT_CONFIG.autre;
+                  const dist = (userLat !== null && userLng !== null)
+                    ? haversine(userLat, userLng, item.lat, item.lng)
+                    : null;
+                  const photo = listPhotoMap[item.id] || item.google_photo_url;
                   return (
-                    <View key={cat}>
-                      <TouchableOpacity
-                        style={styles.accordionHeader}
-                        onPress={() => setExpandedCats(prev =>
-                          expanded ? prev.filter(c => c !== cat) : [...prev, cat]
-                        )}
-                        activeOpacity={0.7}
-                      >
-                        <View style={[styles.accordionHeaderIcon, { backgroundColor: cfg.color + '22' }]}>
-                          <Ionicons name={cfg.icon} size={16} color={cfg.color} />
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.listCard}
+                      onPress={() => { setListView(false); openFiche(item); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.listCardAccent, { backgroundColor: cfg.color }]} />
+                      {photo ? (
+                        <Image source={{ uri: photo }} style={styles.listCardPhoto} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.listCardPhoto, { backgroundColor: cfg.color + '18', alignItems: 'center', justifyContent: 'center' }]}>
+                          <Ionicons name={cfg.icon} size={20} color={cfg.color + '99'} />
                         </View>
-                        <Text style={styles.accordionHeaderLabel}>{cfg.label}</Text>
-                        <View style={[styles.accordionHeaderBadge, { backgroundColor: cfg.color + '18' }]}>
-                          <Text style={[styles.accordionHeaderCount, { color: cfg.color }]}>{catLieux.length}</Text>
+                      )}
+                      <View style={styles.listCardBody}>
+                        <Text style={styles.listCardNom} numberOfLines={1}>{item.nom}</Text>
+                        <View style={styles.listCardCatRow}>
+                          <Text style={[styles.listCardCat, { color: cfg.color }]}>{cfg.label}</Text>
+                          {item.ville ? <Text style={styles.listCardAddr}> · {item.ville}</Text> : null}
                         </View>
-                        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
-                      </TouchableOpacity>
-                      {expanded && catLieux.map((item, idx) => {
-                        const dist = (userLat !== null && userLng !== null)
-                          ? haversine(userLat, userLng, item.lat, item.lng)
-                          : null;
-                        return (
-                          <TouchableOpacity
-                            key={item.id}
-                            style={[styles.listItem, idx < catLieux.length - 1 && styles.listSep]}
-                            onPress={() => openFiche(item)}
-                            activeOpacity={0.7}
-                          >
-                            <View style={{ flex: 1, gap: 2 }}>
-                              <Text style={styles.listItemNom} numberOfLines={1}>{item.nom}</Text>
-                              <Text style={styles.listItemVille} numberOfLines={1}>{[item.adresse, item.ville].filter(Boolean).join(' · ')}</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                {item.note_moyenne ? (
-                                  <>
-                                    <Ionicons name="star" size={11} color={colors.terra} />
-                                    <Text style={styles.listItemNote}>{item.note_moyenne.toFixed(1)}</Text>
-                                    <Text style={styles.listItemMeta}>({item.nb_avis} avis)</Text>
-                                  </>
-                                ) : (
-                                  <Text style={styles.listItemMeta}>Pas encore d'avis</Text>
-                                )}
-                                {dist !== null && (
-                                  <Text style={styles.listItemMeta}>· {dist < 1 ? `${Math.round(dist * 1000)} m` : `${dist.toFixed(1)} km`}</Text>
-                                )}
-                              </View>
-                            </View>
-                            <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                        <View style={styles.listCardMeta}>
+                          {item.note_moyenne ? (
+                            <>
+                              <Ionicons name="star" size={11} color={colors.terra} />
+                              <Text style={styles.listCardNote}>{item.note_moyenne.toFixed(1)}</Text>
+                              <Text style={styles.listCardMetaText}>({item.nb_avis})</Text>
+                            </>
+                          ) : (
+                            <Text style={styles.listCardMetaText}>Pas encore d'avis</Text>
+                          )}
+                        </View>
+                      </View>
+                      {dist !== null && (
+                        <View style={styles.listCardDistBadge}>
+                          <Text style={styles.listCardDistText}>
+                            {dist < 1 ? `${Math.round(dist * 1000)} m` : `${dist.toFixed(1)} km`}
+                          </Text>
+                        </View>
+                      )}
+                      <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginRight: 12 }} />
+                    </TouchableOpacity>
                   );
                 })}
-            </ScrollView>
-          )}
+              </View>
+            )}
+          </ScrollView>
         </View>
       )}
 
       {/* Search + filters overlay */}
       <View style={styles.topOverlay} pointerEvents="box-none">
+
+        {/* Carte / Liste toggle */}
+        <View style={styles.carteListeRow} pointerEvents="auto">
+          <View style={styles.carteListeToggle}>
+            <TouchableOpacity
+              style={[styles.carteListeOption, !listView && styles.carteListeOptionActive]}
+              onPress={() => setListView(false)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="map-outline" size={13} color={!listView ? '#fff' : colors.bordeaux} />
+              <Text style={[styles.carteListeLabel, !listView && styles.carteListeLabelActive]}>Carte</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.carteListeOption, listView && styles.carteListeOptionActive]}
+              onPress={() => setListView(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="list-outline" size={13} color={listView ? '#fff' : colors.bordeaux} />
+              <Text style={[styles.carteListeLabel, listView && styles.carteListeLabelActive]}>Liste</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.searchContainer} pointerEvents="auto">
           <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 12 }} />
           <TextInput
@@ -1940,9 +2923,6 @@ export default function CarteScreen() {
               <Ionicons name="options-outline" size={18} color={filterActive ? colors.terra : colors.bordeaux} />
               {filterActive && <View style={styles.filterActiveDot} />}
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.listToggleBtn} onPress={() => setListView(v => !v)}>
-            <Ionicons name={listView ? 'map-outline' : 'list-outline'} size={18} color={listView ? colors.terra : colors.bordeaux} />
           </TouchableOpacity>
         </View>
 
@@ -1991,6 +2971,13 @@ export default function CarteScreen() {
           >
             <Ionicons name="calendar-outline" size={13} color={showEvents ? '#fff' : '#4A7FA5'} />
             <Text style={[styles.filterLabel, showEvents && styles.filterLabelActive]}>Événements</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterPill, showBalades && { backgroundColor: colors.sage, borderColor: colors.sage }]}
+            onPress={() => setShowBalades(v => !v)}
+          >
+            <Ionicons name="walk-outline" size={13} color={showBalades ? '#fff' : colors.sage} />
+            <Text style={[styles.filterLabel, showBalades && styles.filterLabelActive]}>Balades</Text>
           </TouchableOpacity>
         </ScrollView>}
 
@@ -2073,8 +3060,45 @@ export default function CarteScreen() {
         <Ionicons name="locate" size={22} color={colors.bordeaux} />
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.proposeBtn} onPress={() => requireAuth(() => setProposeModal(true))}>
-        <Ionicons name="add" size={24} color={colors.ivory} />
+      {pickingBaladeDepart && (
+        <View style={styles.pickModeBanner}>
+          <Ionicons name="location-outline" size={16} color={colors.ivory} />
+          <Text style={styles.pickModeBannerText}>Tape sur la carte pour le départ</Text>
+          <TouchableOpacity onPress={() => { setPickingBaladeDepart(false); setBaladeDepartLat(null); setBaladeDepartLng(null); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close" size={18} color={colors.ivory} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {pickingBaladeArrivee && (
+        <View style={[styles.pickModeBanner, { backgroundColor: colors.sage }]}>
+          <Ionicons name="flag-outline" size={16} color={colors.ivory} />
+          <Text style={styles.pickModeBannerText}>Tape sur la carte pour l'arrivée</Text>
+          <TouchableOpacity onPress={() => { setPickingBaladeArrivee(false); setBaladeFormVisible(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close" size={18} color={colors.ivory} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {fabOpen && (
+        <View style={styles.fabMenu}>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => setProposeModal(true)); }}>
+            <Text style={styles.fabMenuLabel}>Suggérer un lieu</Text>
+            <View style={[styles.fabMenuIcon, { backgroundColor: colors.bordeaux }]}>
+              <Ionicons name="location-outline" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => setPickingBaladeDepart(true)); }}>
+            <Text style={styles.fabMenuLabel}>Proposer une balade</Text>
+            <View style={[styles.fabMenuIcon, { backgroundColor: '#2E7D6B' }]}>
+              <Ionicons name="walk-outline" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <TouchableOpacity style={styles.proposeBtn} onPress={() => requireAuth(() => setFabOpen(v => !v))}>
+        <Ionicons name={fabOpen ? 'close' : 'add'} size={24} color={colors.ivory} />
       </TouchableOpacity>
 
       {showPointsAnim && (
@@ -2685,6 +3709,177 @@ export default function CarteScreen() {
         </View>
       </View>
     </View>
+
+    {/* ── Balade modals ── */}
+    {/* ── Balade fiche ── */}
+    {selectedBalade && (
+      <Modal visible animationType="slide" transparent onRequestClose={() => setSelectedBalade(null)}>
+        <TouchableOpacity style={styles.baladeOverlay} activeOpacity={1} onPress={() => setSelectedBalade(null)} />
+        <View style={[styles.baladeSheet, { paddingBottom: insets.bottom + 16 }]}>
+          <View style={styles.baladeSheetHandle} />
+          <View style={styles.baladeSheetHeader}>
+            <View style={[styles.baladeBubble, { width: 40, height: 40, borderRadius: 20 }]}>
+              <Ionicons name="walk-outline" size={20} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.baladeSheetNom}>{selectedBalade.nom}</Text>
+              <Text style={styles.baladeSheetAuthor}>
+                Par {selectedBalade.profils?.prenom || 'un membre'}
+                {selectedBalade.distance_km ? ` · ${selectedBalade.distance_km} km` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setSelectedBalade(null)}>
+              <Ionicons name="close" size={22} color={colors.bordeaux} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.baladeRoute}>
+            <View style={styles.baladeRouteDot} />
+            <Text style={styles.baladeRouteLabel} numberOfLines={2}>
+              {selectedBalade.depart_label || 'Point de départ'}
+            </Text>
+          </View>
+          <View style={styles.baladeRouteLine} />
+          <View style={styles.baladeRoute}>
+            <Ionicons name="flag-outline" size={14} color='#2E7D6B' />
+            <Text style={styles.baladeRouteLabel} numberOfLines={2}>
+              {selectedBalade.arrivee_texte || (selectedBalade.arrivee_lat ? 'Point marqué sur la carte' : '—')}
+            </Text>
+          </View>
+          {selectedBalade.description ? (
+            <Text style={styles.baladeSheetDesc}>{selectedBalade.description}</Text>
+          ) : null}
+          {FILTRES_DEF.filter(f => (selectedBalade as any)[f.key]).length > 0 && (
+            <View style={styles.baladeFiltresBadges}>
+              {FILTRES_DEF.filter(f => (selectedBalade as any)[f.key]).map(f => (
+                <View key={f.key} style={styles.baladeFiltresBadge}>
+                  <Ionicons name={f.icon as any} size={12} color={colors.sage} />
+                  <Text style={styles.baladeFiltresBadgeText}>{f.label}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      </Modal>
+    )}
+
+    {/* ── Balade formulaire ── */}
+    {baladeFormVisible && (
+      <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setBaladeFormVisible(false)}>
+        <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.ivory }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView contentContainerStyle={styles.baladeForm} keyboardShouldPersistTaps="handled">
+            <View style={styles.baladeFormHeader}>
+              <TouchableOpacity onPress={() => { setBaladeFormVisible(false); setBaladeDepartLat(null); setBaladeDepartLng(null); }}>
+                <Ionicons name="close" size={24} color={colors.bordeaux} />
+              </TouchableOpacity>
+              <Text style={styles.baladeFormTitle}>Proposer une balade</Text>
+              <TouchableOpacity
+                style={[styles.baladeFormSubmit, (!baladeNom.trim() || (!baladeArrivee.trim() && !baladeFinalArriveeCoords) || baladeLoading) && { opacity: 0.4 }]}
+                onPress={submitBalade}
+                disabled={!baladeNom.trim() || (!baladeArrivee.trim() && !baladeFinalArriveeCoords) || baladeLoading}
+              >
+                {baladeLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.baladeFormSubmitText}>Publier</Text>}
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.baladeFormLabel}>Nom de la balade *</Text>
+            <TextInput style={styles.baladeFormInput} placeholder="Ex : Tour du Bois de Vincennes" placeholderTextColor={colors.textMuted} value={baladeNom} onChangeText={setBaladeNom} />
+
+            <Text style={styles.baladeFormLabel}>Point d'arrivée *</Text>
+            {baladeFinalArriveeCoords ? (
+              <View style={styles.baladeArriveeMapRow}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="flag" size={16} color={colors.sage} />
+                  <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux }}>Point placé sur la carte</Text>
+                </View>
+                <TouchableOpacity onPress={() => setBaladeFinalArriveeCoords(null)}>
+                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <TextInput style={styles.baladeFormInput} placeholder="Adresse ou nom du lieu d'arrivée" placeholderTextColor={colors.textMuted} value={baladeArrivee} onChangeText={setBaladeArrivee} />
+                <TouchableOpacity
+                  style={styles.baladeArriveeMapBtn}
+                  onPress={() => { setBaladeFormVisible(false); setPickingBaladeArrivee(true); }}
+                >
+                  <Ionicons name="map-outline" size={15} color={colors.bordeaux} />
+                  <Text style={styles.baladeArriveeMapBtnText}>Placer sur la carte</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <Text style={styles.baladeFormLabel}>Description (optionnel)</Text>
+            <TextInput style={[styles.baladeFormInput, { height: 90 }]} placeholder="Décris la balade, les points d'intérêt…" placeholderTextColor={colors.textMuted} value={baladeDesc} onChangeText={setBaladeDesc} multiline />
+
+            {baladeFinalArriveeCoords && baladeDepartLat !== null && baladeDepartLng !== null ? (
+              <View style={styles.baladeDistanceInfo}>
+                <Ionicons name="navigate-outline" size={14} color={colors.sage} />
+                <Text style={styles.baladeDistanceInfoText}>
+                  {haversine(baladeDepartLat, baladeDepartLng, baladeFinalArriveeCoords.lat, baladeFinalArriveeCoords.lng).toFixed(1)} km à vol d'oiseau
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.baladeFormLabel}>Distance en km (optionnel)</Text>
+                <TextInput style={styles.baladeFormInput} placeholder="Ex : 4.5" placeholderTextColor={colors.textMuted} value={baladeDistance} onChangeText={setBaladeDistance} keyboardType="decimal-pad" />
+              </>
+            )}
+
+            <Text style={styles.baladeFormLabel}>Photo (optionnel)</Text>
+            {baladePhotoUri ? (
+              <View style={{ position: 'relative', marginBottom: 4 }}>
+                <Image source={{ uri: baladePhotoUri }} style={{ width: '100%', height: 160, borderRadius: 10 }} resizeMode="cover" />
+                <TouchableOpacity
+                  style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14, padding: 4 }}
+                  onPress={() => setBaladePhotoUri(null)}
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.baladePhotoBtn}
+                onPress={async () => {
+                  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (!perm.granted) { Alert.alert('Permission refusée', 'Autorise l\'accès à ta galerie dans les Réglages.'); return; }
+                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+                  if (!result.canceled && result.assets[0]) setBaladePhotoUri(result.assets[0].uri);
+                }}
+              >
+                <Ionicons name="image-outline" size={20} color={colors.textMuted} />
+                <Text style={styles.baladePhotoBtnText}>Ajouter une photo</Text>
+              </TouchableOpacity>
+            )}
+
+            <Text style={styles.baladeFormLabel}>Caractéristiques (optionnel)</Text>
+            <View style={styles.baladeFiltresGrid}>
+              {FILTRES_DEF.map(f => {
+                const active = baladeFiltres[f.key];
+                return (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.baladeFiltreChip, active && styles.baladeFiltreChipActive]}
+                    onPress={() => setBaladeFiltres(prev => ({ ...prev, [f.key]: !prev[f.key] }))}
+                  >
+                    <Ionicons name={f.icon as any} size={14} color={active ? colors.ivory : colors.bordeaux} />
+                    <Text style={[styles.baladeFiltreChipText, active && { color: colors.ivory }]}>{f.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+    )}
+
+    {selectedExplorateur && (
+      <ExplorateurDetailModal
+        exp={selectedExplorateur}
+        onClose={() => setSelectedExplorateur(null)}
+        onLieuPress={openDiscoverLieu}
+      />
+    )}
+    </>
   );
 }
 
@@ -2793,6 +3988,19 @@ const styles = StyleSheet.create({
   },
   clusterText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: '#fff', fontWeight: '700' },
   topOverlay: { position: 'absolute', top: 0, left: 0, right: 0, gap: 8, paddingTop: 10 },
+  carteListeRow: { alignItems: 'center' },
+  carteListeToggle: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 22, padding: 3, borderWidth: 1, borderColor: colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.14, shadowRadius: 6, elevation: 5,
+  },
+  carteListeOption: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 18, paddingVertical: 7, borderRadius: 18,
+  },
+  carteListeOptionActive: { backgroundColor: colors.bordeaux },
+  carteListeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  carteListeLabelActive: { color: '#fff' },
   searchContainer: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white,
     borderRadius: 14, marginHorizontal: 12, borderWidth: 1, borderColor: colors.border,
@@ -2820,7 +4028,7 @@ const styles = StyleSheet.create({
   resultNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   resultVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   loadingBadge: {
-    position: 'absolute', top: 118, right: 16, backgroundColor: colors.ivory,
+    position: 'absolute', top: 154, right: 16, backgroundColor: colors.ivory,
     borderRadius: 20, padding: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 3,
   },
   locBtn: {
@@ -2833,6 +4041,101 @@ const styles = StyleSheet.create({
     borderRadius: 24, width: 48, height: 48, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 6, elevation: 5,
   },
+  fabMenu: {
+    position: 'absolute', bottom: 82, left: 16, gap: 10,
+  },
+  fabMenuItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  fabMenuLabel: {
+    backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+    fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#fff',
+  },
+  fabMenuIcon: {
+    width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
+  },
+  pickModeBanner: {
+    position: 'absolute', bottom: 90, left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.bordeaux, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 5,
+  },
+  pickModeBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  baladePin: { alignItems: 'center' },
+  baladeBubble: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: '#2E7D6B',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 3,
+  },
+  baladeBubbleSelected: { width: 42, height: 42, borderRadius: 21 },
+  baladeTail: { width: 0, height: 0, borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#2E7D6B' },
+  baladeOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)' },
+  baladeSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: colors.ivory, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingHorizontal: 20, paddingTop: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 12,
+  },
+  baladeSheetHandle: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 16 },
+  baladeSheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  baladeSheetNom: { fontFamily: 'DMSans_600SemiBold', fontSize: 16, color: colors.bordeaux },
+  baladeSheetAuthor: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  baladeRoute: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 4 },
+  baladeRouteDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2E7D6B', marginTop: 2 },
+  baladeRouteLabel: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  baladeRouteLine: { width: 2, height: 16, backgroundColor: colors.border, marginLeft: 4, marginVertical: 2 },
+  baladeSheetDesc: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginTop: 12, lineHeight: 20 },
+  baladeForm: { padding: 20, paddingBottom: 60 },
+  baladeFormHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 8 },
+  baladeFormTitle: { flex: 1, fontFamily: 'DMSans_600SemiBold', fontSize: 17, color: colors.bordeaux, textAlign: 'center' },
+  baladeFormSubmit: { backgroundColor: colors.bordeaux, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  baladeFormSubmitText: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: '#fff' },
+  baladeFormLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginBottom: 6, marginTop: 16 },
+  baladeFormInput: {
+    backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,
+  },
+  baladeArriveeMapRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.sage,
+    paddingHorizontal: 14, paddingVertical: 10, gap: 8,
+  },
+  baladeArriveeMapBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 8, alignSelf: 'flex-start',
+    backgroundColor: colors.ivoryPale, borderRadius: 8, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  baladeArriveeMapBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  baladeFiltresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  baladeFiltreChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.white,
+  },
+  baladeFiltreChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  baladeFiltreChipText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
+  baladeFiltresBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  baladeFiltresBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(46,125,107,0.08)', borderRadius: 12,
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  baladeFiltresBadgeText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.sage },
+  baladeDistanceInfo: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, marginBottom: 4,
+    backgroundColor: 'rgba(46,125,107,0.08)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  baladeDistanceInfoText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.sage },
+  baladePhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed',
+    borderRadius: 10, paddingVertical: 16, marginBottom: 4,
+  },
+  baladePhotoBtnText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0, top: 0, backgroundColor: colors.ivoryPale,
@@ -3023,7 +4326,7 @@ const styles = StyleSheet.create({
   // List view
   listViewContainer: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: colors.ivoryPale, paddingTop: 64,
+    backgroundColor: colors.ivoryPale,
   },
   sortBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -3043,26 +4346,34 @@ const styles = StyleSheet.create({
   listCount: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginLeft: 'auto' as any },
   listEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingBottom: 80, marginTop: 60 },
   listEmptyText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted },
-  // Accordion
-  accordionHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border,
+  // List cards
+  listCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.white,
+    marginHorizontal: 12, marginBottom: 8,
+    borderRadius: 14, overflow: 'hidden',
+    minHeight: 72,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07, shadowRadius: 4, elevation: 2,
   },
-  accordionHeaderIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  accordionHeaderLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
-  accordionHeaderBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  accordionHeaderCount: { fontFamily: 'DMSans_500Medium', fontSize: 12 },
-  listItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 20, paddingVertical: 14,
-    backgroundColor: colors.ivoryPale,
+  listCardAccent: { width: 4, alignSelf: 'stretch' },
+  listCardPhoto: {
+    width: 64, height: 64, borderRadius: 12,
+    margin: 12, marginRight: 0,
   },
-  listItemNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
-  listItemVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
-  listItemNote: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
-  listItemMeta: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
-  listSep: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  listCardBody: { flex: 1, paddingVertical: 12, paddingHorizontal: 10, gap: 2 },
+  listCardNom: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.bordeaux },
+  listCardCatRow: { flexDirection: 'row', alignItems: 'center' },
+  listCardCat: { fontFamily: 'DMSans_500Medium', fontSize: 11 },
+  listCardAddr: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  listCardMeta: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  listCardNote: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+  listCardMetaText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  listCardDistBadge: {
+    backgroundColor: colors.ivoryPale, borderRadius: 8,
+    paddingHorizontal: 7, paddingVertical: 4, marginRight: 4,
+  },
+  listCardDistText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
   // Search bar additions
   searchDivider: { width: 1, height: 20, backgroundColor: colors.border, marginHorizontal: 2 },
   listToggleBtn: { paddingHorizontal: 12, paddingVertical: 12 },
