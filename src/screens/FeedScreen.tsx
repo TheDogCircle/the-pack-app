@@ -16,7 +16,7 @@ import AuthGate from '../components/AuthGate';
 import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
 import MessagerieScreen from './MessagerieScreen';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,9 +363,11 @@ function CommentsModal({
   }
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={{ flex: 1 }}>
-        <View style={styles.commentsModal}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.commentsOverlay}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <View style={[styles.commentsSheet, { maxHeight: SCREEN_HEIGHT * 0.75, marginBottom: kbHeight }]}>
+          <View style={styles.commentsHandle} />
           <View style={styles.commentsHeader}>
             <Text style={styles.commentsTitle}>Commentaires</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -374,11 +376,12 @@ function CommentsModal({
           </View>
 
           {loadingComments ? (
-            <ActivityIndicator color={colors.terra} style={{ flex: 1 }} />
+            <ActivityIndicator color={colors.terra} style={{ paddingVertical: 30 }} />
           ) : (
             <FlatList
               data={comments}
               keyExtractor={c => c.id}
+              style={{ flexShrink: 1 }}
               contentContainerStyle={styles.commentsList}
               ListEmptyComponent={
                 <Text style={styles.commentsEmpty}>Aucun commentaire. Sois le premier !</Text>
@@ -395,7 +398,7 @@ function CommentsModal({
             />
           )}
 
-          <View style={[styles.commentInputRow, { paddingBottom: kbHeight > 0 ? 12 : Math.max(insets.bottom, 12), marginBottom: kbHeight }]}>
+          <View style={[styles.commentInputRow, { paddingBottom: kbHeight > 0 ? 12 : Math.max(insets.bottom, 12) }]}>
             <TextInput
               style={styles.commentTextInput}
               placeholder="Ajouter un commentaire…"
@@ -1149,7 +1152,9 @@ const styles = StyleSheet.create({
   },
 
   // Comments modal
-  commentsModal:  { flex: 1, backgroundColor: colors.white },
+  commentsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  commentsSheet: { backgroundColor: colors.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: 'hidden' },
+  commentsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 10, marginBottom: 2 },
   commentsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   commentsTitle:  { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
   commentsList:   { padding: 16, gap: 12 },
