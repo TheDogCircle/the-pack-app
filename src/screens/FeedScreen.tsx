@@ -432,7 +432,7 @@ function NewPostModal({
   onPosted: () => void;
   navigation: any;
 }) {
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUris, setImageUris] = useState<string[]>([]);
   const [caption, setCaption] = useState('');
   const [lieuSearch, setLieuSearch] = useState('');
   const [lieuResults, setLieuResults] = useState<LieuResult[]>([]);
@@ -440,9 +440,10 @@ function NewPostModal({
   const [selectedLieu, setSelectedLieu] = useState<LieuResult | null>(null);
   const [uploading, setUploading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const MAX_PHOTOS = 5;
 
   function reset() {
-    setImageUri(null);
+    setImageUris([]);
     setCaption('');
     setLieuSearch('');
     setLieuResults([]);
@@ -452,6 +453,8 @@ function NewPostModal({
   }
 
   function pickImage() {
+    const remaining = MAX_PHOTOS - imageUris.length;
+    if (remaining <= 0) return;
     Alert.alert('Ajouter une photo', '', [
       {
         text: 'Prendre une photo',
@@ -464,7 +467,9 @@ function NewPostModal({
           const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
           });
-          if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+          if (!result.canceled && result.assets[0]) {
+            setImageUris(prev => [...prev, result.assets[0].uri].slice(0, MAX_PHOTOS));
+          }
         },
       },
       {
@@ -476,9 +481,12 @@ function NewPostModal({
             return;
           }
           const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
+            mediaTypes: ['images'], quality: 0.8,
+            allowsMultipleSelection: true, selectionLimit: remaining,
           });
-          if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+          if (!result.canceled) {
+            setImageUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_PHOTOS));
+          }
         },
       },
       { text: 'Annuler', style: 'cancel' },
@@ -499,15 +507,19 @@ function NewPostModal({
   }
 
   async function publish() {
-    if (!imageUri) return;
+    if (!imageUris.length) return;
     setUploading(true);
     try {
-      const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-      const r2Key = `lieu-photos/community/${myUserId}/${Date.now()}.${ext}`;
-      const publicUrl = await uploadToR2(imageUri, r2Key);
+      const urls: string[] = [];
+      for (const uri of imageUris) {
+        const ext = uri.split('.').pop()?.toLowerCase() || 'jpg';
+        const r2Key = `lieu-photos/community/${myUserId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        urls.push(await uploadToR2(uri, r2Key));
+      }
       const { error: dbErr } = await supabase.from('community_posts').insert({
         user_id: myUserId,
-        image_url: publicUrl,
+        image_url: urls[0],
+        images: urls.length > 1 ? urls : null,
         caption: caption.trim() || null,
         lieu_id: selectedLieu?.id || null,
         auto_generated: false,
@@ -544,9 +556,9 @@ function NewPostModal({
             </TouchableOpacity>
             <Text style={styles.newPostTitle}>Nouveau post</Text>
             <TouchableOpacity
-              style={[styles.publishBtn, (!imageUri || uploading) && styles.publishBtnDisabled]}
+              style={[styles.publishBtn, (!imageUris.length || uploading) && styles.publishBtnDisabled]}
               onPress={publish}
-              disabled={!imageUri || uploading}
+              disabled={!imageUris.length || uploading}
             >
               {uploading ? (
                 <ActivityIndicator color="#fff" size="small" />
@@ -556,16 +568,31 @@ function NewPostModal({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
-            {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
-            ) : (
+          {imageUris.length === 0 ? (
+            <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
               <View style={styles.imagePickerEmpty}>
                 <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
-                <Text style={styles.imagePickerHint}>Appuyer pour ajouter une photo</Text>
+                <Text style={styles.imagePickerHint}>Appuyer pour ajouter des photos (5 max)</Text>
               </View>
-            )}
-          </TouchableOpacity>
+            </TouchableOpacity>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageThumbsRow}>
+              {imageUris.map((uri, idx) => (
+                <View key={idx} style={styles.imageThumb}>
+                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <TouchableOpacity style={styles.imageThumbRemove} onPress={() => setImageUris(prev => prev.filter((_, i) => i !== idx))}>
+                    <Ionicons name="close-circle" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {imageUris.length < MAX_PHOTOS && (
+                <TouchableOpacity style={[styles.imageThumb, styles.imageThumbAdd]} onPress={pickImage}>
+                  <Ionicons name="add" size={26} color={colors.bordeaux} />
+                  <Text style={styles.imagePickerHint}>{imageUris.length}/{MAX_PHOTOS}</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          )}
 
           <View style={styles.newPostSection}>
             <TextInput
@@ -688,14 +715,14 @@ export default function FeedScreen() {
     const [communityPhotoRes, communityLieuRes, photosRes] = await Promise.all([
       supabase
         .from('community_posts')
-        .select('id, type, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .select('id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
         .eq('hidden', false)
         .neq('type', 'nouveau_lieu')
         .order('created_at', { ascending: false })
         .limit(30),
       supabase
         .from('community_posts')
-        .select('id, type, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .select('id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
         .eq('hidden', false)
         .eq('type', 'nouveau_lieu')
         .order('created_at', { ascending: false })
@@ -1176,7 +1203,10 @@ const styles = StyleSheet.create({
   imagePicker:     { margin: 16, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, height: (SCREEN_WIDTH - 32) * 0.75 },
   imagePickerEmpty:{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ivoryPale, gap: 8 },
   imagePickerHint: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
-  imagePreview:    { width: '100%', height: '100%' },
+  imageThumbsRow:  { paddingHorizontal: 16, gap: 10 },
+  imageThumb:      { width: 90, height: 90, borderRadius: 12, overflow: 'hidden', backgroundColor: colors.ivoryPale },
+  imageThumbAdd:   { alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed', backgroundColor: 'transparent' },
+  imageThumbRemove:{ position: 'absolute', top: 3, right: 3, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 10 },
   newPostSection:  { paddingHorizontal: 16, paddingTop: 12 },
   captionInput:    { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, padding: 12, backgroundColor: colors.ivoryPale, borderRadius: 10, minHeight: 60 },
   lieuSearchRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: colors.ivoryPale, borderRadius: 10 },
