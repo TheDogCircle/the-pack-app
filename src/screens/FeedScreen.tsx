@@ -5,16 +5,15 @@ import {
   Modal, Keyboard, Platform, Dimensions, ScrollView, KeyboardAvoidingView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from 'base64-arraybuffer';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadToR2 } from '../lib/supabase';
+import { mapNavigation } from '../lib/mapNavigation';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
-import { mapNavigation } from '../lib/mapNavigation';
 import MessagerieScreen from './MessagerieScreen';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -24,7 +23,9 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 type CommunityPost = {
   id: string;
   user_id: string;
-  image_url: string;
+  type?: string;
+  image_url: string | null;
+  images?: string[];
   caption: string | null;
   lieu_id: string | null;
   auto_generated: boolean;
@@ -33,6 +34,9 @@ type CommunityPost = {
   lieux: { id: string; nom: string; cat: string; ville: string } | null;
   community_post_likes: { user_id: string }[];
   community_post_comments: { id: string }[];
+  fromMap?: boolean;
+  nom_chien?: string | null;
+  realPhotoId?: string | null;
 };
 
 type Comment = {
@@ -96,6 +100,9 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostC
   const likeCount = post.community_post_likes.length;
   const commentCount = post.community_post_comments.length;
   const author = post.profils?.prenom || 'Membre';
+  const [imgIndex, setImgIndex] = useState(0);
+  const images = post.images && post.images.length > 0 ? post.images : (post.image_url ? [post.image_url] : []);
+  const isCarousel = images.length > 1;
 
   return (
     <View style={styles.postCard}>
@@ -105,9 +112,45 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostC
           <Text style={styles.postAuthor}>{author}</Text>
           <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
         </View>
+        {isCarousel && (
+          <View style={styles.carouselCounter}>
+            <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
+          </View>
+        )}
       </View>
 
-      <Image source={{ uri: post.image_url }} style={styles.postImage} resizeMode="cover" />
+      <View>
+        {isCarousel ? (
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={e => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+              setImgIndex(idx);
+            }}
+          >
+            {images.map((uri, i) => (
+              <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
+            ))}
+          </ScrollView>
+        ) : (
+          <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
+        )}
+        {post.fromMap && (
+          <View style={styles.fromMapBadge}>
+            <Ionicons name="map-outline" size={11} color="#fff" />
+            <Text style={styles.fromMapBadgeText}>Carte</Text>
+          </View>
+        )}
+      </View>
+      {isCarousel && (
+        <View style={styles.carouselDots}>
+          {images.map((_, i) => (
+            <View key={i} style={[styles.carouselDot, i === imgIndex && styles.carouselDotActive]} />
+          ))}
+        </View>
+      )}
 
       <View style={styles.postActions}>
         <TouchableOpacity style={styles.postActionBtn} onPress={() => onLike(post.id)}>
@@ -122,7 +165,6 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostC
             </Text>
           )}
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.postActionBtn} onPress={() => onCommentPress(post)}>
           <Ionicons name="chatbubble-outline" size={20} color={colors.bordeaux} />
           {commentCount > 0 && <Text style={styles.postActionCount}>{commentCount}</Text>}
@@ -143,7 +185,95 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostC
           <Text style={styles.postCaptionBold}>{author} </Text>
           {post.caption}
         </Text>
+      ) : post.fromMap && post.nom_chien ? (
+        <Text style={styles.postCaption}>
+          <Text style={styles.postCaptionBold}>{author} </Text>
+          avec {post.nom_chien}
+        </Text>
       ) : null}
+    </View>
+  );
+}
+
+// ─── NouveauLieuCard ──────────────────────────────────────────────────────────
+
+function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPress: (id: string) => void }) {
+  const author = post.profils?.prenom || 'Un membre';
+  const lieu = post.lieux;
+
+  return (
+    <View style={[styles.postCard, styles.lieuCard]}>
+      <View style={styles.postHeader}>
+        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.postAuthor}>{author}</Text>
+          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        style={styles.nouveauLieuBody}
+        onPress={() => lieu && onLieuPress(lieu.id)}
+        activeOpacity={lieu ? 0.8 : 1}
+      >
+        <View style={styles.nouveauLieuIconWrap}>
+          <Ionicons name="location" size={26} color={colors.terra} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.nouveauLieuLabel}>a ajouté un lieu dog-friendly</Text>
+          {lieu ? (
+            <>
+              <Text style={styles.nouveauLieuNom}>{lieu.nom}</Text>
+              <Text style={styles.nouveauLieuMeta}>{lieu.cat} · {lieu.ville}</Text>
+            </>
+          ) : null}
+        </View>
+        {lieu ? <Ionicons name="chevron-forward" size={16} color={colors.textMuted} /> : null}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── BaladeCard ───────────────────────────────────────────────────────────────
+
+function BaladeCard({ post, onBaladePress }: {
+  post: CommunityPost;
+  onBaladePress: (post: CommunityPost) => void;
+}) {
+  const author = post.profils?.prenom || 'Un membre';
+  const parts = (post.caption || '').split(' · ');
+  const nom = parts[0] || 'Balade';
+  const dist = parts[1] || null;
+
+  return (
+    <View style={[styles.postCard, styles.baladeCard]}>
+      <View style={styles.postHeader}>
+        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.postAuthor}>{author}</Text>
+          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+        </View>
+      </View>
+
+      {post.image_url ? (
+        <Image source={{ uri: post.image_url }} style={styles.postImage} resizeMode="cover" />
+      ) : null}
+
+      <TouchableOpacity
+        style={styles.baladeCardBody}
+        onPress={() => onBaladePress(post)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.baladeCardIconWrap}>
+          <Ionicons name="walk-outline" size={26} color={colors.sage} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.nouveauLieuLabel}>a partagé une balade</Text>
+          <Text style={styles.baladeCardNom}>{nom}</Text>
+          {dist ? <Text style={styles.baladeCardMeta}>{dist}</Text> : null}
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -162,20 +292,44 @@ function CommentsModal({
   const [loadingComments, setLoadingComments] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (visible && post) fetchComments(post.id);
     else setComments([]);
   }, [visible, post?.id]);
 
+  // Modal en presentationStyle="pageSheet" : KeyboardAvoidingView calcule mal
+  // sa hauteur disponible dans ce contexte (le sheet ne couvre pas tout
+  // l'écran), d'où le clavier qui recouvrait le champ. On suit le clavier
+  // manuellement à la place, fiable quel que soit le presentationStyle.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, e => setKbHeight(e.endCoordinates.height));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
+
   async function fetchComments(postId: string) {
     setLoadingComments(true);
-    const { data } = await supabase
-      .from('community_post_comments')
-      .select('id, content, created_at, user_id')
-      .eq('post_id', postId)
-      .order('created_at', { ascending: true });
-
+    let data: any[] | null = null;
+    if (post?.fromMap && post.realPhotoId) {
+      const { data: d } = await supabase
+        .from('photo_comments')
+        .select('id, content, created_at, user_id')
+        .eq('photo_id', post.realPhotoId)
+        .order('created_at', { ascending: true });
+      data = d;
+    } else {
+      const { data: d } = await supabase
+        .from('community_post_comments')
+        .select('id, content, created_at, user_id')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
+      data = d;
+    }
     const userIds = [...new Set((data || []).map((c: any) => c.user_id))];
     let profileMap: Record<string, any> = {};
     if (userIds.length > 0) {
@@ -190,9 +344,18 @@ function CommentsModal({
   async function sendComment() {
     if (!text.trim() || !post || !myUserId) return;
     setSending(true);
-    const { error } = await supabase.from('community_post_comments').insert({
-      post_id: post.id, user_id: myUserId, content: text.trim(),
-    });
+    let error: any = null;
+    if (post.fromMap && post.realPhotoId) {
+      const { error: e } = await supabase.from('photo_comments').insert({
+        photo_id: post.realPhotoId, user_id: myUserId, content: text.trim(),
+      });
+      error = e;
+    } else {
+      const { error: e } = await supabase.from('community_post_comments').insert({
+        post_id: post.id, user_id: myUserId, content: text.trim(),
+      });
+      error = e;
+    }
     if (error) { Alert.alert('Erreur', error.message); setSending(false); return; }
     setText('');
     await fetchComments(post.id);
@@ -201,7 +364,7 @@ function CommentsModal({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={{ flex: 1 }}>
         <View style={styles.commentsModal}>
           <View style={styles.commentsHeader}>
             <Text style={styles.commentsTitle}>Commentaires</Text>
@@ -232,7 +395,7 @@ function CommentsModal({
             />
           )}
 
-          <View style={styles.commentInputRow}>
+          <View style={[styles.commentInputRow, { paddingBottom: kbHeight > 0 ? 12 : Math.max(insets.bottom, 12), marginBottom: kbHeight }]}>
             <TextInput
               style={styles.commentTextInput}
               placeholder="Ajouter un commentaire…"
@@ -250,7 +413,7 @@ function CommentsModal({
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -258,17 +421,19 @@ function CommentsModal({
 // ─── NewPostModal ─────────────────────────────────────────────────────────────
 
 function NewPostModal({
-  visible, onClose, myUserId, onPosted,
+  visible, onClose, myUserId, onPosted, navigation,
 }: {
   visible: boolean;
   onClose: () => void;
   myUserId: string;
   onPosted: () => void;
+  navigation: any;
 }) {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
   const [lieuSearch, setLieuSearch] = useState('');
   const [lieuResults, setLieuResults] = useState<LieuResult[]>([]);
+  const [lieuSearched, setLieuSearched] = useState(false);
   const [selectedLieu, setSelectedLieu] = useState<LieuResult | null>(null);
   const [uploading, setUploading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -278,30 +443,55 @@ function NewPostModal({
     setCaption('');
     setLieuSearch('');
     setLieuResults([]);
+    setLieuSearched(false);
     setSelectedLieu(null);
     setUploading(false);
   }
 
-  async function pickImage() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission refusée', 'Autorise l\'accès à ta galerie dans les Réglages.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
-    });
-    if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+  function pickImage() {
+    Alert.alert('Ajouter une photo', '', [
+      {
+        text: 'Prendre une photo',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Permission refusée', 'Autorise l\'accès à la caméra dans les Réglages.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
+          });
+          if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+        },
+      },
+      {
+        text: 'Choisir depuis la galerie',
+        onPress: async () => {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Permission refusée', 'Autorise l\'accès à ta galerie dans les Réglages.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'], quality: 0.8, allowsEditing: true, aspect: [4, 3],
+          });
+          if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+        },
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
   }
 
   function onLieuSearchChange(q: string) {
     setLieuSearch(q);
+    setLieuSearched(false);
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (q.length < 2) { setLieuResults([]); return; }
     searchTimer.current = setTimeout(async () => {
       const { data } = await supabase
         .from('lieux').select('id, nom, cat, ville').eq('actif', true).ilike('nom', `%${q}%`).limit(5);
       setLieuResults(data || []);
+      setLieuSearched(true);
     }, 300);
   }
 
@@ -310,13 +500,8 @@ function NewPostModal({
     setUploading(true);
     try {
       const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-      const path = `community/${myUserId}/${Date.now()}.${ext}`;
-      const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
-      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
-      const { error: upErr } = await supabase.storage
-        .from('lieu-photos').upload(path, decode(base64), { contentType });
-      if (upErr) throw new Error(upErr.message);
-      const { data: { publicUrl } } = supabase.storage.from('lieu-photos').getPublicUrl(path);
+      const r2Key = `lieu-photos/community/${myUserId}/${Date.now()}.${ext}`;
+      const publicUrl = await uploadToR2(imageUri, r2Key);
       const { error: dbErr } = await supabase.from('community_posts').insert({
         user_id: myUserId,
         image_url: publicUrl,
@@ -325,6 +510,9 @@ function NewPostModal({
         auto_generated: false,
       });
       if (dbErr) throw new Error(dbErr.message);
+      supabase.from('profils').select('points').eq('id', myUserId).single().then(({ data }) => {
+        if (data) supabase.from('profils').update({ points: (data.points || 0) + 2 }).eq('id', myUserId);
+      });
       reset();
       onClose();
       onPosted();
@@ -413,7 +601,7 @@ function NewPostModal({
                 />
               )}
             </View>
-            {lieuResults.length > 0 && !selectedLieu && (
+            {!selectedLieu && lieuResults.length > 0 && (
               <View style={styles.lieuResultsList}>
                 {lieuResults.map(l => (
                   <TouchableOpacity
@@ -423,6 +611,7 @@ function NewPostModal({
                       setSelectedLieu(l);
                       setLieuSearch('');
                       setLieuResults([]);
+                      setLieuSearched(false);
                       Keyboard.dismiss();
                     }}
                   >
@@ -431,6 +620,23 @@ function NewPostModal({
                   </TouchableOpacity>
                 ))}
               </View>
+            )}
+            {!selectedLieu && lieuSearched && lieuResults.length === 0 && lieuSearch.length >= 2 && (
+              <TouchableOpacity
+                style={styles.lieuSuggestRow}
+                onPress={() => {
+                  mapNavigation.setPendingPropose(lieuSearch);
+                  reset();
+                  onClose();
+                  navigation.navigate('Carte');
+                }}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={colors.terra} />
+                <Text style={styles.lieuSuggestText}>
+                  « {lieuSearch} » n'est pas encore sur la carte —{' '}
+                  <Text style={{ fontFamily: 'DMSans_600SemiBold' }}>Suggérer ce lieu</Text>
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
         </ScrollView>
@@ -475,35 +681,120 @@ export default function FeedScreen() {
 
   async function loadFeed() {
     setFeedLoading(true);
-    const { data, error } = await supabase
-      .from('community_posts')
-      .select('id, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
-      .eq('hidden', false)
-      .order('created_at', { ascending: false })
-      .limit(50);
 
-    if (error || !data) { setFeedLoading(false); return; }
+    const [communityPhotoRes, communityLieuRes, photosRes] = await Promise.all([
+      supabase
+        .from('community_posts')
+        .select('id, type, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .eq('hidden', false)
+        .neq('type', 'nouveau_lieu')
+        .order('created_at', { ascending: false })
+        .limit(30),
+      supabase
+        .from('community_posts')
+        .select('id, type, image_url, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .eq('hidden', false)
+        .eq('type', 'nouveau_lieu')
+        .order('created_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('photos')
+        .select('id, url, created_at, lieu_id, user_id, nom_chien, group_id')
+        .eq('validee', true)
+        .not('lieu_id', 'is', null)
+        .not('url', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(30),
+    ]);
 
-    const userIds = [...new Set(data.map((p: any) => p.user_id))] as string[];
-    const lieuIds = [...new Set(data.filter((p: any) => p.lieu_id).map((p: any) => p.lieu_id))] as string[];
+    if (communityPhotoRes.error && communityLieuRes.error && photosRes.error) { setFeedLoading(false); return; }
+
+    const communityData: any[] = [...(communityPhotoRes.data || []), ...(communityLieuRes.data || [])];
+    const photosData: any[] = (photosRes.data || []).filter((p: any) =>
+      !communityData.some((cp: any) => cp.image_url === p.url)
+    );
+
+    const allUserIds = [...new Set([
+      ...communityData.map((p: any) => p.user_id),
+      ...photosData.map((p: any) => p.user_id),
+    ])] as string[];
+    const allLieuIds = [...new Set([
+      ...communityData.filter((p: any) => p.lieu_id).map((p: any) => p.lieu_id),
+      ...photosData.map((p: any) => p.lieu_id),
+    ])] as string[];
 
     const [profilesRes, lieuxRes] = await Promise.all([
-      userIds.length > 0
-        ? supabase.from('profils').select('id, prenom, avatar_url').in('id', userIds)
+      allUserIds.length > 0
+        ? supabase.from('profils').select('id, prenom, avatar_url').in('id', allUserIds)
         : Promise.resolve({ data: [] as any[] }),
-      lieuIds.length > 0
-        ? supabase.from('lieux').select('id, nom, cat, ville').in('id', lieuIds)
+      allLieuIds.length > 0
+        ? supabase.from('lieux').select('id, nom, cat, ville').in('id', allLieuIds)
         : Promise.resolve({ data: [] as any[] }),
     ]);
 
     const profileMap = Object.fromEntries((profilesRes.data || []).map((p: any) => [p.id, p]));
     const lieuMap = Object.fromEntries((lieuxRes.data || []).map((l: any) => [l.id, l]));
 
-    setPosts(data.map((p: any) => ({
+    const communityPosts: CommunityPost[] = communityData.map((p: any) => ({
       ...p,
       profils: profileMap[p.user_id] || null,
       lieux: p.lieu_id ? (lieuMap[p.lieu_id] || null) : null,
-    })));
+    }));
+
+    const realPhotoIds = photosData.map((p: any) => p.id);
+    let photoLikesMap: Record<string, { user_id: string }[]> = {};
+    let photoCommentsCountMap: Record<string, number> = {};
+    if (realPhotoIds.length > 0) {
+      try {
+        const [{ data: allPhotoLikes }, { data: allPhotoComments }] = await Promise.all([
+          supabase.from('photo_likes').select('photo_id, user_id').in('photo_id', realPhotoIds),
+          supabase.from('photo_comments').select('photo_id').in('photo_id', realPhotoIds),
+        ]);
+        (allPhotoLikes || []).forEach((l: any) => {
+          if (!photoLikesMap[l.photo_id]) photoLikesMap[l.photo_id] = [];
+          photoLikesMap[l.photo_id].push({ user_id: l.user_id });
+        });
+        (allPhotoComments || []).forEach((c: any) => {
+          photoCommentsCountMap[c.photo_id] = (photoCommentsCountMap[c.photo_id] || 0) + 1;
+        });
+      } catch (_) {}
+    }
+
+    // Grouper les photos par group_id (upload multiple = carrousel)
+    const photoGroups = new Map<string, any[]>();
+    photosData.forEach((p: any) => {
+      const key = p.group_id || `solo-${p.id}`;
+      if (!photoGroups.has(key)) photoGroups.set(key, []);
+      photoGroups.get(key)!.push(p);
+    });
+
+    const mapPosts: CommunityPost[] = Array.from(photoGroups.values()).map(group => {
+      const first = group[0];
+      const allUrls = group.map((p: any) => p.url);
+      return {
+        id: `map-${first.id}`,
+        user_id: first.user_id,
+        image_url: first.url,
+        images: allUrls,
+        caption: null,
+        lieu_id: first.lieu_id,
+        auto_generated: false,
+        created_at: first.created_at,
+        profils: profileMap[first.user_id] || null,
+        lieux: lieuMap[first.lieu_id] || null,
+        community_post_likes: photoLikesMap[first.id] || [],
+        community_post_comments: Array.from({ length: photoCommentsCountMap[first.id] || 0 }, (_, i) => ({ id: String(i) })),
+        fromMap: true,
+        nom_chien: first.nom_chien || null,
+        realPhotoId: first.id,
+      };
+    });
+
+    const merged = [...communityPosts, ...mapPosts].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    setPosts(merged);
     setFeedLoading(false);
   }
 
@@ -522,17 +813,43 @@ export default function FeedScreen() {
         : [...p.community_post_likes, { user_id: myUserId! }];
       return { ...p, community_post_likes: newLikes };
     }));
-    if (liked) {
-      supabase.from('community_post_likes').delete()
-        .eq('post_id', postId).eq('user_id', myUserId).then(() => {});
+    if (post.fromMap && post.realPhotoId) {
+      const photoId = post.realPhotoId;
+      if (liked) {
+        supabase.from('photo_likes').delete()
+          .eq('photo_id', photoId).eq('user_id', myUserId).then(() => {});
+      } else {
+        supabase.from('photo_likes').insert({ photo_id: photoId, user_id: myUserId }).then(() => {});
+      }
     } else {
-      supabase.from('community_post_likes').insert({ post_id: postId, user_id: myUserId }).then(() => {});
+      if (liked) {
+        supabase.from('community_post_likes').delete()
+          .eq('post_id', postId).eq('user_id', myUserId).then(() => {});
+      } else {
+        supabase.from('community_post_likes').insert({ post_id: postId, user_id: myUserId }).then(() => {});
+      }
     }
   }
 
   function openLieu(lieuId: string) {
     mapNavigation.setPendingLieu(lieuId);
     navigation.navigate('Carte' as any);
+  }
+
+  async function openBalade(post: CommunityPost) {
+    const nom = (post.caption || '').split(' · ')[0].trim();
+    if (!nom || !post.user_id) return;
+    const { data } = await supabase
+      .from('balades')
+      .select('id')
+      .eq('user_id', post.user_id)
+      .ilike('nom', nom)
+      .limit(1);
+    const baladeId = Array.isArray(data) ? data[0]?.id : null;
+    if (baladeId) {
+      mapNavigation.setPendingBalade(baladeId);
+      navigation.navigate('Carte' as any);
+    }
   }
 
   // ── Membres ──
@@ -649,15 +966,24 @@ export default function FeedScreen() {
                   <Text style={styles.emptySubText}>Sois le premier à partager un moment avec la meute !</Text>
                 </View>
               }
-              renderItem={({ item }) => (
-                <PostCard
-                  post={item}
-                  myUserId={myUserId || ''}
-                  onLike={toggleLike}
-                  onCommentPress={setCommentPost}
-                  onLieuPress={openLieu}
-                />
-              )}
+              renderItem={({ item }) =>
+                item.type === 'nouveau_lieu' ? (
+                  <NouveauLieuCard post={item} onLieuPress={openLieu} />
+                ) : item.type === 'balade' ? (
+                  <BaladeCard
+                    post={item}
+                    onBaladePress={openBalade}
+                  />
+                ) : (
+                  <PostCard
+                    post={item}
+                    myUserId={myUserId || ''}
+                    onLike={toggleLike}
+                    onCommentPress={setCommentPost}
+                    onLieuPress={openLieu}
+                  />
+                )
+              }
             />
           )}
 
@@ -758,6 +1084,7 @@ export default function FeedScreen() {
             onClose={() => setNewPostVisible(false)}
             myUserId={myUserId}
             onPosted={() => { setTab('feed'); loadFeed(); }}
+            navigation={navigation}
           />
           <CommentsModal
             post={commentPost}
@@ -795,6 +1122,18 @@ const styles = StyleSheet.create({
   postAuthor:  { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   postTime:    { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   postImage:   { width: SCREEN_WIDTH, height: SCREEN_WIDTH * 0.75 },
+  fromMapBadge: {
+    position: 'absolute', top: 10, right: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.52)', borderRadius: 12,
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  fromMapBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff' },
+  carouselDots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, paddingVertical: 8 },
+  carouselDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.border },
+  carouselDotActive: { width: 18, backgroundColor: colors.bordeaux },
+  carouselCounter: { backgroundColor: 'rgba(61,26,26,0.08)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  carouselCounterText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted },
   postActions: { flexDirection: 'row', gap: 16, paddingHorizontal: 14, paddingTop: 10 },
   postActionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
   postActionCount:{ fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
@@ -843,6 +1182,43 @@ const styles = StyleSheet.create({
   lieuResultRow:   { padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   lieuResultName:  { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   lieuResultVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  lieuSuggestRow:  { marginTop: 6, flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, backgroundColor: colors.terra + '10', borderRadius: 10, borderWidth: 1, borderColor: colors.terra + '30' },
+  lieuSuggestText: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.bordeaux, lineHeight: 17 },
+
+  // Balade card
+  baladeCard: { borderLeftWidth: 3, borderLeftColor: colors.sage },
+  baladeCardBody: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 14, marginBottom: 14, padding: 14,
+    backgroundColor: 'rgba(46,125,107,0.06)', borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(46,125,107,0.18)',
+  },
+  baladeCardIconWrap: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(46,125,107,0.25)',
+  },
+  baladeCardNom:  { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
+  baladeCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.sage },
+  baladeTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  baladeTypeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.sage },
+
+  // Nouveau lieu card
+  lieuCard: { borderLeftWidth: 3, borderLeftColor: colors.terra },
+  nouveauLieuBody: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 14, marginBottom: 14, padding: 14,
+    backgroundColor: colors.ivoryPale, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  nouveauLieuIconWrap: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.border,
+  },
+  nouveauLieuLabel: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  nouveauLieuNom:   { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
+  nouveauLieuMeta:  { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
 
   // Membres
   list:       { paddingHorizontal: 16, gap: 10, paddingBottom: 20 },
