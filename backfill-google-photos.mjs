@@ -70,7 +70,8 @@ async function main() {
     try {
       const url = await fetchGooglePhoto(lieu);
       if (!url) { console.log(`  ∅ pas de photo trouvée : ${lieu.nom} (${lieu.ville})`); none++; continue; }
-      const check = await fetch(url, { method: 'HEAD' });
+      // L'endpoint media ne supporte pas HEAD (404 systematique) : GET suit la redirection 302 vers l'image reelle.
+      const check = await fetch(url);
       if (!check.ok) { console.log(`  ✗ URL inaccessible (${check.status}) : ${lieu.nom}`); failed++; continue; }
       await sb.from('lieux').update({ google_photo_url: url }).eq('id', lieu.id);
       console.log(`  ✔ ${lieu.nom} (${lieu.ville})`);

@@ -134,6 +134,7 @@ type Lieu = {
   note_moyenne?: number | null; nb_avis?: number | null;
   chiens_salle?: boolean | null; chiens_terrasse?: boolean | null; espace_dedie?: boolean | null;
   eau?: boolean | null; gamelles?: boolean | null; chiens_laches?: boolean | null; chiens_laisse?: boolean | null;
+  petits_chiens?: boolean | null; moyens_chiens?: boolean | null; grands_chiens?: boolean | null;
   google_photo_url?: string | null; created_at?: string | null; mise_en_avant?: boolean | null;
 };
 type LieuFull = Lieu & {
@@ -204,15 +205,6 @@ type DiscoverPhoto = {
   id: string; url: string; lieuId: string;
   lieu: { nom: string; cat: string; ville: string };
   nomChien: string | null; authorDisplay: string | null;
-};
-
-type Explorateur = {
-  id: string; nom: string; handle: string | null; bio: string | null;
-  photo_profil_url: string | null; photo_banniere_url: string | null;
-  instagram_url: string | null; tiktok_url: string | null;
-  youtube_url: string | null; site_web: string | null;
-  nb_abonnes: number | null;
-  lieux?: { lieu_id: string; nom: string; cat: string; ville: string; commentaire: string | null; photoUrl: string | null }[];
 };
 
 function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
@@ -312,124 +304,6 @@ function PhotoDiscoverCard({
   );
 }
 
-function ExplorateurDiscoverCard({ exp, onPress }: { exp: Explorateur; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={dstyles.expCard} onPress={onPress} activeOpacity={0.88}>
-      {exp.photo_banniere_url ? (
-        <Image source={{ uri: exp.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />
-      )}
-      <View style={dstyles.expOverlay}>
-        <View style={dstyles.expStarBadge}>
-          <Ionicons name="star" size={10} color={colors.terra} />
-          <Text style={dstyles.expStarLabel}>Explorateur</Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {exp.photo_profil_url ? (
-            <Image source={{ uri: exp.photo_profil_url }} style={dstyles.expAvatar} />
-          ) : (
-            <View style={[dstyles.expAvatar, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
-              <Ionicons name="person" size={18} color={colors.ivory} />
-            </View>
-          )}
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={dstyles.expNom}>{exp.nom}</Text>
-            {exp.handle ? <Text style={dstyles.expHandle}>{exp.handle}</Text> : null}
-          </View>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function ExplorateurDetailModal({
-  exp, onClose, onLieuPress,
-}: { exp: Explorateur; onClose: () => void; onLieuPress: (id: string) => void }) {
-  return (
-    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={dstyles.expModalContainer}>
-        <View style={dstyles.expModalBanner}>
-          {exp.photo_banniere_url ? (
-            <Image source={{ uri: exp.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />
-          )}
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(61,26,26,0.35)' }]} />
-          <TouchableOpacity style={dstyles.expModalCloseBtn} onPress={onClose}>
-            <Ionicons name="close" size={20} color={colors.ivory} />
-          </TouchableOpacity>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-          <View style={dstyles.expModalHeader}>
-            {exp.photo_profil_url ? (
-              <Image source={{ uri: exp.photo_profil_url }} style={dstyles.expModalAvatar} />
-            ) : (
-              <View style={[dstyles.expModalAvatar, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
-                <Ionicons name="person" size={26} color={colors.ivory} />
-              </View>
-            )}
-            <View style={{ flex: 1, marginLeft: 14 }}>
-              <Text style={dstyles.expModalNom}>{exp.nom}</Text>
-              {exp.handle ? <Text style={dstyles.expModalHandle}>{exp.handle}</Text> : null}
-              {exp.nb_abonnes ? <Text style={dstyles.expModalAbonnes}>{exp.nb_abonnes.toLocaleString('fr-FR')} abonnés</Text> : null}
-            </View>
-          </View>
-          {exp.bio ? <Text style={dstyles.expModalBio}>{exp.bio}</Text> : null}
-          <View style={dstyles.expModalLinks}>
-            {exp.instagram_url ? (
-              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.instagram_url!)}>
-                <Ionicons name="logo-instagram" size={15} color={colors.ivory} />
-                <Text style={dstyles.expLinkLabel}>Instagram</Text>
-              </TouchableOpacity>
-            ) : null}
-            {exp.tiktok_url ? (
-              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.tiktok_url!)}>
-                <Ionicons name="musical-notes-outline" size={15} color={colors.ivory} />
-                <Text style={dstyles.expLinkLabel}>TikTok</Text>
-              </TouchableOpacity>
-            ) : null}
-            {exp.youtube_url ? (
-              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.youtube_url!)}>
-                <Ionicons name="logo-youtube" size={15} color={colors.ivory} />
-                <Text style={dstyles.expLinkLabel}>YouTube</Text>
-              </TouchableOpacity>
-            ) : null}
-            {exp.site_web ? (
-              <TouchableOpacity style={dstyles.expLink} onPress={() => Linking.openURL(exp.site_web!)}>
-                <Ionicons name="globe-outline" size={15} color={colors.ivory} />
-                <Text style={dstyles.expLinkLabel}>Site</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          {exp.lieux && exp.lieux.length > 0 && (
-            <View style={dstyles.expModalSection}>
-              <Text style={dstyles.expModalSectionTitle}>Ses coups de cœur</Text>
-              {exp.lieux.map(l => (
-                <TouchableOpacity key={l.lieu_id} style={dstyles.expLieuRow} onPress={() => { onClose(); onLieuPress(l.lieu_id); }}>
-                  {l.photoUrl ? (
-                    <Image source={{ uri: l.photoUrl }} style={dstyles.expLieuThumb} resizeMode="cover" />
-                  ) : (
-                    <View style={[dstyles.expLieuThumb, { backgroundColor: (CAT_CONFIG[l.cat]?.color || colors.textMuted) + '18', alignItems: 'center', justifyContent: 'center' }]}>
-                      <Ionicons name="location-outline" size={16} color={colors.textMuted} />
-                    </View>
-                  )}
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={dstyles.expLieuNom}>{l.nom}</Text>
-                    <Text style={dstyles.expLieuVille}>{l.ville}</Text>
-                    {l.commentaire ? <Text style={dstyles.expLieuComment} numberOfLines={2}>"{l.commentaire}"</Text> : null}
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-}
-
 const dstyles = StyleSheet.create({
   section: { marginTop: 22, paddingLeft: 16 },
   sectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 12 },
@@ -448,7 +322,7 @@ const dstyles = StyleSheet.create({
   cardVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   cardMeta: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
 
-  featured: { width: SCREEN_W - 32, marginLeft: 16, height: 190, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.border },
+  featured: { width: SCREEN_W - 32, height: 190, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.border },
   featuredGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 14, backgroundColor: 'rgba(61,26,26,0.62)', gap: 4 },
   featuredBadge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4 },
   featuredBadgeLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -466,49 +340,6 @@ const dstyles = StyleSheet.create({
   photoCardLike: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(61,26,26,0.45)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
   photoCardLikeCount: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
 
-  expCard: {
-    width: SCREEN_W * 0.7, height: 158, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.bordeaux,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,
-  },
-  expOverlay: { flex: 1, justifyContent: 'space-between', padding: 14, backgroundColor: 'rgba(61,26,26,0.55)' },
-  expStarBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
-    backgroundColor: 'rgba(245,239,224,0.15)', borderWidth: 1, borderColor: 'rgba(245,239,224,0.25)',
-    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20,
-  },
-  expStarLabel: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory, letterSpacing: 0.5 },
-  expAvatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.terraPale },
-  expNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 14, color: colors.ivory },
-  expHandle: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.65)', marginTop: 1 },
-
-  expModalContainer: { flex: 1, backgroundColor: colors.ivoryPale },
-  expModalBanner: { width: '100%', height: 220, backgroundColor: colors.bordeaux },
-  expModalCloseBtn: {
-    position: 'absolute', top: 50, right: 16, width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(61,26,26,0.5)', alignItems: 'center', justifyContent: 'center',
-  },
-  expModalHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
-  expModalAvatar: {
-    width: 64, height: 64, borderRadius: 32, borderWidth: 3, borderColor: colors.ivory, marginTop: -32,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
-  },
-  expModalNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
-  expModalHandle: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  expModalAbonnes: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginTop: 3 },
-  expModalBio: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 21, paddingHorizontal: 20, marginBottom: 16 },
-  expModalLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20, marginBottom: 24 },
-  expLink: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.bordeaux, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
-  expLinkLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
-  expModalSection: { paddingHorizontal: 20 },
-  expModalSectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 14 },
-  expLieuRow: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 10,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
-  },
-  expLieuThumb: { width: 52, height: 52, borderRadius: 10 },
-  expLieuNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginBottom: 2 },
-  expLieuVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
-  expLieuComment: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terra, marginTop: 3, fontStyle: 'italic' },
 });
 
 async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string>> {
@@ -636,15 +467,12 @@ export default function CarteScreen() {
   const [recommendedLieux, setRecommendedLieux] = useState<DiscoverLieu[]>([]);
   const [friendPickLieux, setFriendPickLieux] = useState<DiscoverLieu[]>([]);
   const [nearbyDiscoverLieux, setNearbyDiscoverLieux] = useState<DiscoverLieu[]>([]);
-  const [adressesDuMoment, setAdressesDuMoment] = useState<DiscoverLieu[]>([]);
   const [recentDiscoverLieux, setRecentDiscoverLieux] = useState<DiscoverLieu[]>([]);
   const [topDiscoverLieux, setTopDiscoverLieux] = useState<DiscoverLieu[]>([]);
   const [featuredDiscoverLieu, setFeaturedDiscoverLieu] = useState<DiscoverLieu | null>(null);
   const [discoverPhotos, setDiscoverPhotos] = useState<DiscoverPhoto[]>([]);
   const [discoverPhotoLikes, setDiscoverPhotoLikes] = useState<Record<string, number>>({});
   const [discoverPhotoLikedByMe, setDiscoverPhotoLikedByMe] = useState<Set<string>>(new Set());
-  const [explorateurs, setExplorateurs] = useState<Explorateur[]>([]);
-  const [selectedExplorateur, setSelectedExplorateur] = useState<Explorateur | null>(null);
   const [listPhotoMap, setListPhotoMap] = useState<Record<string, string>>({});
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
@@ -835,7 +663,7 @@ export default function CarteScreen() {
     if (lieux.length === 0) setLoading(true);
     try {
       let query = supabase
-        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,google_photo_url,created_at,mise_en_avant').eq('actif', true)
+        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,google_photo_url,created_at,mise_en_avant').eq('actif', true)
         .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
         .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
         .limit(500);
@@ -860,10 +688,6 @@ export default function CarteScreen() {
     setDiscoverLoading(true);
     const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const qMisEnAvant = supabase.from('lieux')
-      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
-      .eq('actif', true).eq('mise_en_avant', true).order('created_at', { ascending: false }).limit(10);
-
     const qTop = supabase.from('lieux')
       .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
       .eq('actif', true).not('note_moyenne', 'is', null).order('note_moyenne', { ascending: false }).limit(20);
@@ -883,8 +707,8 @@ export default function CarteScreen() {
     qNearby = (qNearby as any).limit(60);
 
     // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
-    const [rMisEnAvant, rTop, rRecent, rNearby, signals] = await Promise.all([
-      qMisEnAvant, qTop, qRecent, qNearby, loadUserSignals(userId),
+    const [rTop, rRecent, rNearby, signals] = await Promise.all([
+      qTop, qRecent, qNearby, loadUserSignals(userId),
     ]);
 
     let nearbyRaw: DiscoverLieu[] = (rNearby.data || []) as DiscoverLieu[];
@@ -895,7 +719,6 @@ export default function CarteScreen() {
         .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
     }
 
-    const misEnAvant: DiscoverLieu[] = (rMisEnAvant.data || []) as DiscoverLieu[];
     const top: DiscoverLieu[] = (rTop.data || []) as DiscoverLieu[];
     const recent: DiscoverLieu[] = (rRecent.data || []) as DiscoverLieu[];
     const nearby = nearbyRaw.slice(0, 15);
@@ -909,18 +732,16 @@ export default function CarteScreen() {
     const friendPicks = filterFriendPicks(candidates, signals, 10);
 
     // Une seule requête photo pour toutes les sections
-    const allIds = [...new Set([...misEnAvant, ...top, ...recent, ...nearby, ...recommended, ...friendPicks].map(l => l.id))];
+    const allIds = [...new Set([...top, ...recent, ...nearby, ...recommended, ...friendPicks].map(l => l.id))];
     const photoMap = await fetchPhotosForLieux(allIds);
     const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || l.google_photo_url || null });
 
-    const misEnAvantE = misEnAvant.map(enrich);
     const topE = top.slice(0, 10).map(enrich);
     const recentE = recent.map(enrich);
     const nearbyE = nearby.map(enrich);
     const recommendedE = recommended.map(enrich);
     const friendPicksE = friendPicks.map(enrich);
 
-    setAdressesDuMoment(misEnAvantE);
     setTopDiscoverLieux(topE);
     setRecentDiscoverLieux(recentE);
     setNearbyDiscoverLieux(nearbyE);
@@ -928,48 +749,22 @@ export default function CarteScreen() {
     setFriendPickLieux(friendPicksE);
     setFeaturedDiscoverLieu(nearbyE.find(l => l.photoUrl) || recommendedE.find(l => l.photoUrl) || nearbyE[0] || recommendedE[0] || null);
 
-    await Promise.all([loadExplorateurs(), loadDiscoverPhotos()]);
+    await loadDiscoverPhotos();
 
     setDiscoverLoading(false);
     setDiscoverLoaded(true);
 
     // Récupération Google Photos en tâche de fond pour les lieux sans photo, dédupliquée
     const seen = new Set<string>();
-    [...misEnAvantE, ...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE]
+    [...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE]
       .filter(l => !l.photoUrl && !seen.has(l.id) && (seen.add(l.id), true))
       .forEach(l => fetchGooglePhotoFor(l).then(url => {
         if (!url) return;
         const patch = (list: DiscoverLieu[]) => list.map(p => p.id === l.id ? { ...p, photoUrl: url } : p);
-        setAdressesDuMoment(patch); setTopDiscoverLieux(patch); setRecentDiscoverLieux(patch);
+        setTopDiscoverLieux(patch); setRecentDiscoverLieux(patch);
         setNearbyDiscoverLieux(patch); setRecommendedLieux(patch); setFriendPickLieux(patch);
         setFeaturedDiscoverLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp);
       }));
-  }
-
-  async function loadExplorateurs() {
-    const { data } = await supabase
-      .from('explorateurs')
-      .select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web,nb_abonnes')
-      .eq('statut', 'actif')
-      .order('ordre', { ascending: true });
-    setExplorateurs(data || []);
-  }
-
-  async function openExplorateurDiscover(exp: Explorateur) {
-    setSelectedExplorateur(exp);
-    const { data: elData } = await supabase
-      .from('explorateur_lieux')
-      .select('lieu_id,commentaire,ordre,lieux(nom,cat,ville,google_photo_url)')
-      .eq('explorateur_id', exp.id)
-      .order('ordre', { ascending: true });
-    if (!elData?.length) { setSelectedExplorateur({ ...exp, lieux: [] }); return; }
-    const lieuIds = elData.map((r: any) => r.lieu_id);
-    const photoMap = await fetchPhotosForLieux(lieuIds);
-    const lieuxList = elData.map((r: any) => ({
-      lieu_id: r.lieu_id, nom: r.lieux?.nom || '', cat: r.lieux?.cat || '', ville: r.lieux?.ville || '',
-      commentaire: r.commentaire, photoUrl: photoMap[r.lieu_id] || r.lieux?.google_photo_url || null,
-    }));
-    setSelectedExplorateur({ ...exp, lieux: lieuxList });
   }
 
   async function loadDiscoverPhotos() {
@@ -1883,6 +1678,9 @@ export default function CarteScreen() {
     chiens_laisse: 'chiens_laisse',
     espace_dedie: 'espace_dedie',
     gamelles: 'gamelles',
+    petits_chiens: 'petits_chiens',
+    moyens_chiens: 'moyens_chiens',
+    grands_chiens: 'grands_chiens',
   };
 
   const filteredLieux = useMemo(() => {
@@ -1946,13 +1744,17 @@ export default function CarteScreen() {
 
   function renderFilterModal() {
     if (!filterModal) return null;
-    const EQUIP_CHIPS = [
-      { key: 'chiens_terrasse', label: 'Terrasse', emoji: '🪑' },
-      { key: 'chiens_salle', label: 'Accepté en salle', emoji: '🐾' },
-      { key: 'eau', label: 'Gamelle d\'eau', emoji: '💧' },
-      { key: 'gamelles', label: 'Gamelles', emoji: '🍖' },
-      { key: 'chiens_laches', label: 'Sans laisse OK', emoji: '🐕' },
-      { key: 'espace_dedie', label: 'Espace dédié', emoji: '💚' },
+    const EQUIP_CHIPS: { key: string; label: string; icon: IoniconsName }[] = [
+      { key: 'chiens_salle', label: 'En salle', icon: 'home-outline' },
+      { key: 'chiens_terrasse', label: 'En terrasse', icon: 'sunny-outline' },
+      { key: 'espace_dedie', label: 'Espace dédié', icon: 'heart-outline' },
+      { key: 'eau', label: 'Eau fournie', icon: 'water-outline' },
+      { key: 'gamelles', label: 'Gamelles', icon: 'restaurant-outline' },
+      { key: 'chiens_laches', label: 'Lâchés autorisés', icon: 'checkmark-circle-outline' },
+      { key: 'chiens_laisse', label: 'Laisse obligatoire', icon: 'alert-circle-outline' },
+      { key: 'petits_chiens', label: 'Petits chiens', icon: 'paw-outline' },
+      { key: 'moyens_chiens', label: 'Moyens chiens', icon: 'paw-outline' },
+      { key: 'grands_chiens', label: 'Grands chiens', icon: 'paw-outline' },
     ];
     return (
       <Modal visible transparent animationType="none" onRequestClose={closeFilterModal}>
@@ -1976,25 +1778,16 @@ export default function CarteScreen() {
             {/* Catégorie */}
             <Text style={styles.filterSectionLabel}>CATÉGORIE</Text>
             <View style={styles.filterChipsGrid}>
-              {[
-                { key: 'parc',       label: 'Parcs',          icon: 'leaf-outline' },
-                { key: 'parc_chien', label: 'Espaces canins', icon: 'paw-outline' },
-                { key: 'restaurant', label: 'Restos',         icon: 'restaurant-outline' },
-                { key: 'cafe',       label: 'Cafés',          icon: 'cafe-outline' },
-                { key: 'veto',       label: 'Vétos',          icon: 'medical-outline' },
-                { key: 'toiletteur', label: 'Toilettage',     icon: 'cut-outline' },
-                { key: 'plage',      label: 'Plages',         icon: 'water-outline' },
-                { key: 'boutique',   label: 'Boutiques',      icon: 'bag-outline' },
-              ].map(c => {
-                const active = filterCat === c.key;
+              {Object.entries(CAT_CONFIG).filter(([key]) => key !== 'autre').map(([key, cfg]) => {
+                const active = filterCat === key;
                 return (
                   <TouchableOpacity
-                    key={c.key}
+                    key={key}
                     style={[styles.filterEquipChip, active && styles.filterEquipChipActive]}
-                    onPress={() => setFilterCat(filterCat === c.key ? null : c.key)}
+                    onPress={() => setFilterCat(filterCat === key ? null : key)}
                   >
-                    <Ionicons name={c.icon as any} size={15} color={active ? colors.ivory : colors.bordeaux} />
-                    <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{c.label}</Text>
+                    <Ionicons name={cfg.icon} size={15} color={active ? colors.ivory : colors.bordeaux} />
+                    <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{cfg.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2041,7 +1834,7 @@ export default function CarteScreen() {
                     style={[styles.filterEquipChip, active && styles.filterEquipChipActive]}
                     onPress={() => toggleEquip(eq.key)}
                   >
-                    <Text style={{ fontSize: 16 }}>{eq.emoji}</Text>
+                    <Ionicons name={eq.icon} size={15} color={active ? colors.ivory : colors.bordeaux} />
                     <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{eq.label}</Text>
                   </TouchableOpacity>
                 );
@@ -2690,6 +2483,17 @@ export default function CarteScreen() {
                   </View>
                 )}
 
+                {nearbyDiscoverLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>{myDogName ? `Près de ${myDogName}` : 'Près de toi'}</Text>
+                    <FlatList
+                      data={nearbyDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
                 {recommendedLieux.length > 0 && (
                   <View style={dstyles.section}>
                     <Text style={dstyles.sectionTitle}>Recommandé pour toi</Text>
@@ -2706,39 +2510,6 @@ export default function CarteScreen() {
                     <Text style={dstyles.sectionTitle}>Les coups de cœur de tes amis</Text>
                     <FlatList
                       data={friendPickLieux} horizontal showsHorizontalScrollIndicator={false}
-                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
-                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
-                    />
-                  </View>
-                )}
-
-                {explorateurs.length > 0 && (
-                  <View style={dstyles.section}>
-                    <Text style={dstyles.sectionTitle}>Les Explorateurs</Text>
-                    <FlatList
-                      data={explorateurs} horizontal showsHorizontalScrollIndicator={false}
-                      keyExtractor={e => e.id} contentContainerStyle={dstyles.cardsRow}
-                      renderItem={({ item }) => <ExplorateurDiscoverCard exp={item} onPress={() => openExplorateurDiscover(item)} />}
-                    />
-                  </View>
-                )}
-
-                {nearbyDiscoverLieux.length > 0 && (
-                  <View style={dstyles.section}>
-                    <Text style={dstyles.sectionTitle}>{myDogName ? `Près de ${myDogName}` : 'Près de toi'}</Text>
-                    <FlatList
-                      data={nearbyDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
-                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
-                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
-                    />
-                  </View>
-                )}
-
-                {adressesDuMoment.length > 0 && (
-                  <View style={dstyles.section}>
-                    <Text style={dstyles.sectionTitle}>Adresses du moment</Text>
-                    <FlatList
-                      data={adressesDuMoment} horizontal showsHorizontalScrollIndicator={false}
                       keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
                       renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
                     />
@@ -3870,14 +3641,6 @@ export default function CarteScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
-    )}
-
-    {selectedExplorateur && (
-      <ExplorateurDetailModal
-        exp={selectedExplorateur}
-        onClose={() => setSelectedExplorateur(null)}
-        onLieuPress={openDiscoverLieu}
-      />
     )}
     </>
   );
