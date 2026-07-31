@@ -392,6 +392,7 @@ export default function CarteScreen() {
   const navigation = useNavigation<any>();
   const mapRef = useRef<MapView>(null);
   const shareLieuCardRef = useRef<View>(null);
+  const baladeMapCaptureRef = useRef<View>(null);
   const [lieux, setLieux] = useState<Lieu[]>([]);
   const [loading, setLoading] = useState(true);
   const [region, setRegion] = useState<Region>({ latitude: 46.8, longitude: 2.3, latitudeDelta: 8, longitudeDelta: 8 });
@@ -930,6 +931,13 @@ export default function CarteScreen() {
     setBaladeSummaryVisible(true);
   }
 
+  function confirmQuitBaladeTracking() {
+    Alert.alert('Quitter le suivi ?', 'La balade en cours sera perdue, rien ne sera publié.', [
+      { text: 'Continuer la balade', style: 'cancel' },
+      { text: 'Quitter', style: 'destructive', onPress: discardBaladeTracking },
+    ]);
+  }
+
   function discardBaladeTracking() {
     if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
     baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
@@ -974,8 +982,15 @@ export default function CarteScreen() {
 
     if (error) { setBaladeLoading(false); Alert.alert('Erreur', error.message); return; }
 
-    // Upload des photos (jusqu'à 5)
+    // Capture du tracé (façon Strava) en premier visuel, puis les photos (jusqu'à 5)
     const urls: string[] = [];
+    if (baladeMapCaptureRef.current) {
+      try {
+        const mapUri = await captureRef(baladeMapCaptureRef, { format: 'png', quality: 0.9 });
+        const r2Key = `lieu-photos/community/${userId}/balade-trace-${Date.now()}.png`;
+        urls.push(await uploadToR2(mapUri, r2Key));
+      } catch {}
+    }
     for (const uri of baladePhotoUris) {
       try {
         const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
@@ -2912,6 +2927,9 @@ export default function CarteScreen() {
             </View>
           </View>
           <View style={styles.baladeTrackingActions}>
+            <TouchableOpacity style={[styles.baladeTrackingBtn, styles.baladeTrackingQuitBtn]} onPress={confirmQuitBaladeTracking}>
+              <Ionicons name="close" size={18} color="#fff" />
+            </TouchableOpacity>
             {baladePaused ? (
               <TouchableOpacity style={styles.baladeTrackingBtn} onPress={resumeBaladeTracking}>
                 <Ionicons name="play" size={18} color="#fff" />
@@ -3655,7 +3673,7 @@ export default function CarteScreen() {
             </View>
 
             {baladeTrace.length > 1 && (
-              <View style={styles.proposeMiniMapWrap}>
+              <View ref={baladeMapCaptureRef} collapsable={false} style={styles.proposeMiniMapWrap}>
                 <MapView
                   style={styles.proposeMiniMap}
                   initialRegion={{
@@ -3924,6 +3942,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   baladeTrackingStopBtn: { backgroundColor: colors.terra },
+  baladeTrackingQuitBtn: { backgroundColor: 'rgba(245,239,224,0.15)' },
   baladePin: { alignItems: 'center' },
   baladeBubble: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: '#2E7D6B',
