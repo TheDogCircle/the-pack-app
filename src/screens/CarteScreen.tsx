@@ -404,7 +404,7 @@ export default function CarteScreen() {
   const [proposeNom, setProposeNom] = useState('');
   const [proposeAdresse, setProposeAdresse] = useState('');
   const [proposeVille, setProposeVille] = useState('');
-  const [proposeCats, setProposeCats] = useState<string[]>(['restaurant']);
+  const [proposeCats, setProposeCats] = useState<string[]>([]);
   const [proposeAutreLabel, setProposeAutreLabel] = useState('');
   const [proposeTel, setProposeTel] = useState('');
   const [proposeSite, setProposeSite] = useState('');
@@ -1500,7 +1500,7 @@ export default function CarteScreen() {
     requireAuth(async () => {
       const { latitude, longitude } = e.nativeEvent.coordinate;
       setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-      setProposeCats(['restaurant']); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+      setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
       setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
       setProposeLat(latitude);
       setProposeLng(longitude);
@@ -1545,6 +1545,7 @@ export default function CarteScreen() {
   async function submitPropose() {
     if (!userId) { showLoginPrompt(); return; }
     if (!proposeNom.trim() || !proposeVille.trim()) return;
+    if (!proposeCats.length) { Alert.alert('Type de lieu manquant', 'Choisis au moins un type de lieu.'); return; }
     setProposeLoading(true);
     const { data: insertedLieu, error } = await supabase.from('lieux').insert({
       nom: proposeNom.trim(), adresse: proposeAdresse.trim() || null, ville: proposeVille.trim(),
@@ -1603,7 +1604,7 @@ export default function CarteScreen() {
     if (error) { Alert.alert('Erreur', error.message); return; }
     setProposeModal(false);
     setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-    setProposeCats(['restaurant']); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+    setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
     setProposeLat(null); setProposeLng(null);
     setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
     setProposePhotos([]);
@@ -3028,12 +3029,30 @@ export default function CarteScreen() {
                 </View>
                 {proposeGeoLoading && <ActivityIndicator size="small" color={colors.terra} style={{ marginTop: 6 }} />}
                 {proposeLat && proposeLng ? (
-                  <View style={styles.geoConfirm}>
-                    <Ionicons name="checkmark-circle" size={14} color="#5A9E6F" />
-                    <Text style={styles.geoConfirmText}>Position trouvée : {proposeLat.toFixed(4)}, {proposeLng.toFixed(4)}</Text>
-                  </View>
+                  <>
+                    <View style={styles.proposeMiniMapWrap}>
+                      <MapView
+                        style={styles.proposeMiniMap}
+                        region={{ latitude: proposeLat, longitude: proposeLng, latitudeDelta: 0.006, longitudeDelta: 0.006 }}
+                        onPress={e => {
+                          const { latitude, longitude } = e.nativeEvent.coordinate;
+                          setProposeLat(latitude); setProposeLng(longitude);
+                        }}
+                      >
+                        <Marker
+                          coordinate={{ latitude: proposeLat, longitude: proposeLng }}
+                          draggable
+                          onDragEnd={e => {
+                            const { latitude, longitude } = e.nativeEvent.coordinate;
+                            setProposeLat(latitude); setProposeLng(longitude);
+                          }}
+                        />
+                      </MapView>
+                    </View>
+                    <Text style={styles.geoHint}>Déplace le repère (ou touche la carte) pour ajuster l'emplacement exact — c'est la première cause d'imprécision, prends 2 secondes pour bien le placer.</Text>
+                  </>
                 ) : (
-                  <Text style={styles.geoHint}>Utilise ta position GPS ou cherche l'adresse pour un emplacement précis sur la carte.</Text>
+                  <Text style={styles.geoHint}>Utilise ta position GPS ou cherche l'adresse pour faire apparaître la carte et placer le repère précisément.</Text>
                 )}
               </View>
               <View style={styles.proposeField}>
@@ -3172,7 +3191,7 @@ export default function CarteScreen() {
               </View>
               )}
 
-              <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || proposeLoading}>
+              <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLoading}>
                 {proposeLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Soumettre le lieu</Text>}
               </TouchableOpacity>
             </ScrollView>
@@ -4049,9 +4068,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   geoBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
-  geoConfirm: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  geoConfirmText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: '#5A9E6F' },
   geoHint: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 6, lineHeight: 16 },
+  proposeMiniMapWrap: { height: 180, borderRadius: 12, overflow: 'hidden', marginTop: 8, borderWidth: 1, borderColor: colors.border },
+  proposeMiniMap: { width: '100%', height: '100%' },
   catPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.white,
     borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border,
