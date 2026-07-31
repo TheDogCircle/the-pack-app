@@ -744,21 +744,38 @@ export default function FeedScreen() {
   async function loadFeed() {
     setFeedLoading(true);
 
-    const [communityPhotoRes, communityLieuRes, photosRes] = await Promise.all([
+    const myId = session?.user?.id || null;
+    const COMMUNITY_POST_FIELDS = 'id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, visibilite, community_post_likes (user_id), community_post_comments (id)';
+
+    const [communityPhotoRes, communityLieuRes, restrictedBaladeRes, followingRes, photosRes] = await Promise.all([
       supabase
         .from('community_posts')
-        .select('id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .select(COMMUNITY_POST_FIELDS)
         .eq('hidden', false)
         .neq('type', 'nouveau_lieu')
+        .or('type.neq.balade,visibilite.eq.public')
         .order('created_at', { ascending: false })
         .limit(30),
       supabase
         .from('community_posts')
-        .select('id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, community_post_likes (user_id), community_post_comments (id)')
+        .select(COMMUNITY_POST_FIELDS)
         .eq('hidden', false)
         .eq('type', 'nouveau_lieu')
         .order('created_at', { ascending: false })
         .limit(20),
+      myId
+        ? supabase
+            .from('community_posts')
+            .select(COMMUNITY_POST_FIELDS)
+            .eq('hidden', false)
+            .eq('type', 'balade')
+            .neq('visibilite', 'public')
+            .order('created_at', { ascending: false })
+            .limit(30)
+        : Promise.resolve({ data: [] as any[] }),
+      myId
+        ? supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte')
+        : Promise.resolve({ data: [] as any[] }),
       supabase
         .from('photos')
         .select('id, url, created_at, lieu_id, user_id, nom_chien, group_id')
@@ -771,7 +788,12 @@ export default function FeedScreen() {
 
     if (communityPhotoRes.error && communityLieuRes.error && photosRes.error) { setFeedLoading(false); return; }
 
-    const communityData: any[] = [...(communityPhotoRes.data || []), ...(communityLieuRes.data || [])];
+    const followingIds = new Set(((followingRes as any).data || []).map((f: any) => f.following_id));
+    const visibleRestrictedBalades = ((restrictedBaladeRes as any).data || []).filter((p: any) =>
+      p.user_id === myId || followingIds.has(p.user_id)
+    );
+
+    const communityData: any[] = [...(communityPhotoRes.data || []), ...(communityLieuRes.data || []), ...visibleRestrictedBalades];
     const photosData: any[] = (photosRes.data || []).filter((p: any) =>
       !communityData.some((cp: any) => cp.image_url === p.url)
     );

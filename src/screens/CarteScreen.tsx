@@ -200,6 +200,12 @@ const FILTRES_DEF: { key: keyof BaladeFiltres; label: string; icon: string }[] =
   { key: 'sol_naturel',  label: 'Sol naturel',       icon: 'leaf-outline' },
 ];
 
+const VISIBILITE_DEF: { key: 'prive' | 'abonnes' | 'public'; label: string; sub: string; icon: IoniconsName }[] = [
+  { key: 'prive',    label: 'Privé',        sub: 'Visible par toi seul(e)',       icon: 'lock-closed-outline' },
+  { key: 'abonnes',  label: 'Abonnés',      sub: 'Visible par tes abonnés',       icon: 'people-outline' },
+  { key: 'public',   label: 'Tout le monde',sub: 'Visible dans le feed communautaire', icon: 'earth-outline' },
+];
+
 // ── Découverte (mode Liste) ─────────────────────────────────────────────────
 // Rangées curatées façon "Explorer", affichées au-dessus de la liste filtrable
 // quand aucune recherche/filtre n'est active. Porté depuis l'ancien
@@ -503,6 +509,7 @@ export default function CarteScreen() {
   const [baladeDesc, setBaladeDesc] = useState('');
   const [baladeLoading, setBaladeLoading] = useState(false);
   const [baladeFiltres, setBaladeFiltres] = useState<BaladeFiltres>(FILTRES_VIDE);
+  const [baladeVisibilite, setBaladeVisibilite] = useState<'prive' | 'abonnes' | 'public'>('public');
   const [baladePhotoUris, setBaladePhotoUris] = useState<string[]>([]);
   // ── Suivi live (façon Strava) ──
   const [baladeTracking, setBaladeTracking] = useState(false);
@@ -944,6 +951,7 @@ export default function CarteScreen() {
     setBaladeTracking(false); setBaladePaused(false); setBaladeSummaryVisible(false);
     setBaladeTrace([]); setBaladeElapsedSec(0); setBaladeLiveDistanceKm(0);
     setBaladeNom(''); setBaladeDesc(''); setBaladePhotoUris([]); setBaladeFiltres(FILTRES_VIDE);
+    setBaladeVisibilite('public');
   }
 
   async function pickBaladePhotos() {
@@ -966,7 +974,7 @@ export default function CarteScreen() {
     const arrivee = baladeTrace[baladeTrace.length - 1];
     const dist = parseFloat(baladeLiveDistanceKm.toFixed(2));
 
-    const { error } = await supabase.from('balades').insert({
+    const { data: baladeRow, error } = await supabase.from('balades').insert({
       user_id: userId,
       nom: baladeNom.trim(),
       description: baladeDesc.trim() || null,
@@ -978,6 +986,7 @@ export default function CarteScreen() {
       duree_secondes: baladeElapsedSec,
       trace: baladeTrace,
       validee: true,
+      visibilite: baladeVisibilite,
       ...baladeFiltres,
     }).select('id').single();
 
@@ -1009,6 +1018,8 @@ export default function CarteScreen() {
       images: urls.length > 1 ? urls : null,
       caption,
       auto_generated: true,
+      balade_id: baladeRow?.id || null,
+      visibilite: baladeVisibilite,
     }).then(() => {});
 
     // +25 points
@@ -3731,6 +3742,28 @@ export default function CarteScreen() {
               )}
             </ScrollView>
 
+            <Text style={styles.baladeFormLabel}>Qui peut voir cette balade ?</Text>
+            <View style={{ gap: 8 }}>
+              {VISIBILITE_DEF.map(v => {
+                const active = baladeVisibilite === v.key;
+                return (
+                  <TouchableOpacity
+                    key={v.key}
+                    style={[styles.baladeVisibiliteRow, active && styles.baladeVisibiliteRowActive]}
+                    onPress={() => setBaladeVisibilite(v.key)}
+                  >
+                    <Ionicons name={v.icon} size={18} color={active ? colors.ivory : colors.bordeaux} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.baladeVisibiliteLabel, active && { color: colors.ivory }]}>{v.label}</Text>
+                      <Text style={[styles.baladeVisibiliteSub, active && { color: 'rgba(245,239,224,0.75)' }]}>{v.sub}</Text>
+                    </View>
+                    {active && <Ionicons name="checkmark-circle" size={18} color={colors.ivory} />}
+                  </TouchableOpacity>
+                );
+              })}
+              <Text style={styles.baladeVisibiliteNote}>Le tracé reste visible sur la carte comme suggestion de balade pour tout le monde, quel que soit ton choix.</Text>
+            </View>
+
             <Text style={styles.baladeFormLabel}>Caractéristiques (optionnel)</Text>
             <View style={styles.baladeFiltresGrid}>
               {FILTRES_DEF.map(f => {
@@ -3997,6 +4030,15 @@ const styles = StyleSheet.create({
   },
   baladeArriveeMapBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   baladeFiltresGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  baladeVisibiliteRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 11, backgroundColor: colors.white,
+  },
+  baladeVisibiliteRowActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  baladeVisibiliteLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  baladeVisibiliteSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  baladeVisibiliteNote: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
   baladeFiltreChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     borderWidth: 1, borderColor: colors.border, borderRadius: 20,
