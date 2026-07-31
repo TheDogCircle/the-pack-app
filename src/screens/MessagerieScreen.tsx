@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard,
   Modal, Image, Alert, Share, Linking,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
@@ -133,8 +134,18 @@ function GroupeCard({
 export default function MessagerieScreen() {
   const navigation = useNavigation<any>();
   const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
   const { session, loading: sessionLoading } = useSession();
   const myUserId = session?.user?.id ?? null;
+  const [kbVisible, setKbVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, () => setKbVisible(true));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKbVisible(false));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   const [activeTab, setActiveTab] = useState<'messages' | 'groupes'>('groupes');
 
@@ -603,7 +614,7 @@ export default function MessagerieScreen() {
   // ── Chat view ──
   if (selectedConv) {
     return (
-      <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight + 70 : 0}>
+      <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.participantsBar} style={s.participantsScroll}>
           {selectedConv.members.map(m => (
             <View key={m.user_id} style={s.participantItem}>
@@ -643,7 +654,7 @@ export default function MessagerieScreen() {
             }}
           />
         )}
-        <View style={s.inputBar}>
+        <View style={[s.inputBar, { paddingBottom: kbVisible ? 10 : Math.max(insets.bottom, 10) }]}>
           <TextInput style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
           <TouchableOpacity style={[s.sendBtn, (!inputText.trim() || sending) && s.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim() || sending}>
             {sending ? <ActivityIndicator size="small" color={colors.ivory} /> : <Ionicons name="send" size={18} color={colors.ivory} />}
@@ -993,7 +1004,7 @@ const s = StyleSheet.create({
   msgTextMe: { color: colors.ivory },
   msgTime: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginLeft: 12, marginTop: 2 },
   msgTimeMe: { marginLeft: 0, marginRight: 12 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
   input: { flex: 1, minHeight: 40, maxHeight: 110, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.ivoryPale },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   sendBtnDisabled: { backgroundColor: colors.border },
