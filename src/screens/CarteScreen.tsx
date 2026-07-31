@@ -605,14 +605,23 @@ export default function CarteScreen() {
         .single()
         .then(({ data, error }) => {
           if (data && !error) {
+            setListView(false);
             setShowBalades(true);
             setSelectedBalade(data as Balade);
-            mapRef.current?.animateToRegion({
-              latitude: data.depart_lat,
-              longitude: data.depart_lng,
-              latitudeDelta: 0.05,
-              longitudeDelta: 0.05,
-            }, 800);
+            const trace = (data as any).trace as { latitude: number; longitude: number }[] | null;
+            if (trace && trace.length > 1) {
+              mapRef.current?.fitToCoordinates(trace, {
+                edgePadding: { top: 80, right: 60, bottom: 340, left: 60 },
+                animated: true,
+              });
+            } else {
+              mapRef.current?.animateToRegion({
+                latitude: data.depart_lat,
+                longitude: data.depart_lng,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+              }, 800);
+            }
           }
         });
     }
