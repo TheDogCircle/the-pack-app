@@ -67,6 +67,14 @@ function getNiveau(pts: number) {
   return { n, next, pct };
 }
 
+function fmtDuree(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 const CAT_EMOJI: Record<string, string> = {
   restaurant: '🍽️', cafe: '☕', hotel: '🏨', parc: '🌳',
   plage: '🏖️', veterinaire: '🏥', toiletteur: '✂️', boutique: '🛍️', bar: '🍺', autre: '📍',
@@ -270,6 +278,8 @@ export default function ProfilScreen() {
   const [pendingRequests, setPendingRequests] = useState<{ id: string; follower_id: string; prenom: string | null; username: string | null; avatar_url: string | null }[]>([]);
   const [myLieux, setMyLieux] = useState<{ id: string; nom: string; cat: string; ville: string; actif: boolean }[]>([]);
   const [lieuxOpen, setLieuxOpen] = useState(false);
+  const [myBalades, setMyBalades] = useState<{ id: string; nom: string; distance_km: number | null; duree_secondes: number | null; created_at: string }[]>([]);
+  const [baladesOpen, setBaladesOpen] = useState(false);
   const cardRef = useRef<View>(null);
 
   const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
@@ -288,7 +298,7 @@ export default function ProfilScreen() {
 
     savePushToken(session.user.id);
 
-    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }, { data: mesLieux }] = await Promise.all([
+    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }, { data: mesLieux }, { data: mesBalades }] = await Promise.all([
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
@@ -298,6 +308,7 @@ export default function ProfilScreen() {
       supabase.from('explorateurs').select('id,nom,handle,bio,photo_profil_url,photo_banniere_url,instagram_url,tiktok_url,youtube_url,site_web').eq('user_id', session.user.id).maybeSingle(),
       supabase.from('follows').select('id,follower_id').eq('following_id', session.user.id).eq('statut', 'en_attente'),
       supabase.from('lieux').select('id,nom,cat,ville,actif').eq('submitted_by', session.user.id).order('created_at', { ascending: false }).limit(30),
+      supabase.from('balades').select('id,nom,distance_km,duree_secondes,created_at').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
     ]);
     setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
@@ -324,6 +335,7 @@ export default function ProfilScreen() {
     })));
     setMyPhotos(photosList || []);
     setMyLieux((mesLieux || []) as { id: string; nom: string; cat: string; ville: string; actif: boolean }[]);
+    setMyBalades((mesBalades || []) as { id: string; nom: string; distance_km: number | null; duree_secondes: number | null; created_at: string }[]);
 
     if (pendingFollows && pendingFollows.length > 0) {
       const ids = pendingFollows.map((f: any) => f.follower_id);
@@ -600,6 +612,52 @@ export default function ProfilScreen() {
                         </Text>
                       </View>
                     </View>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Mes activités (balades) */}
+          <View style={styles.accordionWrap}>
+            <TouchableOpacity style={styles.accordionHeader} onPress={() => setBaladesOpen(o => !o)} activeOpacity={0.8}>
+              <Ionicons name="walk-outline" size={15} color={colors.bordeaux} />
+              <Text style={styles.accordionTitle}>Mes activités</Text>
+              {myBalades.length > 0 && (
+                <View style={styles.lieuxCountBadge}>
+                  <Text style={styles.lieuxCountBadgeText}>{myBalades.length}</Text>
+                </View>
+              )}
+              <Ionicons name={baladesOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+            {baladesOpen && (
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
+                {myBalades.length === 0 ? (
+                  <View style={{ padding: 16 }}>
+                    <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>
+                      Tu n'as pas encore fait de balade.
+                    </Text>
+                  </View>
+                ) : (
+                  myBalades.map((b, i) => (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={[styles.lieuSuggestRow, i < myBalades.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        mapNavigation.setPendingBalade(b.id);
+                        navigation.navigate('Tabs', { screen: 'Carte' });
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.lieuSuggestNom} numberOfLines={1}>{b.nom}</Text>
+                        <Text style={styles.lieuSuggestVille}>
+                          {b.distance_km ? `${b.distance_km} km` : ''}
+                          {b.duree_secondes ? ` · ${fmtDuree(b.duree_secondes)}` : ''}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
                   ))
                 )}
               </View>

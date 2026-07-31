@@ -123,6 +123,22 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function fmtDuree(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtAllure(totalSec: number, km: number): string {
+  if (!km || km <= 0) return '';
+  const secPerKm = totalSec / km;
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}'${String(s).padStart(2, '0')}/km`;
+}
+
 const FAV_FILTER_OPTS: { key: string; label: string; icon: IoniconsName; color: string }[] = [
   { key: 'favori',      label: 'Favoris',    icon: 'heart',            color: '#E05070' },
   { key: 'a_tester',   label: 'À tester',   icon: 'bookmark',         color: colors.bordeaux },
@@ -482,19 +498,23 @@ export default function CarteScreen() {
   // ── Balades ──
   const [balades, setBalades] = useState<Balade[]>([]);
   const [selectedBalade, setSelectedBalade] = useState<Balade | null>(null);
-  const [pickingBaladeDepart, setPickingBaladeDepart] = useState(false);
-  const [baladeFormVisible, setBaladeFormVisible] = useState(false);
-  const [baladeDepartLat, setBaladeDepartLat] = useState<number | null>(null);
-  const [baladeDepartLng, setBaladeDepartLng] = useState<number | null>(null);
   const [baladeNom, setBaladeNom] = useState('');
-  const [baladeArrivee, setBaladeArrivee] = useState('');
   const [baladeDesc, setBaladeDesc] = useState('');
-  const [baladeDistance, setBaladeDistance] = useState('');
   const [baladeLoading, setBaladeLoading] = useState(false);
-  const [pickingBaladeArrivee, setPickingBaladeArrivee] = useState(false);
-  const [baladeFinalArriveeCoords, setBaladeFinalArriveeCoords] = useState<{lat: number; lng: number} | null>(null);
   const [baladeFiltres, setBaladeFiltres] = useState<BaladeFiltres>(FILTRES_VIDE);
-  const [baladePhotoUri, setBaladePhotoUri] = useState<string | null>(null);
+  const [baladePhotoUris, setBaladePhotoUris] = useState<string[]>([]);
+  // ── Suivi live (façon Strava) ──
+  const [baladeTracking, setBaladeTracking] = useState(false);
+  const [baladePaused, setBaladePaused] = useState(false);
+  const [baladeTrace, setBaladeTrace] = useState<{ latitude: number; longitude: number; t: number }[]>([]);
+  const [baladeElapsedSec, setBaladeElapsedSec] = useState(0);
+  const [baladeLiveDistanceKm, setBaladeLiveDistanceKm] = useState(0);
+  const [baladeSummaryVisible, setBaladeSummaryVisible] = useState(false);
+  const baladeWatchRef = useRef<Location.LocationSubscription | null>(null);
+  const baladeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const baladeStartMsRef = useRef<number | null>(null);
+  const MAX_BALADE_PHOTOS = 5;
+  const BALADE_MIN_SEGMENT_KM = 0.003; // ~3m, filtre le bruit GPS
   const [fabOpen, setFabOpen] = useState(false);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextFetchRef = useRef(false);
@@ -572,7 +592,7 @@ export default function CarteScreen() {
     const baladeId = mapNavigation.consumeBalade();
     if (baladeId) {
       supabase.from('balades')
-        .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
+        .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
         .eq('id', baladeId)
         .single()
         .then(({ data, error }) => {
@@ -832,7 +852,7 @@ export default function CarteScreen() {
     const lngD = r.longitudeDelta * 0.6;
     const { data } = await supabase
       .from('balades')
-      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
+      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
       .eq('validee', true)
       .gte('depart_lat', r.latitude - latD).lte('depart_lat', r.latitude + latD)
       .gte('depart_lng', r.longitude - lngD).lte('depart_lng', r.longitude + lngD)
@@ -844,53 +864,134 @@ export default function CarteScreen() {
     setBalades(data.map((b: any) => ({ ...b, profils: pm[b.user_id] || null })));
   }
 
-  async function submitBalade() {
-    if (!userId || !baladeDepartLat || !baladeDepartLng || !baladeNom.trim()) return;
-    if (!baladeArrivee.trim() && !baladeFinalArriveeCoords) {
-      Alert.alert('Point d\'arrivée manquant', 'Indique l\'arrivée par texte ou sur la carte.');
+  // ── Suivi live d'une balade (façon Strava) ──
+  function baladeLocationCallback(pos: Location.LocationObject) {
+    const { latitude, longitude } = pos.coords;
+    setBaladeTrace(prev => {
+      const last = prev[prev.length - 1];
+      if (last) {
+        const segKm = haversine(last.latitude, last.longitude, latitude, longitude);
+        if (segKm < BALADE_MIN_SEGMENT_KM) return prev;
+        setBaladeLiveDistanceKm(d => d + segKm);
+      }
+      const t = baladeStartMsRef.current ? Math.round((Date.now() - baladeStartMsRef.current) / 1000) : 0;
+      return [...prev, { latitude, longitude, t }];
+    });
+  }
+
+  async function startBaladeWatcher() {
+    baladeWatchRef.current = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
+      baladeLocationCallback
+    );
+  }
+
+  async function startBaladeTracking() {
+    if (!userId) { showLoginPrompt(); return; }
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission requise', "Autorise la géolocalisation dans les réglages pour suivre ta balade.");
       return;
     }
+    setFabOpen(false);
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+    setBaladeTrace([{ latitude: loc.coords.latitude, longitude: loc.coords.longitude, t: 0 }]);
+    setBaladeLiveDistanceKm(0);
+    setBaladeElapsedSec(0);
+    setBaladePaused(false);
+    setBaladeTracking(true);
+    baladeStartMsRef.current = Date.now();
+    mapRef.current?.animateToRegion({ latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 500);
+    baladeTimerRef.current = setInterval(() => setBaladeElapsedSec(s => s + 1), 1000);
+    await startBaladeWatcher();
+  }
+
+  function pauseBaladeTracking() {
+    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
+    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+    setBaladePaused(true);
+  }
+
+  async function resumeBaladeTracking() {
+    setBaladePaused(false);
+    baladeTimerRef.current = setInterval(() => setBaladeElapsedSec(s => s + 1), 1000);
+    await startBaladeWatcher();
+  }
+
+  function stopBaladeTracking() {
+    if (baladeTrace.length < 2) {
+      Alert.alert('Balade trop courte', 'Marche un peu plus avant de terminer, pour avoir un vrai trajet à partager.');
+      return;
+    }
+    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
+    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+    setBaladeTracking(false);
+    setBaladePaused(false);
+    setBaladeSummaryVisible(true);
+  }
+
+  function discardBaladeTracking() {
+    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
+    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+    setBaladeTracking(false); setBaladePaused(false); setBaladeSummaryVisible(false);
+    setBaladeTrace([]); setBaladeElapsedSec(0); setBaladeLiveDistanceKm(0);
+    setBaladeNom(''); setBaladeDesc(''); setBaladePhotoUris([]); setBaladeFiltres(FILTRES_VIDE);
+  }
+
+  async function pickBaladePhotos() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission requise', "Autorise l'accès à ta galerie dans les réglages."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], quality: 0.8,
+      allowsMultipleSelection: true, selectionLimit: MAX_BALADE_PHOTOS - baladePhotoUris.length,
+    });
+    if (result.canceled) return;
+    setBaladePhotoUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_BALADE_PHOTOS));
+  }
+
+  async function submitBalade() {
+    if (!userId || !baladeNom.trim() || baladeTrace.length < 2) return;
     setBaladeLoading(true);
 
-    // Auto-distance via Haversine si GPS disponible, sinon saisie manuelle
-    const dist = baladeFinalArriveeCoords
-      ? parseFloat(haversine(baladeDepartLat, baladeDepartLng, baladeFinalArriveeCoords.lat, baladeFinalArriveeCoords.lng).toFixed(1))
-      : (baladeDistance.trim() ? parseFloat(baladeDistance.replace(',', '.')) : null);
+    const depart = baladeTrace[0];
+    const arrivee = baladeTrace[baladeTrace.length - 1];
+    const dist = parseFloat(baladeLiveDistanceKm.toFixed(2));
 
-    const { data: baladeRow, error } = await supabase.from('balades').insert({
+    const { error } = await supabase.from('balades').insert({
       user_id: userId,
       nom: baladeNom.trim(),
       description: baladeDesc.trim() || null,
-      depart_lat: baladeDepartLat,
-      depart_lng: baladeDepartLng,
-      arrivee_texte: baladeArrivee.trim() || null,
-      arrivee_lat: baladeFinalArriveeCoords?.lat ?? null,
-      arrivee_lng: baladeFinalArriveeCoords?.lng ?? null,
-      distance_km: dist && !isNaN(dist) ? dist : null,
+      depart_lat: depart.latitude,
+      depart_lng: depart.longitude,
+      arrivee_lat: arrivee.latitude,
+      arrivee_lng: arrivee.longitude,
+      distance_km: dist,
+      duree_secondes: baladeElapsedSec,
+      trace: baladeTrace,
       validee: true,
       ...baladeFiltres,
     }).select('id').single();
 
-    setBaladeLoading(false);
-    if (error) { Alert.alert('Erreur', error.message); return; }
+    if (error) { setBaladeLoading(false); Alert.alert('Erreur', error.message); return; }
 
-    // Upload photo si sélectionnée
-    let photoUrl: string | null = null;
-    if (baladePhotoUri) {
+    // Upload des photos (jusqu'à 5)
+    const urls: string[] = [];
+    for (const uri of baladePhotoUris) {
       try {
-        const ext = baladePhotoUri.split('.').pop()?.toLowerCase() || 'jpg';
-        const r2Key = `lieu-photos/community/${userId}/balade-${Date.now()}.${ext}`;
-        photoUrl = await uploadToR2(baladePhotoUri, r2Key);
+        const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+        const r2Key = `lieu-photos/community/${userId}/balade-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        urls.push(await uploadToR2(uri, r2Key));
       } catch {}
     }
 
     // Publication dans le feed
-    const distLabel = dist ? ` · ${dist} km` : '';
+    const caption = `${baladeNom.trim()} · ${dist} km · ${fmtDuree(baladeElapsedSec)}`;
     supabase.from('community_posts').insert({
       user_id: userId,
       type: 'balade',
-      image_url: photoUrl,
-      caption: baladeNom.trim() + distLabel,
+      image_url: urls[0] || null,
+      images: urls.length > 1 ? urls : null,
+      caption,
       auto_generated: true,
     }).then(() => {});
 
@@ -899,11 +1000,8 @@ export default function CarteScreen() {
       if (data) supabase.from('profils').update({ points: (data.points || 0) + 25 }).eq('id', userId);
     });
 
-    setBaladeFormVisible(false);
-    setBaladeNom(''); setBaladeArrivee(''); setBaladeDesc(''); setBaladeDistance('');
-    setBaladeDepartLat(null); setBaladeDepartLng(null);
-    setBaladeFinalArriveeCoords(null); setBaladeFiltres(FILTRES_VIDE);
-    setBaladePhotoUri(null);
+    setBaladeLoading(false);
+    discardBaladeTracking();
     triggerPointsAnim();
     setShowBalades(true);
   }
@@ -2324,20 +2422,6 @@ export default function CarteScreen() {
           }, 600);
         }}
         onLongPress={handleMapLongPress}
-        onPress={(e) => {
-          if (pickingBaladeDepart) {
-            const { latitude, longitude } = e.nativeEvent.coordinate;
-            setBaladeDepartLat(latitude);
-            setBaladeDepartLng(longitude);
-            setPickingBaladeDepart(false);
-            setBaladeFormVisible(true);
-          } else if (pickingBaladeArrivee) {
-            const { latitude, longitude } = e.nativeEvent.coordinate;
-            setBaladeFinalArriveeCoords({ lat: latitude, lng: longitude });
-            setPickingBaladeArrivee(false);
-            setBaladeFormVisible(true);
-          }
-        }}
         showsUserLocation
         showsMyLocationButton={false}
       >
@@ -2427,35 +2511,15 @@ export default function CarteScreen() {
             </View>
           </Marker>
         ))}
-        {baladeDepartLat !== null && baladeDepartLng !== null && (
-          <Marker
-            coordinate={{ latitude: baladeDepartLat, longitude: baladeDepartLng }}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.baladePin}>
-              <View style={[styles.baladeBubble, { backgroundColor: colors.terra }]}>
-                <Ionicons name="flag-outline" size={16} color="#fff" />
-              </View>
-              <View style={[styles.baladeTail, { borderTopColor: colors.terra }]} />
-            </View>
-          </Marker>
-        )}
-        {baladeFinalArriveeCoords !== null && (
-          <Marker
-            coordinate={{ latitude: baladeFinalArriveeCoords.lat, longitude: baladeFinalArriveeCoords.lng }}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.baladePin}>
-              <View style={[styles.baladeBubble, { backgroundColor: colors.sage }]}>
-                <Ionicons name="flag" size={16} color="#fff" />
-              </View>
-              <View style={[styles.baladeTail, { borderTopColor: colors.sage }]} />
-            </View>
-          </Marker>
-        )}
-        {selectedBalade?.arrivee_lat != null && selectedBalade?.arrivee_lng != null && (
+        {selectedBalade && (selectedBalade as any).trace?.length > 1 ? (
+          <Polyline
+            coordinates={(selectedBalade as any).trace}
+            strokeColor={colors.sage}
+            strokeWidth={4}
+            lineCap="round"
+            lineJoin="round"
+          />
+        ) : selectedBalade?.arrivee_lat != null && selectedBalade?.arrivee_lng != null && (
           <Polyline
             coordinates={[
               { latitude: selectedBalade.depart_lat, longitude: selectedBalade.depart_lng },
@@ -2467,6 +2531,9 @@ export default function CarteScreen() {
             lineCap="round"
             lineJoin="round"
           />
+        )}
+        {baladeTracking && baladeTrace.length > 1 && (
+          <Polyline coordinates={baladeTrace} strokeColor={colors.terra} strokeWidth={5} lineCap="round" lineJoin="round" />
         )}
       </MapView>
 
@@ -2832,23 +2899,32 @@ export default function CarteScreen() {
         <Ionicons name="locate" size={22} color={colors.bordeaux} />
       </TouchableOpacity>
 
-      {pickingBaladeDepart && (
-        <View style={styles.pickModeBanner}>
-          <Ionicons name="location-outline" size={16} color={colors.ivory} />
-          <Text style={styles.pickModeBannerText}>Tape sur la carte pour le départ</Text>
-          <TouchableOpacity onPress={() => { setPickingBaladeDepart(false); setBaladeDepartLat(null); setBaladeDepartLng(null); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="close" size={18} color={colors.ivory} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {pickingBaladeArrivee && (
-        <View style={[styles.pickModeBanner, { backgroundColor: colors.sage }]}>
-          <Ionicons name="flag-outline" size={16} color={colors.ivory} />
-          <Text style={styles.pickModeBannerText}>Tape sur la carte pour l'arrivée</Text>
-          <TouchableOpacity onPress={() => { setPickingBaladeArrivee(false); setBaladeFormVisible(true); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="close" size={18} color={colors.ivory} />
-          </TouchableOpacity>
+      {baladeTracking && (
+        <View style={styles.baladeTrackingBar}>
+          <View style={styles.baladeTrackingStats}>
+            <View style={styles.baladeTrackingStatItem}>
+              <Text style={styles.baladeTrackingStatValue}>{fmtDuree(baladeElapsedSec)}</Text>
+              <Text style={styles.baladeTrackingStatLabel}>durée</Text>
+            </View>
+            <View style={styles.baladeTrackingStatItem}>
+              <Text style={styles.baladeTrackingStatValue}>{baladeLiveDistanceKm.toFixed(2)}</Text>
+              <Text style={styles.baladeTrackingStatLabel}>km</Text>
+            </View>
+          </View>
+          <View style={styles.baladeTrackingActions}>
+            {baladePaused ? (
+              <TouchableOpacity style={styles.baladeTrackingBtn} onPress={resumeBaladeTracking}>
+                <Ionicons name="play" size={18} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.baladeTrackingBtn} onPress={pauseBaladeTracking}>
+                <Ionicons name="pause" size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[styles.baladeTrackingBtn, styles.baladeTrackingStopBtn]} onPress={stopBaladeTracking}>
+              <Ionicons name="stop" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -2860,8 +2936,8 @@ export default function CarteScreen() {
               <Ionicons name="location-outline" size={18} color="#fff" />
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => setPickingBaladeDepart(true)); }}>
-            <Text style={styles.fabMenuLabel}>Proposer une balade</Text>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => requireAuth(() => startBaladeTracking())}>
+            <Text style={styles.fabMenuLabel}>Démarrer une balade</Text>
             <View style={[styles.fabMenuIcon, { backgroundColor: '#2E7D6B' }]}>
               <Ionicons name="walk-outline" size={18} color="#fff" />
             </View>
@@ -3516,6 +3592,10 @@ export default function CarteScreen() {
               <Text style={styles.baladeSheetAuthor}>
                 Par {selectedBalade.profils?.prenom || 'un membre'}
                 {selectedBalade.distance_km ? ` · ${selectedBalade.distance_km} km` : ''}
+                {(selectedBalade as any).duree_secondes ? ` · ${fmtDuree((selectedBalade as any).duree_secondes)}` : ''}
+                {(selectedBalade as any).duree_secondes && selectedBalade.distance_km
+                  ? ` · ${fmtAllure((selectedBalade as any).duree_secondes, selectedBalade.distance_km)}`
+                  : ''}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setSelectedBalade(null)}>
@@ -3552,94 +3632,83 @@ export default function CarteScreen() {
       </Modal>
     )}
 
-    {/* ── Balade formulaire ── */}
-    {baladeFormVisible && (
-      <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setBaladeFormVisible(false)}>
+    {/* ── Balade : résumé + publication après le suivi live ── */}
+    {baladeSummaryVisible && (
+      <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={() => {}}>
         <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.ivory }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.baladeForm} keyboardShouldPersistTaps="handled">
             <View style={styles.baladeFormHeader}>
-              <TouchableOpacity onPress={() => { setBaladeFormVisible(false); setBaladeDepartLat(null); setBaladeDepartLng(null); }}>
+              <TouchableOpacity onPress={() => Alert.alert('Abandonner la balade ?', 'Le trajet enregistré sera perdu.', [
+                { text: 'Continuer', style: 'cancel' },
+                { text: 'Abandonner', style: 'destructive', onPress: discardBaladeTracking },
+              ])}>
                 <Ionicons name="close" size={24} color={colors.bordeaux} />
               </TouchableOpacity>
-              <Text style={styles.baladeFormTitle}>Proposer une balade</Text>
+              <Text style={styles.baladeFormTitle}>Ta balade</Text>
               <TouchableOpacity
-                style={[styles.baladeFormSubmit, (!baladeNom.trim() || (!baladeArrivee.trim() && !baladeFinalArriveeCoords) || baladeLoading) && { opacity: 0.4 }]}
+                style={[styles.baladeFormSubmit, (!baladeNom.trim() || baladeLoading) && { opacity: 0.4 }]}
                 onPress={submitBalade}
-                disabled={!baladeNom.trim() || (!baladeArrivee.trim() && !baladeFinalArriveeCoords) || baladeLoading}
+                disabled={!baladeNom.trim() || baladeLoading}
               >
                 {baladeLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.baladeFormSubmitText}>Publier</Text>}
               </TouchableOpacity>
             </View>
 
+            {baladeTrace.length > 1 && (
+              <View style={styles.proposeMiniMapWrap}>
+                <MapView
+                  style={styles.proposeMiniMap}
+                  initialRegion={{
+                    latitude: (baladeTrace[0].latitude + baladeTrace[baladeTrace.length - 1].latitude) / 2,
+                    longitude: (baladeTrace[0].longitude + baladeTrace[baladeTrace.length - 1].longitude) / 2,
+                    latitudeDelta: 0.02, longitudeDelta: 0.02,
+                  }}
+                >
+                  <Polyline coordinates={baladeTrace} strokeColor={colors.sage} strokeWidth={4} />
+                  <Marker coordinate={baladeTrace[0]} pinColor={colors.sage} />
+                  <Marker coordinate={baladeTrace[baladeTrace.length - 1]} pinColor={colors.terra} />
+                </MapView>
+              </View>
+            )}
+
+            <View style={styles.baladeStatsRow}>
+              <View style={styles.baladeStatItem}>
+                <Text style={styles.baladeStatValue}>{baladeLiveDistanceKm.toFixed(2)}</Text>
+                <Text style={styles.baladeStatLabel}>km</Text>
+              </View>
+              <View style={styles.baladeStatItem}>
+                <Text style={styles.baladeStatValue}>{fmtDuree(baladeElapsedSec)}</Text>
+                <Text style={styles.baladeStatLabel}>durée</Text>
+              </View>
+              <View style={styles.baladeStatItem}>
+                <Text style={styles.baladeStatValue}>{fmtAllure(baladeElapsedSec, baladeLiveDistanceKm) || '—'}</Text>
+                <Text style={styles.baladeStatLabel}>allure</Text>
+              </View>
+            </View>
+
             <Text style={styles.baladeFormLabel}>Nom de la balade *</Text>
             <TextInput style={styles.baladeFormInput} placeholder="Ex : Tour du Bois de Vincennes" placeholderTextColor={colors.textMuted} value={baladeNom} onChangeText={setBaladeNom} />
 
-            <Text style={styles.baladeFormLabel}>Point d'arrivée *</Text>
-            {baladeFinalArriveeCoords ? (
-              <View style={styles.baladeArriveeMapRow}>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="flag" size={16} color={colors.sage} />
-                  <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux }}>Point placé sur la carte</Text>
-                </View>
-                <TouchableOpacity onPress={() => setBaladeFinalArriveeCoords(null)}>
-                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <TextInput style={styles.baladeFormInput} placeholder="Adresse ou nom du lieu d'arrivée" placeholderTextColor={colors.textMuted} value={baladeArrivee} onChangeText={setBaladeArrivee} />
-                <TouchableOpacity
-                  style={styles.baladeArriveeMapBtn}
-                  onPress={() => { setBaladeFormVisible(false); setPickingBaladeArrivee(true); }}
-                >
-                  <Ionicons name="map-outline" size={15} color={colors.bordeaux} />
-                  <Text style={styles.baladeArriveeMapBtnText}>Placer sur la carte</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
             <Text style={styles.baladeFormLabel}>Description (optionnel)</Text>
-            <TextInput style={[styles.baladeFormInput, { height: 90 }]} placeholder="Décris la balade, les points d'intérêt…" placeholderTextColor={colors.textMuted} value={baladeDesc} onChangeText={setBaladeDesc} multiline />
+            <TextInput style={[styles.baladeFormInput, { height: 90 }]} placeholder="Comment s'est passée la balade ?" placeholderTextColor={colors.textMuted} value={baladeDesc} onChangeText={setBaladeDesc} multiline />
 
-            {baladeFinalArriveeCoords && baladeDepartLat !== null && baladeDepartLng !== null ? (
-              <View style={styles.baladeDistanceInfo}>
-                <Ionicons name="navigate-outline" size={14} color={colors.sage} />
-                <Text style={styles.baladeDistanceInfoText}>
-                  {haversine(baladeDepartLat, baladeDepartLng, baladeFinalArriveeCoords.lat, baladeFinalArriveeCoords.lng).toFixed(1)} km à vol d'oiseau
-                </Text>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.baladeFormLabel}>Distance en km (optionnel)</Text>
-                <TextInput style={styles.baladeFormInput} placeholder="Ex : 4.5" placeholderTextColor={colors.textMuted} value={baladeDistance} onChangeText={setBaladeDistance} keyboardType="decimal-pad" />
-              </>
-            )}
-
-            <Text style={styles.baladeFormLabel}>Photo (optionnel)</Text>
-            {baladePhotoUri ? (
-              <View style={{ position: 'relative', marginBottom: 4 }}>
-                <Image source={{ uri: baladePhotoUri }} style={{ width: '100%', height: 160, borderRadius: 10 }} resizeMode="cover" />
-                <TouchableOpacity
-                  style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14, padding: 4 }}
-                  onPress={() => setBaladePhotoUri(null)}
-                >
-                  <Ionicons name="close" size={16} color="#fff" />
+            <Text style={styles.baladeFormLabel}>Photos (max {MAX_BALADE_PHOTOS})</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+              {baladePhotoUris.map((uri, idx) => (
+                <View key={idx} style={styles.proposeMediaThumb}>
+                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <TouchableOpacity style={styles.proposeMediaRemove} onPress={() => setBaladePhotoUris(p => p.filter((_, i) => i !== idx))}>
+                    <Ionicons name="close-circle" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {baladePhotoUris.length < MAX_BALADE_PHOTOS && (
+                <TouchableOpacity style={[styles.proposeMediaThumb, styles.proposeMediaAdd]} onPress={pickBaladePhotos}>
+                  <Ionicons name="camera-outline" size={24} color={colors.bordeaux} />
+                  <Text style={styles.proposeMediaAddLabel}>Ajouter</Text>
                 </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.baladePhotoBtn}
-                onPress={async () => {
-                  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                  if (!perm.granted) { Alert.alert('Permission refusée', 'Autorise l\'accès à ta galerie dans les Réglages.'); return; }
-                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
-                  if (!result.canceled && result.assets[0]) setBaladePhotoUri(result.assets[0].uri);
-                }}
-              >
-                <Ionicons name="image-outline" size={20} color={colors.textMuted} />
-                <Text style={styles.baladePhotoBtnText}>Ajouter une photo</Text>
-              </TouchableOpacity>
-            )}
+              )}
+            </ScrollView>
 
             <Text style={styles.baladeFormLabel}>Caractéristiques (optionnel)</Text>
             <View style={styles.baladeFiltresGrid}>
@@ -3838,14 +3907,23 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
   },
-  pickModeBanner: {
+  baladeTrackingBar: {
     position: 'absolute', bottom: 90, left: 16, right: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: colors.bordeaux, borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 5,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    backgroundColor: colors.bordeaux, borderRadius: 16,
+    paddingHorizontal: 18, paddingVertical: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
   },
-  pickModeBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  baladeTrackingStats: { flexDirection: 'row', gap: 20 },
+  baladeTrackingStatItem: { alignItems: 'flex-start' },
+  baladeTrackingStatValue: { fontFamily: 'DMSans_600SemiBold', fontSize: 18, color: colors.ivory },
+  baladeTrackingStatLabel: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.6)' },
+  baladeTrackingActions: { flexDirection: 'row', gap: 8 },
+  baladeTrackingBtn: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: colors.sage,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  baladeTrackingStopBtn: { backgroundColor: colors.terra },
   baladePin: { alignItems: 'center' },
   baladeBubble: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: '#2E7D6B',
@@ -3876,6 +3954,10 @@ const styles = StyleSheet.create({
   baladeFormSubmit: { backgroundColor: colors.bordeaux, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
   baladeFormSubmitText: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: '#fff' },
   baladeFormLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginBottom: 6, marginTop: 16 },
+  baladeStatsRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 16, paddingVertical: 14, backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
+  baladeStatItem: { alignItems: 'center' },
+  baladeStatValue: { fontFamily: 'DMSans_600SemiBold', fontSize: 20, color: colors.bordeaux },
+  baladeStatLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
   baladeFormInput: {
     backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,

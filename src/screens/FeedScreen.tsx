@@ -243,7 +243,10 @@ function BaladeCard({ post, onBaladePress }: {
   const author = post.profils?.prenom || 'Un membre';
   const parts = (post.caption || '').split(' · ');
   const nom = parts[0] || 'Balade';
-  const dist = parts[1] || null;
+  const meta = parts.slice(1).join(' · ') || null;
+  const [imgIndex, setImgIndex] = useState(0);
+  const images = post.images && post.images.length > 0 ? post.images : (post.image_url ? [post.image_url] : []);
+  const isCarousel = images.length > 1;
 
   return (
     <View style={[styles.postCard, styles.baladeCard]}>
@@ -253,11 +256,39 @@ function BaladeCard({ post, onBaladePress }: {
           <Text style={styles.postAuthor}>{author}</Text>
           <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
         </View>
+        {isCarousel && (
+          <View style={styles.carouselCounter}>
+            <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
+          </View>
+        )}
       </View>
 
-      {post.image_url ? (
-        <Image source={{ uri: post.image_url }} style={styles.postImage} resizeMode="cover" />
+      {images.length > 0 ? (
+        isCarousel ? (
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={e => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+              setImgIndex(idx);
+            }}
+          >
+            {images.map((uri, i) => (
+              <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
+            ))}
+          </ScrollView>
+        ) : (
+          <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
+        )
       ) : null}
+      {isCarousel && (
+        <View style={styles.carouselDots}>
+          {images.map((_, i) => (
+            <View key={i} style={[styles.carouselDot, i === imgIndex && styles.carouselDotActive]} />
+          ))}
+        </View>
+      )}
 
       <TouchableOpacity
         style={styles.baladeCardBody}
@@ -270,7 +301,7 @@ function BaladeCard({ post, onBaladePress }: {
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={styles.nouveauLieuLabel}>a partagé une balade</Text>
           <Text style={styles.baladeCardNom}>{nom}</Text>
-          {dist ? <Text style={styles.baladeCardMeta}>{dist}</Text> : null}
+          {meta ? <Text style={styles.baladeCardMeta}>{meta}</Text> : null}
         </View>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </TouchableOpacity>
