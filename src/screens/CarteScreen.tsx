@@ -1038,6 +1038,7 @@ export default function CarteScreen() {
     setActiveCat(next);
     setFavFilter(null);
     setAutresOpen(false);
+    setShowBalades(false);
     lastFetchedRegionRef.current = null;
     fetchLieux(region, next, true);
   }
@@ -1046,13 +1047,25 @@ export default function CarteScreen() {
     const next = cat === activeCat ? null : cat;
     setActiveCat(next);
     setFavFilter(null);
+    setShowBalades(false);
     lastFetchedRegionRef.current = null;
     setAutresOpen(false);
     fetchLieux(region, next, true);
   }
 
+  function onBaladesPress() {
+    const next = !showBalades;
+    setShowBalades(next);
+    if (next) {
+      setActiveCat(null);
+      setFavFilter(null);
+      setAutresOpen(false);
+    }
+  }
+
   async function onFavFilterPress(liste: string) {
     setAutresOpen(false);
+    setShowBalades(false);
     if (favFilter === liste) {
       setFavFilter(null);
       fetchLieux(region, activeCat, true);
@@ -2454,7 +2467,7 @@ export default function CarteScreen() {
         showsUserLocation
         showsMyLocationButton={false}
       >
-        {!showEvents && clusters.map((cluster: any) => {
+        {!showEvents && !showBalades && clusters.map((cluster: any) => {
           const [lng, lat] = cluster.geometry.coordinates;
           const { cluster: isCluster, cluster_id, point_count, lieu } = cluster.properties;
 
@@ -2810,6 +2823,13 @@ export default function CarteScreen() {
             );
           })}
           <TouchableOpacity
+            style={[styles.filterPill, showBalades && { backgroundColor: colors.sage, borderColor: colors.sage }]}
+            onPress={onBaladesPress}
+          >
+            <Ionicons name="walk-outline" size={13} color={showBalades ? '#fff' : colors.sage} />
+            <Text style={[styles.filterLabel, showBalades && styles.filterLabelActive]}>Balades</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.filterPill, (autresOpen || AUTRES_CATS.some(c => c.key === activeCat && !favFilter)) && { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux }]}
             onPress={() => setAutresOpen(v => !v)}
           >
@@ -2839,13 +2859,6 @@ export default function CarteScreen() {
           >
             <Ionicons name="calendar-outline" size={13} color={showEvents ? '#fff' : '#4A7FA5'} />
             <Text style={[styles.filterLabel, showEvents && styles.filterLabelActive]}>Événements</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterPill, showBalades && { backgroundColor: colors.sage, borderColor: colors.sage }]}
-            onPress={() => setShowBalades(v => !v)}
-          >
-            <Ionicons name="walk-outline" size={13} color={showBalades ? '#fff' : colors.sage} />
-            <Text style={[styles.filterLabel, showBalades && styles.filterLabelActive]}>Balades</Text>
           </TouchableOpacity>
         </ScrollView>}
 

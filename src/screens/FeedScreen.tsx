@@ -30,6 +30,8 @@ type CommunityPost = {
   lieu_id: string | null;
   auto_generated: boolean;
   created_at: string;
+  balade_id?: string | null;
+  balades?: { distance_km: number | null; duree_secondes: number | null } | null;
   profils: { prenom: string; avatar_url: string | null } | null;
   lieux: { id: string; nom: string; cat: string; ville: string } | null;
   community_post_likes: { user_id: string }[];
@@ -73,6 +75,22 @@ function timeAgo(date: string): string {
   const d = Math.floor(h / 24);
   if (d < 7) return `${d}j`;
   return new Date(date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+function fmtDureeFeed(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtAllureFeed(totalSec: number, km: number): string {
+  if (!km || km <= 0) return '';
+  const secPerKm = totalSec / km;
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}'${String(s).padStart(2, '0')}/km`;
 }
 
 function PostAvatar({ prenom, avatarUrl }: { prenom: string; avatarUrl: string | null }) {
@@ -236,17 +254,24 @@ function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPre
 
 // ─── BaladeCard ───────────────────────────────────────────────────────────────
 
-function BaladeCard({ post, onBaladePress }: {
+function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress }: {
   post: CommunityPost;
+  myUserId: string;
+  onLike: (postId: string) => void;
+  onCommentPress: (post: CommunityPost) => void;
   onBaladePress: (post: CommunityPost) => void;
 }) {
+  const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
+  const likeCount = post.community_post_likes.length;
+  const commentCount = post.community_post_comments.length;
   const author = post.profils?.prenom || 'Un membre';
-  const parts = (post.caption || '').split(' · ');
-  const nom = parts[0] || 'Balade';
-  const meta = parts.slice(1).join(' · ') || null;
+  const nom = (post.caption || '').split(' · ')[0] || 'Balade';
   const [imgIndex, setImgIndex] = useState(0);
   const images = post.images && post.images.length > 0 ? post.images : (post.image_url ? [post.image_url] : []);
   const isCarousel = images.length > 1;
+  const dist = post.balades?.distance_km ?? null;
+  const dureeSec = post.balades?.duree_secondes ?? null;
+  const allure = dist && dureeSec ? fmtAllureFeed(dureeSec, dist) : null;
 
   return (
     <View style={[styles.postCard, styles.baladeCard]}>
@@ -254,7 +279,7 @@ function BaladeCard({ post, onBaladePress }: {
         <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
         <View style={{ flex: 1 }}>
           <Text style={styles.postAuthor}>{author}</Text>
-          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+          <Text style={styles.postTime}>a partagé une balade · {timeAgo(post.created_at)}</Text>
         </View>
         {isCarousel && (
           <View style={styles.carouselCounter}>
@@ -263,25 +288,46 @@ function BaladeCard({ post, onBaladePress }: {
         )}
       </View>
 
-      {images.length > 0 ? (
-        isCarousel ? (
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={e => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-              setImgIndex(idx);
-            }}
-          >
-            {images.map((uri, i) => (
-              <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
-            ))}
-          </ScrollView>
-        ) : (
-          <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
-        )
-      ) : null}
+      <TouchableOpacity onPress={() => onBaladePress(post)} activeOpacity={0.85}>
+        <Text style={styles.baladeCardTitle}>{nom}</Text>
+
+        {(dist || dureeSec) && (
+          <View style={styles.baladeStravaStats}>
+            <View style={styles.baladeStravaStatItem}>
+              <Text style={styles.baladeStravaStatValue}>{dist ? `${dist} km` : '—'}</Text>
+              <Text style={styles.baladeStravaStatLabel}>Distance</Text>
+            </View>
+            <View style={styles.baladeStravaStatItem}>
+              <Text style={styles.baladeStravaStatValue}>{allure || '—'}</Text>
+              <Text style={styles.baladeStravaStatLabel}>Allure</Text>
+            </View>
+            <View style={styles.baladeStravaStatItem}>
+              <Text style={styles.baladeStravaStatValue}>{dureeSec ? fmtDureeFeed(dureeSec) : '—'}</Text>
+              <Text style={styles.baladeStravaStatLabel}>Durée</Text>
+            </View>
+          </View>
+        )}
+
+        {images.length > 0 ? (
+          isCarousel ? (
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={e => {
+                const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                setImgIndex(idx);
+              }}
+            >
+              {images.map((uri, i) => (
+                <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
+              ))}
+            </ScrollView>
+          ) : (
+            <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
+          )
+        ) : null}
+      </TouchableOpacity>
       {isCarousel && (
         <View style={styles.carouselDots}>
           {images.map((_, i) => (
@@ -290,21 +336,24 @@ function BaladeCard({ post, onBaladePress }: {
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.baladeCardBody}
-        onPress={() => onBaladePress(post)}
-        activeOpacity={0.8}
-      >
-        <View style={styles.baladeCardIconWrap}>
-          <Ionicons name="walk-outline" size={26} color={colors.sage} />
-        </View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={styles.nouveauLieuLabel}>a partagé une balade</Text>
-          <Text style={styles.baladeCardNom}>{nom}</Text>
-          {meta ? <Text style={styles.baladeCardMeta}>{meta}</Text> : null}
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-      </TouchableOpacity>
+      <View style={styles.postActions}>
+        <TouchableOpacity style={styles.postActionBtn} onPress={() => onLike(post.id)}>
+          <Ionicons
+            name={likedByMe ? 'heart' : 'heart-outline'}
+            size={22}
+            color={likedByMe ? '#E05070' : colors.bordeaux}
+          />
+          {likeCount > 0 && (
+            <Text style={[styles.postActionCount, likedByMe && { color: '#E05070' }]}>
+              {likeCount}
+            </Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.postActionBtn} onPress={() => onCommentPress(post)}>
+          <Ionicons name="chatbubble-outline" size={20} color={colors.bordeaux} />
+          {commentCount > 0 && <Text style={styles.postActionCount}>{commentCount}</Text>}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -745,7 +794,7 @@ export default function FeedScreen() {
     setFeedLoading(true);
 
     const myId = session?.user?.id || null;
-    const COMMUNITY_POST_FIELDS = 'id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, visibilite, community_post_likes (user_id), community_post_comments (id)';
+    const COMMUNITY_POST_FIELDS = 'id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, visibilite, balade_id, balades (distance_km, duree_secondes), community_post_likes (user_id), community_post_comments (id)';
 
     const [communityPhotoRes, communityLieuRes, restrictedBaladeRes, followingRes, photosRes] = await Promise.all([
       supabase
@@ -921,6 +970,12 @@ export default function FeedScreen() {
   }
 
   async function openBalade(post: CommunityPost) {
+    if (post.balade_id) {
+      mapNavigation.setPendingBalade(post.balade_id);
+      navigation.navigate('Carte' as any);
+      return;
+    }
+    // Anciens posts publiés avant l'ajout de balade_id : repli sur un matching approximatif
     const nom = (post.caption || '').split(' · ')[0].trim();
     if (!nom || !post.user_id) return;
     const { data } = await supabase
@@ -1056,6 +1111,9 @@ export default function FeedScreen() {
                 ) : item.type === 'balade' ? (
                   <BaladeCard
                     post={item}
+                    myUserId={myUserId || ''}
+                    onLike={toggleLike}
+                    onCommentPress={setCommentPost}
                     onBaladePress={openBalade}
                   />
                 ) : (
@@ -1276,19 +1334,16 @@ const styles = StyleSheet.create({
 
   // Balade card
   baladeCard: { borderLeftWidth: 3, borderLeftColor: colors.sage },
-  baladeCardBody: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginHorizontal: 14, marginBottom: 14, padding: 14,
-    backgroundColor: 'rgba(46,125,107,0.06)', borderRadius: 12,
-    borderWidth: 1, borderColor: 'rgba(46,125,107,0.18)',
+  baladeCardTitle: {
+    fontFamily: 'DMSans_600SemiBold', fontSize: 17, color: colors.bordeaux,
+    marginHorizontal: 14, marginBottom: 10,
   },
-  baladeCardIconWrap: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(46,125,107,0.25)',
+  baladeStravaStats: {
+    flexDirection: 'row', marginHorizontal: 14, marginBottom: 12, gap: 20,
   },
-  baladeCardNom:  { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
-  baladeCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.sage },
+  baladeStravaStatItem: { alignItems: 'flex-start' },
+  baladeStravaStatValue: { fontFamily: 'DMSans_600SemiBold', fontSize: 16, color: colors.bordeaux },
+  baladeStravaStatLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   baladeTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   baladeTypeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.sage },
 
