@@ -952,6 +952,7 @@ export default function CarteScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], quality: 0.8,
       allowsMultipleSelection: true, selectionLimit: MAX_BALADE_PHOTOS - baladePhotoUris.length,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
     if (result.canceled) return;
     setBaladePhotoUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_BALADE_PHOTOS));
@@ -1416,6 +1417,7 @@ export default function CarteScreen() {
             }
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ['images'], quality: 0.7, allowsMultipleSelection: true, selectionLimit: 3,
+              preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
             });
             if (result.canceled || !result.assets?.length) return;
             await handlePhotos(result.assets.map((a: any) => a.uri));
@@ -1640,6 +1642,7 @@ export default function CarteScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], quality: 0.8,
       allowsMultipleSelection: true, selectionLimit: 5 - proposePhotos.length,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
     if (result.canceled) return;
     setProposePhotos(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, 5));

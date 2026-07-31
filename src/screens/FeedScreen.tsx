@@ -514,6 +514,7 @@ function NewPostModal({
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'], quality: 0.8,
             allowsMultipleSelection: true, selectionLimit: remaining,
+            preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
           });
           if (!result.canceled) {
             setImageUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_PHOTOS));
