@@ -1721,12 +1721,16 @@ export default function CarteScreen() {
     }
     // Upload photos
     if (!error && insertedLieu?.id && proposePhotos.length) {
+      const groupId = proposePhotos.length > 1 ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null;
       for (const uri of proposePhotos) {
         try {
           const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
           const r2Key = `lieu-photos/${userId}/${insertedLieu.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
           const publicUrl = await uploadToR2(uri, r2Key);
-          await supabase.from('photos').insert({ lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: true });
+          await supabase.from('photos').insert({
+            lieu_id: insertedLieu.id, user_id: userId, url: publicUrl, validee: true,
+            ...(groupId ? { group_id: groupId } : {}),
+          });
         } catch {}
       }
     }
