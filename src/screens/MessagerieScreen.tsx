@@ -172,7 +172,6 @@ export default function MessagerieScreen({
   // ── Groupes state ──
   const [groupes, setGroupes] = useState<Groupe[]>([]);
   const [myConvIds, setMyConvIds] = useState<Set<string>>(new Set());
-  const [typeFilter, setTypeFilter] = useState<GroupeType | null>(null);
   const [groupesLoading, setGroupesLoading] = useState(false);
   const [createGroupeModal, setCreateGroupeModal] = useState(false);
   const [groupeForm, setGroupeForm] = useState<{ nom: string; description: string; ville: string; type: GroupeType; photoUri: string | null }>({ nom: '', description: '', ville: '', type: 'balade', photoUri: null });
@@ -196,8 +195,7 @@ export default function MessagerieScreen({
     return `${others.slice(0, 2).map(m => m.prenom).join(', ')} +${others.length - 2}`;
   }
 
-  const typesPresent = GROUPE_TYPES.filter(t => groupes.some(g => g.type === t));
-  const filteredGroupes = typeFilter ? groupes.filter(g => g.type === typeFilter) : groupes;
+  const filteredGroupes = groupes;
   // Les conversations de groupe (nom renseigne = cree via "Groupe prive") vont dans l'onglet Groupes, pas Messages
   const directConversations = conversations.filter(c => !c.nom);
   const groupChatConversations = conversations.filter(c => !!c.nom);
@@ -755,19 +753,6 @@ export default function MessagerieScreen({
       {/* ── Groupes tab ── */}
       {activeTab === 'groupes' && (
         <>
-          {/* Type filter chips */}
-          {typesPresent.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.villeScroll} contentContainerStyle={s.villeScrollContent}>
-              <TouchableOpacity style={[s.villeChip, !typeFilter && s.villeChipActive]} onPress={() => setTypeFilter(null)}>
-                <Text style={[s.villeChipText, !typeFilter && s.villeChipTextActive]} numberOfLines={1}>Tous</Text>
-              </TouchableOpacity>
-              {typesPresent.map(t => (
-                <TouchableOpacity key={t} style={[s.villeChip, typeFilter === t && s.villeChipActive]} onPress={() => setTypeFilter(typeFilter === t ? null : t)}>
-                  <Text style={[s.villeChipText, typeFilter === t && s.villeChipTextActive]} numberOfLines={1}>{GROUPE_TYPE_LABELS[t]}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
 
           {groupesLoading ? <ActivityIndicator style={{ flex: 1, marginTop: 40 }} color={colors.terra} /> : (
             <FlatList
