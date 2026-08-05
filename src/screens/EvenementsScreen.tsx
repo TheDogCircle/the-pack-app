@@ -68,12 +68,15 @@ export default function EvenementsScreen() {
 
   // Ouvre directement un evenement quand on arrive via une notification
   useEffect(() => {
-    if (!evenements.length) return;
     const pendingId = mapNavigation.consumeEvent();
-    if (pendingId) {
-      const found = evenements.find(e => e.id === pendingId);
-      if (found) setSelectedEvent(found);
-    }
+    if (!pendingId) return;
+    const found = evenements.find(e => e.id === pendingId);
+    if (found) { setSelectedEvent(found); return; }
+    // Pas dans la liste actuelle (filtre different) : on va le chercher directement
+    supabase.from('evenements')
+      .select('*, profils(prenom, username, avatar_url)')
+      .eq('id', pendingId).maybeSingle()
+      .then(({ data }) => { if (data) setSelectedEvent(data as Evenement); });
   }, [evenements]);
 
   async function load() {
