@@ -1,14 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, TextInput, Alert,
   Modal, Keyboard, Platform, Dimensions, ScrollView, KeyboardAvoidingView,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase, uploadToR2 } from '../lib/supabase';
+import { sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
@@ -763,6 +764,13 @@ export default function FeedScreen() {
   const { session, loading: sessionLoading } = useSession();
   const [tab, setTab] = useState<'feed' | 'messages' | 'membres'>('feed');
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [pendingConvId, setPendingConvId] = useState<string | null>(null);
+
+  // Notification "message" tapee : bascule sur l'onglet Chat et ouvre la conversation
+  useFocusEffect(useCallback(() => {
+    const cid = mapNavigation.consumeConversation();
+    if (cid) { setTab('messages'); setPendingConvId(cid); }
+  }, []));
 
   // Feed
   const [posts, setPosts] = useState<CommunityPost[]>([]);
@@ -931,6 +939,16 @@ export default function FeedScreen() {
     setFeedLoading(false);
   }
 
+  async function notifyPhotoLike(ownerId: string) {
+    if (!myUserId || ownerId === myUserId) return;
+    const [{ data: owner }, { data: me }] = await Promise.all([
+      supabase.from('profils').select('push_token,notif_photo_like').eq('id', ownerId).single(),
+      supabase.from('profils').select('prenom').eq('id', myUserId).single(),
+    ]);
+    if (!owner?.push_token || owner.notif_photo_like === false) return;
+    sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like' });
+  }
+
   function toggleLike(postId: string) {
     if (!myUserId) {
       Alert.alert('Connexion requise', 'Connecte-toi pour liker une photo.');
@@ -953,6 +971,7 @@ export default function FeedScreen() {
           .eq('photo_id', photoId).eq('user_id', myUserId).then(() => {});
       } else {
         supabase.from('photo_likes').insert({ photo_id: photoId, user_id: myUserId }).then(() => {});
+        notifyPhotoLike(post.user_id);
       }
     } else {
       if (liked) {
@@ -960,6 +979,7 @@ export default function FeedScreen() {
           .eq('post_id', postId).eq('user_id', myUserId).then(() => {});
       } else {
         supabase.from('community_post_likes').insert({ post_id: postId, user_id: myUserId }).then(() => {});
+        notifyPhotoLike(post.user_id);
       }
     }
   }
@@ -1079,7 +1099,10 @@ export default function FeedScreen() {
 
       {/* Chat */}
       {tab === 'messages' ? (
-        <MessagerieScreen />
+        <MessagerieScreen
+          pendingConversationId={pendingConvId}
+          onConsumedPendingConversation={() => setPendingConvId(null)}
+        />
 
       /* Feed */
       ) : tab === 'feed' ? (

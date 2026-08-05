@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, ScrollView,
-  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView,
+  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
@@ -17,7 +17,7 @@ type Evenement = {
   date_heure: string; adresse: string | null; ville: string;
   lat: number | null; lng: number | null;
   max_participants: number | null; payant: boolean; prix: number | null;
-  image_url: string | null;
+  image_url: string | null; site_web: string | null;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
   nb_inscrits?: number; je_suis_inscrit?: boolean;
   created_by?: string;
@@ -40,6 +40,7 @@ export default function EvenementsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('avenir');
+  const [villeFilter, setVilleFilter] = useState<string>('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
@@ -183,6 +184,9 @@ export default function EvenementsScreen() {
     { key: 'inscrits',label: 'Mes inscrits',  icon: 'checkmark-circle-outline' },
   ];
 
+  const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const evenementsAffiches = villeFilter ? evenements.filter(e => e.ville === villeFilter) : evenements;
+
   return (
     <View style={styles.container}>
       {/* Filtres */}
@@ -198,12 +202,33 @@ export default function EvenementsScreen() {
         ))}
       </View>
 
+      {/* Filtre ville */}
+      {villesDisponibles.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.villeScroll} contentContainerStyle={styles.villeScrollContent}>
+          <TouchableOpacity
+            style={[styles.villeChip, !villeFilter && styles.villeChipActive]}
+            onPress={() => setVilleFilter('')}
+          >
+            <Text style={[styles.villeChipText, !villeFilter && styles.villeChipTextActive]}>Toutes les villes</Text>
+          </TouchableOpacity>
+          {villesDisponibles.map(v => (
+            <TouchableOpacity
+              key={v}
+              style={[styles.villeChip, villeFilter === v && styles.villeChipActive]}
+              onPress={() => setVilleFilter(v)}
+            >
+              <Text style={[styles.villeChipText, villeFilter === v && styles.villeChipTextActive]}>{v}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {/* Liste */}
       {loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
         <FlatList
-          data={evenements}
+          data={evenementsAffiches}
           keyExtractor={e => e.id}
           contentContainerStyle={[styles.list, evenements.length === 0 && { flex: 1 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.terra} />}
@@ -252,8 +277,8 @@ export default function EvenementsScreen() {
                     <Text style={styles.infoText} numberOfLines={1}>{e.ville}{e.adresse ? ` — ${e.adresse}` : ''}</Text>
                   </View>
                   <View style={styles.cardFooter}>
-                    <Text style={styles.orgaText}>@{e.profils?.username || 'anonyme'}</Text>
-                    {e.nb_inscrits !== undefined && (
+                    <Text style={styles.orgaText}>{e.site_web ? 'Événement tiers' : `@${e.profils?.username || 'anonyme'}`}</Text>
+                    {!e.site_web && e.nb_inscrits !== undefined && (
                       <View style={styles.participantsRow}>
                         <Ionicons name="people-outline" size={12} color={colors.textMuted} />
                         <Text style={styles.participantsText}>{e.nb_inscrits}{e.max_participants ? `/${e.max_participants}` : ''}</Text>
@@ -293,7 +318,7 @@ export default function EvenementsScreen() {
                       {selectedEvent.payant
                         ? <View style={styles.paidBadge}><Text style={styles.paidText}>{selectedEvent.prix ? `${selectedEvent.prix} €` : 'Payant'}</Text></View>
                         : <View style={styles.freeBadge}><Text style={styles.freeText}>✓ Gratuit</Text></View>}
-                      {selectedEvent.nb_inscrits !== undefined && (
+                      {!selectedEvent.site_web && selectedEvent.nb_inscrits !== undefined && (
                         <View style={styles.countBadge}>
                           <Text style={styles.countText}>{selectedEvent.nb_inscrits}{selectedEvent.max_participants ? `/${selectedEvent.max_participants}` : ''} inscrits</Text>
                         </View>
@@ -314,12 +339,21 @@ export default function EvenementsScreen() {
                       </View>
                     </View>
                     <View style={[styles.modalInfoRow, { marginBottom: 16 }]}>
-                      <Ionicons name="person-outline" size={16} color={colors.textMuted} />
-                      <Text style={styles.modalInfoSub}>Organisé par @{selectedEvent.profils?.username || 'anonyme'}</Text>
+                      <Ionicons name={selectedEvent.site_web ? 'globe-outline' : 'person-outline'} size={16} color={colors.textMuted} />
+                      <Text style={styles.modalInfoSub}>
+                        {selectedEvent.site_web ? 'Événement organisé par un tiers' : `Organisé par @${selectedEvent.profils?.username || 'anonyme'}`}
+                      </Text>
                     </View>
                     {selectedEvent.description ? <Text style={styles.modalDesc}>{selectedEvent.description}</Text> : null}
 
-                    {isFull ? (
+                    {selectedEvent.site_web ? (
+                      <>
+                        <TouchableOpacity style={styles.joinBtn} onPress={() => Linking.openURL(selectedEvent.site_web!)}>
+                          <Text style={styles.joinBtnText}>Voir le site officiel</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.externalNote}>Inscription non disponible sur l'app — organisé par un tiers</Text>
+                      </>
+                    ) : isFull ? (
                       <View style={styles.fullBadge}><Text style={styles.fullText}>Complet — plus de places disponibles</Text></View>
                     ) : selectedEvent.je_suis_inscrit ? (
                       <TouchableOpacity style={styles.cancelBtn} onPress={() => toggleInscription(selectedEvent.id, false)} disabled={inscriptionLoading}>
@@ -440,6 +474,16 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
 
+  villeScroll: { marginHorizontal: 16, marginBottom: 8 },
+  villeScrollContent: { gap: 8, paddingRight: 16 },
+  villeChip: {
+    paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
+    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
+  },
+  villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  villeChipTextActive: { color: colors.ivory },
+
   list: { padding: 14, gap: 14, paddingBottom: 100 },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 48 },
@@ -496,6 +540,7 @@ const styles = StyleSheet.create({
   modalDesc: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 22, marginBottom: 20 },
   joinBtn: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 8 },
   joinBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  externalNote: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 8 },
   cancelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff3e0', borderRadius: 14, padding: 15, marginTop: 8, borderWidth: 1, borderColor: '#ffcc80' },
   cancelBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: '#e65100' },
   fullBadge: { backgroundColor: colors.ivoryPale, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8 },

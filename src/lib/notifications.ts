@@ -64,12 +64,23 @@ export async function sendPushNotification(
   body: string,
   data?: Record<string, unknown>,
 ): Promise<void> {
+  let ok = false;
+  let detail = '';
   try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ to: token, title, body, data, sound: 'default', badge: 1 }),
     });
+    const json = await res.json().catch(() => null);
+    const ticket = json?.data;
+    ok = res.ok && ticket?.status === 'ok';
+    detail = JSON.stringify({ httpStatus: res.status, ticket });
+  } catch (e: any) {
+    detail = `exception: ${e?.message || String(e)}`;
+  }
+  try {
+    await supabase.from('push_debug_logs').insert({ to_token: token, title, ok, detail });
   } catch {}
 }
 

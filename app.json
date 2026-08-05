@@ -3,7 +3,7 @@
     "name": "The Pack Club",
     "slug": "the-pack-app",
     "scheme": "thepack",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

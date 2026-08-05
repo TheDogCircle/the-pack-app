@@ -6,7 +6,7 @@ import { ActivityIndicator, View, Image, Linking, AppState } from 'react-native'
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
-import { savePushToken } from '../lib/notifications';
+import { savePushToken, clearBadge } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
 
 import { useSession } from '../hooks/useSession';
@@ -180,16 +180,23 @@ export default function Navigation() {
       const data = response.notification.request.content.data as any;
       if (!data || !navigationRef.isReady()) return;
 
-      if (data.type === 'new_lieu' || data.type === 'suggestion_validee') {
+      if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer') {
         if (data.lieuId) {
           mapNavigation.setPendingLieu(data.lieuId);
           navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
         }
+      } else if (data.type === 'photo_like') {
+        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
       } else if (data.type === 'new_event') {
         navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
       } else if (data.type === 'follow') {
         if (data.userId) {
           navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
+        }
+      } else if (data.type === 'message') {
+        if (data.conversationId) {
+          mapNavigation.setPendingConversation(data.conversationId);
+          navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
         }
       }
     });
@@ -205,10 +212,11 @@ export default function Navigation() {
     }
     // Enregistre le token dès la connexion, quel que soit l'écran ouvert
     savePushToken(session.user.id);
+    clearBadge();
 
-    // Renouvelle le token chaque fois que l'app revient au premier plan
+    // Renouvelle le token et efface la pastille chaque fois que l'app revient au premier plan
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') savePushToken(session.user.id);
+      if (state === 'active') { savePushToken(session.user.id); clearBadge(); }
     });
 
     setOnboardingChecked(false);

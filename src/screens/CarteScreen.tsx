@@ -3,7 +3,7 @@ import Supercluster from 'supercluster';
 import {
   View, StyleSheet, Text, TouchableOpacity, ActivityIndicator,
   Animated, ScrollView, Linking, Dimensions, Modal, Keyboard,
-  TextInput, KeyboardAvoidingView, Platform, Alert, FlatList, Image, Share, PanResponder,
+  TextInput, KeyboardAvoidingView, Platform, Alert, FlatList, Image, Share, PanResponder, Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
+import { sendPushNotification } from '../lib/notifications';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
 
@@ -703,7 +704,7 @@ export default function CarteScreen() {
         .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,google_photo_url,created_at,mise_en_avant').eq('actif', true)
         .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
         .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
-        .limit(500);
+        .limit(3000);
       if (cat) query = (query as any).eq('cat', cat);
       const { data } = await query;
       const newPlaces = data || [];
@@ -1293,6 +1294,17 @@ export default function CarteScreen() {
       await supabase.from('photo_likes').delete().eq('photo_id', photoId).eq('user_id', userId);
     } else {
       await supabase.from('photo_likes').insert({ photo_id: photoId, user_id: userId });
+      const { data: photoRow } = await supabase.from('photos').select('user_id').eq('id', photoId).single();
+      const ownerId = photoRow?.user_id;
+      if (ownerId && ownerId !== userId) {
+        const [{ data: owner }, { data: me }] = await Promise.all([
+          supabase.from('profils').select('push_token,notif_photo_like').eq('id', ownerId).single(),
+          supabase.from('profils').select('prenom').eq('id', userId).single(),
+        ]);
+        if (owner?.push_token && owner.notif_photo_like !== false) {
+          sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like' });
+        }
+      }
     }
   }
 
@@ -1853,7 +1865,7 @@ export default function CarteScreen() {
   }, [lieux, filterMinNote, filterEquipements, filterCat, filterDistance, userLat, userLng]);
 
   const clusterIndex = useMemo(() => {
-    const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 14 });
+    const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 13 });
     index.load(filteredLieux.map(l => ({
       type: 'Feature' as const,
       geometry: { type: 'Point' as const, coordinates: [l.lng, l.lat] },
@@ -1875,8 +1887,7 @@ export default function CarteScreen() {
       region.latitude + region.latitudeDelta / 2,
     ];
     try {
-      const all = clusterIndex.getClusters(bbox, zoom);
-      return all.slice(0, 300);
+      return clusterIndex.getClusters(bbox, zoom);
     } catch {
       return [];
     }
@@ -2101,29 +2112,6 @@ export default function CarteScreen() {
               }
             </TouchableOpacity>
 
-            {/* Dropdown favori inline */}
-            {favModal && (
-              <View style={styles.favDropdown}>
-                {FAV_LISTS.map((f, idx) => (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[styles.favDropdownRow, idx < FAV_LISTS.length - 1 && styles.favDropdownBorder, favListe === f.key && { backgroundColor: f.color + '14' }]}
-                    onPress={() => chooseFavListe(f.key)}
-                  >
-                    <Ionicons name={f.icon} size={16} color={f.color} />
-                    <Text style={[styles.favDropdownLabel, favListe === f.key && { color: f.color, fontFamily: 'DMSans_500Medium' }]}>{f.label}</Text>
-                    {favListe === f.key && <Ionicons name="checkmark" size={14} color={f.color} />}
-                  </TouchableOpacity>
-                ))}
-                {favListe && (
-                  <TouchableOpacity style={[styles.favDropdownRow, styles.favDropdownBorder, { borderTopColor: colors.border }]} onPress={() => chooseFavListe(null)}>
-                    <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
-                    <Text style={[styles.favDropdownLabel, { color: colors.textMuted }]}>Retirer</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
             {/* Crédits photo (bas droite) */}
             {currentPhoto && (
               <View style={styles.fichePhotoCredits}>
@@ -2152,6 +2140,32 @@ export default function CarteScreen() {
               </View>
             )}
           </View>
+
+          {/* Dropdown favori (hors du header photo pour ne pas etre coupe par overflow:hidden) */}
+          {favModal && (
+            <>
+              <Pressable style={styles.favDropdownBackdrop} onPress={() => setFavModal(false)} />
+              <View style={styles.favDropdown}>
+                {FAV_LISTS.map((f, idx) => (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.favDropdownRow, idx < FAV_LISTS.length - 1 && styles.favDropdownBorder, favListe === f.key && { backgroundColor: f.color + '14' }]}
+                    onPress={() => chooseFavListe(f.key)}
+                  >
+                    <Ionicons name={f.icon} size={16} color={f.color} />
+                    <Text style={[styles.favDropdownLabel, favListe === f.key && { color: f.color, fontFamily: 'DMSans_500Medium' }]}>{f.label}</Text>
+                    {favListe === f.key && <Ionicons name="checkmark" size={14} color={f.color} />}
+                  </TouchableOpacity>
+                ))}
+                {favListe && (
+                  <TouchableOpacity style={[styles.favDropdownRow, styles.favDropdownBorder, { borderTopColor: colors.border }]} onPress={() => chooseFavListe(null)}>
+                    <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
+                    <Text style={[styles.favDropdownLabel, { color: colors.textMuted }]}>Retirer</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </>
+          )}
 
           {/* ====== INFO BLOC ====== */}
           <View style={styles.ficheInfoBlock}>
@@ -4205,6 +4219,9 @@ const styles = StyleSheet.create({
   ficheAvisReponseText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 17 },
   certInlineBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(34,168,85,0.1)', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 3 },
   certInlineText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#1a6b35' },
+  favDropdownBackdrop: {
+    position: 'absolute', top: -2000, left: -2000, right: -2000, bottom: -2000, zIndex: 49,
+  },
   favDropdown: {
     position: 'absolute', top: 52, right: 48, zIndex: 50, minWidth: 168,
     backgroundColor: colors.white, borderRadius: 12,

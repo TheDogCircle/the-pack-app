@@ -131,7 +131,9 @@ function GroupeCard({
 
 // ── Main screen ──────────────────────────────────────────────────────────────
 
-export default function MessagerieScreen() {
+export default function MessagerieScreen({
+  pendingConversationId, onConsumedPendingConversation,
+}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void } = {}) {
   const navigation = useNavigation<any>();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
@@ -198,6 +200,16 @@ export default function MessagerieScreen() {
 
   // ── Effects ──
   useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
+
+  // Ouvre directement une conversation quand on arrive via une notification push
+  useEffect(() => {
+    if (!pendingConversationId || !conversations.length) return;
+    const conv = conversations.find(c => c.id === pendingConversationId);
+    if (conv) {
+      openConversation(conv);
+      onConsumedPendingConversation?.();
+    }
+  }, [pendingConversationId, conversations]);
 
   // Deep link: thepack://groupe?id=xxx
   useEffect(() => {
@@ -422,7 +434,7 @@ export default function MessagerieScreen() {
       if (!p.push_token) continue;
       if (p.notif_messages === false) continue;
       if (mutedSet.has(p.id)) continue;
-      sendPushNotification(p.push_token, convName, `${myPrenom} : ${text}`, { conversationId: conv.id });
+      sendPushNotification(p.push_token, convName, `${myPrenom} : ${text}`, { type: 'message', conversationId: conv.id });
     }
   }
 
