@@ -161,6 +161,38 @@ export default function Navigation() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   // Stores a profil userId to navigate to once NavigationContainer is ready
   const [pendingProfilId, setPendingProfilId] = useState<string | null>(null);
+  // Stores a notification's data payload to apply once NavigationContainer is ready
+  // (ex: app ouverte a froid en tapant sur la notif, la nav n'est pas encore montee)
+  const [pendingNotifData, setPendingNotifData] = useState<any | null>(null);
+
+  function applyNotificationData(data: any) {
+    if (!data) return;
+    if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer') {
+      if (data.lieuId) {
+        mapNavigation.setPendingLieu(data.lieuId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
+      }
+    } else if (data.type === 'photo_like') {
+      navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
+    } else if (data.type === 'new_event') {
+      navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+    } else if (data.type === 'follow') {
+      if (data.userId) {
+        navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
+      }
+    } else if (data.type === 'message') {
+      if (data.conversationId) {
+        mapNavigation.setPendingConversation(data.conversationId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
+      }
+    }
+  }
+
+  function handleNotificationResponse(data: any) {
+    if (!data) return;
+    if (navigationRef.isReady()) applyNotificationData(data);
+    else setPendingNotifData(data);
+  }
 
   useEffect(() => {
     // Cold start: store the URL, navigate in onReady
@@ -175,30 +207,15 @@ export default function Navigation() {
       }
     });
 
+    // App ouverte a froid en tapant sur une notif : le listener ci-dessous ne recoit pas
+    // toujours cet evenement de lancement, on le recupere explicitement.
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (response) handleNotificationResponse(response.notification.request.content.data as any);
+    });
+
     // Tap on push notification → deep link
     const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data as any;
-      if (!data || !navigationRef.isReady()) return;
-
-      if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer') {
-        if (data.lieuId) {
-          mapNavigation.setPendingLieu(data.lieuId);
-          navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
-        }
-      } else if (data.type === 'photo_like') {
-        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
-      } else if (data.type === 'new_event') {
-        navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
-      } else if (data.type === 'follow') {
-        if (data.userId) {
-          navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
-        }
-      } else if (data.type === 'message') {
-        if (data.conversationId) {
-          mapNavigation.setPendingConversation(data.conversationId);
-          navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
-        }
-      }
+      handleNotificationResponse(response.notification.request.content.data as any);
     });
 
     return () => { linkSub.remove(); notifSub.remove(); };
@@ -242,6 +259,10 @@ export default function Navigation() {
         if (pendingProfilId) {
           navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
           setPendingProfilId(null);
+        }
+        if (pendingNotifData) {
+          applyNotificationData(pendingNotifData);
+          setPendingNotifData(null);
         }
       }}>
       <Stack.Navigator
