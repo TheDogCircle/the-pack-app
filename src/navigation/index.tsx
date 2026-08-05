@@ -203,6 +203,10 @@ export default function Navigation() {
 
   function handleNotificationResponse(data: any) {
     clearBadge();
+    supabase.from('push_debug_logs').insert({
+      to_token: 'TAP', title: 'notif_tap',
+      detail: JSON.stringify({ data, navReady: navigationRef.isReady() }),
+    }).then(() => {}, () => {});
     if (!data) return;
     if (navigationRef.isReady()) applyNotificationData(data);
     else setPendingNotifData(data);
