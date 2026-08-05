@@ -213,6 +213,11 @@ export default function Navigation() {
   }
 
   useEffect(() => {
+    supabase.from('push_debug_logs').insert({
+      to_token: 'MOUNT', title: 'listener_registered',
+      detail: JSON.stringify({ at: new Date().toISOString() }),
+    }).then(() => {}, () => {});
+
     // Cold start: store the URL, navigate in onReady
     Linking.getInitialURL().then(url => {
       if (url) { const id = parseProfilLink(url); if (id) setPendingProfilId(id); }
