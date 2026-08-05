@@ -3,7 +3,7 @@
     "name": "The Pack Club",
     "slug": "the-pack-app",
     "scheme": "thepack",
-    "version": "1.0.4",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -82,7 +82,9 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/b1b30d44-9f5a-468b-b0ae-5591c3117b11"
+      "url": "https://u.expo.dev/b1b30d44-9f5a-468b-b0ae-5591c3117b11",
+      "checkAutomatically": "NEVER",
+      "fallbackToCacheTimeout": 0
     }
   }
 }
