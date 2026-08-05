@@ -163,6 +163,7 @@ export default function MessagerieScreen({
   const [convMode, setConvMode] = useState<'direct' | 'groupe'>('direct');
   const [groupName, setGroupName] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [memberSearch, setMemberSearch] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -197,6 +198,9 @@ export default function MessagerieScreen({
 
   const typesPresent = GROUPE_TYPES.filter(t => groupes.some(g => g.type === t));
   const filteredGroupes = typeFilter ? groupes.filter(g => g.type === typeFilter) : groupes;
+  // Les conversations de groupe (nom renseigne = cree via "Groupe prive") vont dans l'onglet Groupes, pas Messages
+  const directConversations = conversations.filter(c => !c.nom);
+  const groupChatConversations = conversations.filter(c => !!c.nom);
 
   // ── Effects ──
   useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
@@ -446,7 +450,7 @@ export default function MessagerieScreen({
       const { data } = await supabase.from('profils').select('id,prenom,avatar_url,ville').in('id', ids);
       setContacts((data || []).map((p: any) => ({ id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ville: p.ville || null })));
     } else { setContacts([]); }
-    setSelectedMembers([]); setGroupName(''); setConvMode('direct');
+    setSelectedMembers([]); setGroupName(''); setConvMode('direct'); setMemberSearch('');
     setCreateModal(true);
   }
 
@@ -710,9 +714,9 @@ export default function MessagerieScreen({
         <>
           {loading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
             <FlatList
-              data={conversations}
+              data={directConversations}
               keyExtractor={c => c.id}
-              contentContainerStyle={[s.list, conversations.length === 0 && { flex: 1 }]}
+              contentContainerStyle={[s.list, directConversations.length === 0 && { flex: 1 }]}
               onRefresh={loadConversations}
               refreshing={loading}
               ListEmptyComponent={
@@ -772,12 +776,40 @@ export default function MessagerieScreen({
               contentContainerStyle={[s.groupesList, filteredGroupes.length === 0 && { flex: 1 }]}
               onRefresh={loadGroupes}
               refreshing={groupesLoading}
+              ListHeaderComponent={
+                groupChatConversations.length > 0 ? (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={s.groupChatSectionTitle}>Mes discussions de groupe</Text>
+                    {groupChatConversations.map(conv => {
+                      const lastMsg = conv.last_message;
+                      const sender = lastMsg ? conv.members.find(m => m.user_id === lastMsg.user_id) : null;
+                      const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.contenu}` : 'Aucun message';
+                      return (
+                        <TouchableOpacity key={conv.id} style={s.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
+                          {renderConvAvatar(conv)}
+                          <View style={s.convInfo}>
+                            <View style={s.convTopRow}>
+                              <Text style={s.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
+                              {lastMsg && <Text style={s.convTime}>{fmtTime(lastMsg.created_at)}</Text>}
+                            </View>
+                            <Text style={s.convPreview} numberOfLines={1}>{preview}</Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color={colors.border} />
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {filteredGroupes.length > 0 && <Text style={[s.groupChatSectionTitle, { marginTop: 16 }]}>Groupes publics</Text>}
+                  </View>
+                ) : null
+              }
               ListEmptyComponent={
-                <View style={s.empty}>
-                  <Ionicons name="people-outline" size={44} color={colors.border} />
-                  <Text style={s.emptyTitle}>Pas encore de groupe</Text>
-                  <Text style={s.emptyText}>Crée le premier groupe pour ta ville !</Text>
-                </View>
+                groupChatConversations.length === 0 ? (
+                  <View style={s.empty}>
+                    <Ionicons name="people-outline" size={44} color={colors.border} />
+                    <Text style={s.emptyTitle}>Pas encore de groupe</Text>
+                    <Text style={s.emptyText}>Crée le premier groupe pour ta ville !</Text>
+                  </View>
+                ) : null
               }
               renderItem={({ item: groupe }) => (
                 <GroupeCard
@@ -826,8 +858,32 @@ export default function MessagerieScreen({
               {contacts.length === 0 ? (
                 <View style={s.noFollowsWrap}><Ionicons name="people-outline" size={32} color={colors.border} /><Text style={s.noFollowsText}>Suis des membres pour leur envoyer un message.</Text></View>
               ) : (
+                <>
+                  <View style={s.memberSearchWrap}>
+                    <Ionicons name="search" size={16} color={colors.textMuted} />
+                    <TextInput
+                      style={s.memberSearchInput}
+                      value={memberSearch}
+                      onChangeText={setMemberSearch}
+                      placeholder="Rechercher un membre..."
+                      placeholderTextColor={colors.textMuted}
+                    />
+                    {memberSearch.length > 0 && (
+                      <TouchableOpacity onPress={() => setMemberSearch('')}>
+                        <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {(() => {
+                    const filteredContacts = memberSearch.trim()
+                      ? contacts.filter(f => f.prenom.toLowerCase().includes(memberSearch.trim().toLowerCase()))
+                      : contacts;
+                    if (filteredContacts.length === 0) {
+                      return <View style={s.noFollowsWrap}><Text style={s.noFollowsText}>Aucun membre trouvé.</Text></View>;
+                    }
+                    return (
                 <FlatList
-                  data={contacts} keyExtractor={f => f.id} style={{ maxHeight: 260 }}
+                  data={filteredContacts} keyExtractor={f => f.id} style={{ maxHeight: 260 }}
                   renderItem={({ item: f }) => {
                     const selected = selectedMembers.includes(f.id);
                     const disabledDM = convMode === 'direct' && selectedMembers.length === 1 && !selected;
@@ -843,6 +899,9 @@ export default function MessagerieScreen({
                     );
                   }}
                 />
+                    );
+                  })()}
+                </>
               )}
               <TouchableOpacity style={[s.createBtn, (!selectedMembers.length || creating) && s.createBtnDisabled]} onPress={createConversation} disabled={!selectedMembers.length || creating}>
                 {creating ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>{convMode === 'direct' ? 'Démarrer la conversation' : 'Créer le groupe privé'}</Text>}
@@ -975,6 +1034,7 @@ const s = StyleSheet.create({
 
   list: { paddingBottom: 100 },
   groupesList: { padding: 14, paddingBottom: 100, gap: 14 },
+  groupChatSectionTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 48 },
   emptyTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
@@ -1038,6 +1098,12 @@ const s = StyleSheet.create({
   photoPickerImage: { width: '100%', height: '100%' },
   photoPickerText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   membersLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  memberSearchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.white, marginTop: 8, marginBottom: 4,
+  },
+  memberSearchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, padding: 0 },
   noFollowsWrap: { alignItems: 'center', gap: 8, paddingVertical: 20 },
   noFollowsText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.white, marginBottom: 6, borderWidth: 1, borderColor: colors.border },
