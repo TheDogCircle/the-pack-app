@@ -233,15 +233,36 @@ export default function Navigation() {
     // App ouverte a froid en tapant sur une notif : le listener ci-dessous ne recoit pas
     // toujours cet evenement de lancement, on le recupere explicitement.
     Notifications.getLastNotificationResponseAsync().then(response => {
+      supabase.from('push_debug_logs').insert({
+        to_token: 'LASTRESP', title: 'getLastNotificationResponseAsync',
+        detail: JSON.stringify({ hasResponse: !!response, data: response?.notification?.request?.content?.data ?? null }),
+      }).then(() => {}, () => {});
       if (response) handleNotificationResponse(response.notification.request.content.data as any);
+    }, err => {
+      supabase.from('push_debug_logs').insert({
+        to_token: 'LASTRESP_ERR', title: 'getLastNotificationResponseAsync failed',
+        detail: String(err),
+      }).then(() => {}, () => {});
     });
 
     // Tap on push notification → deep link
-    const notifSub = Notifications.addNotificationResponseReceivedListener(response => {
-      handleNotificationResponse(response.notification.request.content.data as any);
-    });
+    let notifSub: { remove: () => void } | null = null;
+    try {
+      notifSub = Notifications.addNotificationResponseReceivedListener(response => {
+        handleNotificationResponse(response.notification.request.content.data as any);
+      });
+      supabase.from('push_debug_logs').insert({
+        to_token: 'LISTENER_OK', title: 'addNotificationResponseReceivedListener registered',
+        detail: '',
+      }).then(() => {}, () => {});
+    } catch (err) {
+      supabase.from('push_debug_logs').insert({
+        to_token: 'LISTENER_ERR', title: 'addNotificationResponseReceivedListener threw',
+        detail: String(err),
+      }).then(() => {}, () => {});
+    }
 
-    return () => { linkSub.remove(); notifSub.remove(); };
+    return () => { linkSub.remove(); notifSub?.remove(); };
   }, []);
 
   useEffect(() => {

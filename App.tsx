@@ -22,8 +22,12 @@ async function checkForOTAUpdate() {
     if (!Updates.isEnabled) return;
     const update = await Updates.checkForUpdateAsync();
     if (update.isAvailable) {
+      // On telecharge la mise a jour mais on NE recharge PAS immediatement :
+      // un reload en plein lancement (ex: ouverture via une notification) coupe
+      // l'ecran et efface le contexte de lancement (notif tapee, lien profond...).
+      // La mise a jour telechargee sera utilisee automatiquement au prochain
+      // demarrage complet de l'app.
       await Updates.fetchUpdateAsync();
-      await Updates.reloadAsync();
     }
   } catch (_) {}
 }
