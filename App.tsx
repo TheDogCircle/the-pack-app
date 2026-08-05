@@ -13,10 +13,8 @@ import {
   DMSans_400Regular,
   DMSans_500Medium,
 } from '@expo-google-fonts/dm-sans';
-import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
-import Navigation, { navigationRef } from './src/navigation';
-import { mapNavigation } from './src/lib/mapNavigation';
+import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
 
 async function checkForOTAUpdate() {
@@ -44,27 +42,11 @@ export default function App() {
       appStateRef.current = next;
     });
 
-    // Gère le tap sur une notification (app en arrière-plan ou fermée)
-    const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
-      clearBadge();
-      const data = response.notification.request.content.data as any;
-      if (!navigationRef.isReady()) return;
-
-      if ((data?.type === 'new_lieu' && data?.lieuId) ||
-          (data?.type === 'suggestion_validee' && data?.lieu_id)) {
-        const lieuId = data?.lieuId ?? data?.lieu_id;
-        mapNavigation.setPendingLieu(lieuId);
-        navigationRef.navigate('Tabs', { screen: 'Carte' } as any);
-      } else if (data?.type === 'follow' && data?.userId) {
-        navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
-      } else if (data?.conversationId) {
-        navigationRef.navigate('Tabs', { screen: 'Meute' } as any);
-      }
-    });
+    // Le tap sur une notification est gere dans src/navigation/index.tsx (un seul
+    // gestionnaire, pour eviter deux listeners concurrents avec une logique differente)
 
     return () => {
       appStateSub.remove();
-      responseSub.remove();
     };
   }, []);
 

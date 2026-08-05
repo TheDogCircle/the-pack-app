@@ -202,6 +202,7 @@ export default function Navigation() {
   }
 
   function handleNotificationResponse(data: any) {
+    clearBadge();
     if (!data) return;
     if (navigationRef.isReady()) applyNotificationData(data);
     else setPendingNotifData(data);
