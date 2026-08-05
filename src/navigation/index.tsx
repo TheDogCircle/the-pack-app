@@ -185,6 +185,19 @@ export default function Navigation() {
         mapNavigation.setPendingConversation(data.conversationId);
         navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
       }
+    } else if (data.type === 'broadcast') {
+      if (data.targetType === 'lieu' && data.lieuId) {
+        mapNavigation.setPendingLieu(data.lieuId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
+      } else if (data.targetType === 'event' && data.eventId) {
+        mapNavigation.setPendingEvent(data.eventId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+      } else if (data.targetType === 'conversation' && data.conversationId) {
+        mapNavigation.setPendingConversation(data.conversationId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
+      } else if (data.targetType === 'url' && data.url) {
+        Linking.openURL(data.url);
+      }
     }
   }
 

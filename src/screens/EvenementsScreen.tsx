@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
+import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
@@ -64,6 +65,16 @@ export default function EvenementsScreen() {
     if (session?.user?.id) setMyUserId(session.user.id);
     load();
   }, [session?.user?.id, filter]);
+
+  // Ouvre directement un evenement quand on arrive via une notification
+  useEffect(() => {
+    if (!evenements.length) return;
+    const pendingId = mapNavigation.consumeEvent();
+    if (pendingId) {
+      const found = evenements.find(e => e.id === pendingId);
+      if (found) setSelectedEvent(found);
+    }
+  }, [evenements]);
 
   async function load() {
     setLoading(true);

@@ -3,6 +3,7 @@ let _returnCallback: (() => void) | null = null;
 let _pendingProposeName: string | null = null;
 let _pendingBaladeId: string | null = null;
 let _pendingConversationId: string | null = null;
+let _pendingEventId: string | null = null;
 
 export const mapNavigation = {
   setPendingLieu(id: string, returnCallback?: () => void) {
@@ -19,4 +20,6 @@ export const mapNavigation = {
   consumeBalade(): string | null { const id = _pendingBaladeId; _pendingBaladeId = null; return id; },
   setPendingConversation(id: string) { _pendingConversationId = id; },
   consumeConversation(): string | null { const id = _pendingConversationId; _pendingConversationId = null; return id; },
+  setPendingEvent(id: string) { _pendingEventId = id; },
+  consumeEvent(): string | null { const id = _pendingEventId; _pendingEventId = null; return id; },
 };

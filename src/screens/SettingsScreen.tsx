@@ -102,6 +102,7 @@ export default function SettingsScreen() {
   const [notifFriendLieu, setNotifFriendLieu] = useState(true);
   const [notifPartner, setNotifPartner] = useState(true);
   const [notifOffer, setNotifOffer] = useState(true);
+  const [notifBroadcast, setNotifBroadcast] = useState(true);
   const [rayonKm, setRayonKm] = useState(20);
   const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
@@ -163,7 +164,7 @@ export default function SettingsScreen() {
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
-        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,rayon_km,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,rayon_km,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
         .eq('id', session.user.id).single(),
       supabase.from('chiens')
         .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
@@ -181,6 +182,7 @@ export default function SettingsScreen() {
       setNotifFriendLieu(data.notif_friend_lieu ?? true);
       setNotifPartner(data.notif_partner ?? true);
       setNotifOffer(data.notif_offer ?? true);
+      setNotifBroadcast(data.notif_broadcast ?? true);
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
@@ -215,7 +217,7 @@ export default function SettingsScreen() {
     setLoading(false);
   }
 
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee' | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer', value: boolean) {
+  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee' | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer' | 'notif_broadcast', value: boolean) {
     if (!userId) return;
     if (key === 'notif_follow') setNotifFollow(value);
     else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
@@ -224,7 +226,8 @@ export default function SettingsScreen() {
     else if (key === 'notif_photo_like') setNotifPhotoLike(value);
     else if (key === 'notif_friend_lieu') setNotifFriendLieu(value);
     else if (key === 'notif_partner') setNotifPartner(value);
-    else setNotifOffer(value);
+    else if (key === 'notif_offer') setNotifOffer(value);
+    else setNotifBroadcast(value);
     await supabase.from('profils').update({ [key]: value }).eq('id', userId);
   }
 
@@ -660,12 +663,20 @@ export default function SettingsScreen() {
           <Switch value={notifPartner} onValueChange={v => toggleNotif('notif_partner', v)}
             trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
         </View>
-        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+        <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
             <Text style={styles.toggleLabel}>Nouvelle offre</Text>
             <Text style={styles.toggleSub}>Quand un partenaire ajoute ou met à jour une offre</Text>
           </View>
           <Switch value={notifOffer} onValueChange={v => toggleNotif('notif_offer', v)}
+            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
+        </View>
+        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Actualités & annonces</Text>
+            <Text style={styles.toggleSub}>Annonces générales de l'équipe The Pack Club</Text>
+          </View>
+          <Switch value={notifBroadcast} onValueChange={v => toggleNotif('notif_broadcast', v)}
             trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
         </View>
       </View>
