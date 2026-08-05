@@ -4,6 +4,7 @@ let _pendingProposeName: string | null = null;
 let _pendingBaladeId: string | null = null;
 let _pendingConversationId: string | null = null;
 let _pendingEventId: string | null = null;
+let _pendingPostId: string | null = null;
 
 export const mapNavigation = {
   setPendingLieu(id: string, returnCallback?: () => void) {
@@ -22,4 +23,6 @@ export const mapNavigation = {
   consumeConversation(): string | null { const id = _pendingConversationId; _pendingConversationId = null; return id; },
   setPendingEvent(id: string) { _pendingEventId = id; },
   consumeEvent(): string | null { const id = _pendingEventId; _pendingEventId = null; return id; },
+  setPendingPost(id: string) { _pendingPostId = id; },
+  consumePost(): string | null { const id = _pendingPostId; _pendingPostId = null; return id; },
 };

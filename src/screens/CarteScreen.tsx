@@ -45,6 +45,7 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   bar:           { icon: 'wine-outline',        markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
   concept_store: { icon: 'bag-handle-outline', markerIcon: 'bag-handle',   label: 'Concept Store', color: '#D4A853' },
   educateur:     { icon: 'school-outline',     markerIcon: 'school',       label: 'Éducateur',     color: '#5B8DB8' },
+  balade:        { icon: 'walk-outline',       markerIcon: 'walk',         label: 'Balade',        color: '#8A9A5B' },
   autre:         { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
 
@@ -70,7 +71,7 @@ function stripTypoPrefix(description: string | null): string {
 }
 
 const PROPOSE_CATS = [
-  'restaurant', 'cafe', 'bar', 'hotel', 'parc', 'parc_chien', 'plage',
+  'restaurant', 'cafe', 'bar', 'hotel', 'parc', 'parc_chien', 'plage', 'balade',
   'boutique', 'concept_store', 'toiletteur', 'veto', 'educateur', 'autre',
 ];
 
@@ -1302,7 +1303,7 @@ export default function CarteScreen() {
           supabase.from('profils').select('prenom').eq('id', userId).single(),
         ]);
         if (owner?.push_token && owner.notif_photo_like !== false) {
-          sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like' });
+          sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId: `map-${photoId}` });
         }
       }
     }

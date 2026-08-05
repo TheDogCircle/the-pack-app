@@ -173,6 +173,7 @@ export default function Navigation() {
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
       }
     } else if (data.type === 'photo_like') {
+      if (data.postId) mapNavigation.setPendingPost(data.postId);
       navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
     } else if (data.type === 'new_event') {
       navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
@@ -180,7 +181,9 @@ export default function Navigation() {
       if (data.userId) {
         navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
       }
-    } else if (data.type === 'message') {
+    } else if (data.type === 'message' || (!data.type && data.conversationId)) {
+      // Le "|| (!data.type && data.conversationId)" gere les anciennes notifications
+      // envoyees avant l'ajout du champ type, qui ne portaient que conversationId.
       if (data.conversationId) {
         mapNavigation.setPendingConversation(data.conversationId);
         navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);

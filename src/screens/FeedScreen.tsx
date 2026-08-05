@@ -766,10 +766,15 @@ export default function FeedScreen() {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [pendingConvId, setPendingConvId] = useState<string | null>(null);
 
+  const [pendingPostId, setPendingPostId] = useState<string | null>(null);
+
   // Notification "message" tapee : bascule sur l'onglet Chat et ouvre la conversation
+  // Notification "photo_like" tapee : bascule sur l'onglet Feed et ouvre la photo/le post
   useFocusEffect(useCallback(() => {
     const cid = mapNavigation.consumeConversation();
     if (cid) { setTab('messages'); setPendingConvId(cid); }
+    const pid = mapNavigation.consumePost();
+    if (pid) { setTab('feed'); setPendingPostId(pid); }
   }, []));
 
   // Feed
@@ -777,6 +782,13 @@ export default function FeedScreen() {
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedRefreshing, setFeedRefreshing] = useState(false);
   const [commentPost, setCommentPost] = useState<CommunityPost | null>(null);
+
+  // Ouvre le post une fois le feed charge
+  useEffect(() => {
+    if (!pendingPostId || !posts.length) return;
+    const found = posts.find(p => p.id === pendingPostId);
+    if (found) { setCommentPost(found); setPendingPostId(null); }
+  }, [pendingPostId, posts]);
   const [newPostVisible, setNewPostVisible] = useState(false);
 
   // Membres
@@ -939,14 +951,14 @@ export default function FeedScreen() {
     setFeedLoading(false);
   }
 
-  async function notifyPhotoLike(ownerId: string) {
+  async function notifyPhotoLike(ownerId: string, postId: string) {
     if (!myUserId || ownerId === myUserId) return;
     const [{ data: owner }, { data: me }] = await Promise.all([
       supabase.from('profils').select('push_token,notif_photo_like').eq('id', ownerId).single(),
       supabase.from('profils').select('prenom').eq('id', myUserId).single(),
     ]);
     if (!owner?.push_token || owner.notif_photo_like === false) return;
-    sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like' });
+    sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId });
   }
 
   function toggleLike(postId: string) {
@@ -971,7 +983,7 @@ export default function FeedScreen() {
           .eq('photo_id', photoId).eq('user_id', myUserId).then(() => {});
       } else {
         supabase.from('photo_likes').insert({ photo_id: photoId, user_id: myUserId }).then(() => {});
-        notifyPhotoLike(post.user_id);
+        notifyPhotoLike(post.user_id, post.id);
       }
     } else {
       if (liked) {
@@ -979,7 +991,7 @@ export default function FeedScreen() {
           .eq('post_id', postId).eq('user_id', myUserId).then(() => {});
       } else {
         supabase.from('community_post_likes').insert({ post_id: postId, user_id: myUserId }).then(() => {});
-        notifyPhotoLike(post.user_id);
+        notifyPhotoLike(post.user_id, post.id);
       }
     }
   }
