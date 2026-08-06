@@ -644,7 +644,7 @@ export default function SettingsScreen() {
         </View>
         <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>J'aime tes photos</Text>
+            <Text style={styles.toggleLabel}>Likes</Text>
             <Text style={styles.toggleSub}>Quand quelqu'un aime une de tes photos</Text>
           </View>
           <Switch value={notifPhotoLike} onValueChange={v => toggleNotif('notif_photo_like', v)}
