@@ -20,6 +20,7 @@ import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
+import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -159,6 +160,8 @@ export default function Navigation() {
   const { session, loading } = useSession();
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [missingFields, setMissingFields] = useState<MissingFields | null>(null);
+  const [completeProfileDismissed, setCompleteProfileDismissed] = useState(false);
   // Stores a profil userId to navigate to once NavigationContainer is ready
   const [pendingProfilId, setPendingProfilId] = useState<string | null>(null);
   // Stores a notification's data payload to apply once NavigationContainer is ready
@@ -288,8 +291,10 @@ export default function Navigation() {
     });
 
     setOnboardingChecked(false);
+    const userId = session.user.id;
     async function checkOnboarding(retriesLeft = 2) {
-      const { data, error } = await supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle();
+      const { data, error } = await supabase.from('profils')
+        .select('prenom, nom, date_naissance_humain, nom_chien').eq('id', userId).maybeSingle();
       if (error) {
         if (retriesLeft > 0) {
           await new Promise(r => setTimeout(r, 800));
@@ -303,6 +308,10 @@ export default function Navigation() {
         return;
       }
       setNeedsOnboarding(!data?.prenom);
+      if (data?.prenom) {
+        const missing = { nom: !data.nom, dateNaissance: !data.date_naissance_humain, nomChien: !data.nom_chien };
+        setMissingFields((missing.nom || missing.dateNaissance || missing.nomChien) ? missing : null);
+      }
       setOnboardingChecked(true);
     }
     checkOnboarding();
@@ -319,6 +328,7 @@ export default function Navigation() {
   }
 
   return (
+    <>
     <NavigationContainer ref={navigationRef} onReady={() => {
         if (pendingProfilId) {
           navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
@@ -364,5 +374,15 @@ export default function Navigation() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+    {session && !needsOnboarding && missingFields && !completeProfileDismissed && (
+      <CompleteProfileModal
+        visible
+        userId={session.user.id}
+        missing={missingFields}
+        onSaved={() => { setMissingFields(null); }}
+        onDismiss={() => setCompleteProfileDismissed(true)}
+      />
+    )}
+    </>
   );
 }
