@@ -186,6 +186,10 @@ export default function Navigation() {
       // envoyees avant l'ajout du champ type, qui ne portaient que conversationId.
       if (data.conversationId) {
         mapNavigation.setPendingConversation(data.conversationId);
+        supabase.from('push_debug_logs').insert({
+          to_token: 'APPLY_MSG', title: 'applyNotificationData message branch',
+          detail: JSON.stringify({ conversationId: data.conversationId }),
+        }).then(() => {}, () => {});
         navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
       }
     } else if (data.type === 'broadcast') {
@@ -284,11 +288,24 @@ export default function Navigation() {
     });
 
     setOnboardingChecked(false);
-    supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle()
-      .then(({ data }) => {
-        setNeedsOnboarding(!data?.prenom);
+    async function checkOnboarding(retriesLeft = 2) {
+      const { data, error } = await supabase.from('profils').select('prenom').eq('id', session.user.id).maybeSingle();
+      if (error) {
+        if (retriesLeft > 0) {
+          await new Promise(r => setTimeout(r, 800));
+          return checkOnboarding(retriesLeft - 1);
+        }
+        // Erreur persistante (reseau, refresh de session en cours…) : on ne force pas
+        // un utilisateur existant a tout resaisir, il vaut mieux rater un vrai cas
+        // d'onboarding (rare) que de reafficher le formulaire a tout le monde.
+        setNeedsOnboarding(false);
         setOnboardingChecked(true);
-      });
+        return;
+      }
+      setNeedsOnboarding(!data?.prenom);
+      setOnboardingChecked(true);
+    }
+    checkOnboarding();
 
     return () => sub.remove();
   }, [session?.user.id]);
