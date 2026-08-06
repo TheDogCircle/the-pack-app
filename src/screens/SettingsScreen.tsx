@@ -103,6 +103,7 @@ export default function SettingsScreen() {
   const [notifPartner, setNotifPartner] = useState(true);
   const [notifOffer, setNotifOffer] = useState(true);
   const [notifBroadcast, setNotifBroadcast] = useState(true);
+  const [notifNewPost, setNotifNewPost] = useState(true);
   const [rayonKm, setRayonKm] = useState(20);
   const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
@@ -164,7 +165,7 @@ export default function SettingsScreen() {
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
-        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,rayon_km,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,rayon_km,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
         .eq('id', session.user.id).single(),
       supabase.from('chiens')
         .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
@@ -183,6 +184,7 @@ export default function SettingsScreen() {
       setNotifPartner(data.notif_partner ?? true);
       setNotifOffer(data.notif_offer ?? true);
       setNotifBroadcast(data.notif_broadcast ?? true);
+      setNotifNewPost(data.notif_new_post ?? true);
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
@@ -217,7 +219,7 @@ export default function SettingsScreen() {
     setLoading(false);
   }
 
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee' | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer' | 'notif_broadcast', value: boolean) {
+  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee' | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer' | 'notif_broadcast' | 'notif_new_post', value: boolean) {
     if (!userId) return;
     if (key === 'notif_follow') setNotifFollow(value);
     else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
@@ -227,7 +229,8 @@ export default function SettingsScreen() {
     else if (key === 'notif_friend_lieu') setNotifFriendLieu(value);
     else if (key === 'notif_partner') setNotifPartner(value);
     else if (key === 'notif_offer') setNotifOffer(value);
-    else setNotifBroadcast(value);
+    else if (key === 'notif_broadcast') setNotifBroadcast(value);
+    else setNotifNewPost(value);
     await supabase.from('profils').update({ [key]: value }).eq('id', userId);
   }
 
@@ -645,6 +648,14 @@ export default function SettingsScreen() {
             <Text style={styles.toggleSub}>Quand quelqu'un aime une de tes photos</Text>
           </View>
           <Switch value={notifPhotoLike} onValueChange={v => toggleNotif('notif_photo_like', v)}
+            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Photos de mes abonnements</Text>
+            <Text style={styles.toggleSub}>Être notifié(e) quand une personne que tu suis publie une photo</Text>
+          </View>
+          <Switch value={notifNewPost} onValueChange={v => toggleNotif('notif_new_post', v)}
             trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
         </View>
         <View style={styles.toggleRow}>

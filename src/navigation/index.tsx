@@ -174,7 +174,7 @@ export default function Navigation() {
         mapNavigation.setPendingLieu(data.lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
       }
-    } else if (data.type === 'photo_like') {
+    } else if (data.type === 'photo_like' || data.type === 'new_post') {
       if (data.postId) mapNavigation.setPendingPost(data.postId);
       navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
     } else if (data.type === 'new_event') {

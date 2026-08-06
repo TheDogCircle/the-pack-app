@@ -504,6 +504,24 @@ function CommentsModal({
 
 // ─── NewPostModal ─────────────────────────────────────────────────────────────
 
+async function notifyFollowersNewPost(userId: string, postId: string) {
+  const [{ data: followers }, { data: me }] = await Promise.all([
+    supabase.from('follows').select('follower_id').eq('following_id', userId).eq('statut', 'accepte'),
+    supabase.from('profils').select('prenom').eq('id', userId).single(),
+  ]);
+  if (!followers?.length) return;
+  const { data: recipients } = await supabase.from('profils')
+    .select('push_token')
+    .in('id', followers.map(f => f.follower_id))
+    .not('push_token', 'is', null)
+    .or('notif_new_post.is.null,notif_new_post.eq.true');
+  if (!recipients?.length) return;
+  const prenom = me?.prenom || 'Quelqu\'un que tu suis';
+  for (const r of recipients) {
+    if (r.push_token) sendPushNotification(r.push_token, 'Nouvelle photo 📸', `${prenom} a publié une nouvelle photo`, { type: 'new_post', postId });
+  }
+}
+
 function NewPostModal({
   visible, onClose, myUserId, onPosted, navigation,
 }: {
@@ -598,18 +616,19 @@ function NewPostModal({
         const r2Key = `lieu-photos/community/${myUserId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
         urls.push(await uploadToR2(uri, r2Key));
       }
-      const { error: dbErr } = await supabase.from('community_posts').insert({
+      const { data: newPost, error: dbErr } = await supabase.from('community_posts').insert({
         user_id: myUserId,
         image_url: urls[0],
         images: urls.length > 1 ? urls : null,
         caption: caption.trim() || null,
         lieu_id: selectedLieu?.id || null,
         auto_generated: false,
-      });
+      }).select('id').single();
       if (dbErr) throw new Error(dbErr.message);
       supabase.from('profils').select('points').eq('id', myUserId).single().then(({ data }) => {
         if (data) supabase.from('profils').update({ points: (data.points || 0) + 2 }).eq('id', myUserId);
       });
+      if (newPost?.id) notifyFollowersNewPost(myUserId, newPost.id);
       reset();
       onClose();
       onPosted();
@@ -772,6 +791,10 @@ export default function FeedScreen() {
   // Notification "photo_like" tapee : bascule sur l'onglet Feed et ouvre la photo/le post
   useFocusEffect(useCallback(() => {
     const cid = mapNavigation.consumeConversation();
+    supabase.from('push_debug_logs').insert({
+      to_token: 'FEED_FOCUS', title: 'FeedScreen useFocusEffect',
+      detail: JSON.stringify({ consumedConversationId: cid }),
+    }).then(() => {}, () => {});
     if (cid) { setTab('messages'); setPendingConvId(cid); }
     const pid = mapNavigation.consumePost();
     if (pid) { setTab('feed'); setPendingPostId(pid); }
