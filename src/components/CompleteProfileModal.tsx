@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
@@ -45,7 +45,11 @@ export default function CompleteProfileModal({
     setSaving(true);
     const { error } = await supabase.from('profils').update(updates).eq('id', userId);
     setSaving(false);
-    if (!error) onSaved();
+    if (error) {
+      Alert.alert('Erreur', "L'enregistrement a échoué (" + error.message + "). Vérifie ta connexion et réessaie.");
+      return;
+    }
+    onSaved();
   }
 
   return (
@@ -104,6 +108,15 @@ export default function CompleteProfileModal({
             <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.btnText}>Enregistrer</Text>}
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.logout}
+              onPress={() => Alert.alert('Se déconnecter ?', 'Tu devras te reconnecter et compléter ces infos pour réutiliser l\'app.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Se déconnecter', style: 'destructive', onPress: () => supabase.auth.signOut() },
+              ])}
+            >
+              <Text style={styles.logoutText}>Se déconnecter</Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -125,4 +138,6 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: colors.terra, borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 6 },
   btnDisabled: { opacity: 0.6 },
   btnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  logout: { alignItems: 'center', paddingTop: 14 },
+  logoutText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
 });
