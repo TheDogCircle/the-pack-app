@@ -8,9 +8,11 @@ serve(async (req) => {
 
   console.log('[notify-new-partner] triggered. lieu:', record?.nom, '| manager_user_id:', record?.manager_user_id, '| old manager_user_id:', oldRecord?.manager_user_id);
 
-  // Only trigger when manager_user_id switches from null → set (a lieu becomes a claimed partner)
-  if (!record?.manager_user_id || oldRecord?.manager_user_id) {
-    console.log('[notify-new-partner] skipped: not a new claim');
+  // Only trigger when manager_user_id switches from null → set (a lieu becomes a claimed partner),
+  // AND the lieu is actually live (actif) — a lieu can get manager_user_id set while still
+  // pending admin validation (actif=false), which must never trigger a public announcement.
+  if (!record?.manager_user_id || oldRecord?.manager_user_id || !record?.actif) {
+    console.log('[notify-new-partner] skipped: not a new claim, or lieu not active yet');
     return new Response('skipped', { status: 200 });
   }
 
