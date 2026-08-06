@@ -161,7 +161,6 @@ export default function Navigation() {
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [missingFields, setMissingFields] = useState<MissingFields | null>(null);
-  const [completeProfileDismissed, setCompleteProfileDismissed] = useState(false);
   // Stores a profil userId to navigate to once NavigationContainer is ready
   const [pendingProfilId, setPendingProfilId] = useState<string | null>(null);
   // Stores a notification's data payload to apply once NavigationContainer is ready
@@ -374,13 +373,12 @@ export default function Navigation() {
         />
       </Stack.Navigator>
     </NavigationContainer>
-    {session && !needsOnboarding && missingFields && !completeProfileDismissed && (
+    {session && !needsOnboarding && missingFields && (
       <CompleteProfileModal
         visible
         userId={session.user.id}
         missing={missingFields}
         onSaved={() => { setMissingFields(null); }}
-        onDismiss={() => setCompleteProfileDismissed(true)}
       />
     )}
     </>

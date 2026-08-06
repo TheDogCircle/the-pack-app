@@ -13,25 +13,35 @@ function formatDate(text: string): string {
 }
 
 export default function CompleteProfileModal({
-  visible, userId, missing, onSaved, onDismiss,
+  visible, userId, missing, onSaved,
 }: {
   visible: boolean;
   userId: string;
   missing: MissingFields;
   onSaved: () => void;
-  onDismiss: () => void;
 }) {
   const [nom, setNom] = useState('');
   const [dateNaissance, setDateNaissance] = useState('');
   const [nomChien, setNomChien] = useState('');
+  const [nomError, setNomError] = useState(false);
+  const [dateError, setDateError] = useState(false);
+  const [nomChienError, setNomChienError] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function save() {
+    const nomMissing = missing.nom && !nom.trim();
+    const dateMissing = missing.dateNaissance && !dateNaissance.trim();
+    const nomChienMissing = missing.nomChien && !nomChien.trim();
+    setNomError(nomMissing);
+    setDateError(dateMissing);
+    setNomChienError(nomChienMissing);
+    if (nomMissing || dateMissing || nomChienMissing) return;
+
     const updates: Record<string, string> = {};
-    if (missing.nom && nom.trim()) updates.nom = nom.trim();
-    if (missing.dateNaissance && dateNaissance.trim()) updates.date_naissance_humain = dateNaissance.trim();
-    if (missing.nomChien && nomChien.trim()) updates.nom_chien = nomChien.trim();
-    if (!Object.keys(updates).length) { onDismiss(); return; }
+    if (missing.nom) updates.nom = nom.trim();
+    if (missing.dateNaissance) updates.date_naissance_humain = dateNaissance.trim();
+    if (missing.nomChien) updates.nom_chien = nomChien.trim();
+
     setSaving(true);
     const { error } = await supabase.from('profils').update(updates).eq('id', userId);
     setSaving(false);
@@ -39,60 +49,60 @@ export default function CompleteProfileModal({
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => {}}>
       <View style={styles.overlay}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.card}>
             <Text style={styles.paw}>🐾</Text>
             <Text style={styles.title}>Complète ton profil</Text>
-            <Text style={styles.sub}>Il nous manque quelques infos pour t'offrir la meilleure expérience.</Text>
+            <Text style={styles.sub}>Ces infos sont obligatoires pour continuer à utiliser The Pack Club.</Text>
 
             {missing.nom && (
               <View style={styles.field}>
-                <Text style={styles.label}>Nom</Text>
+                <Text style={styles.label}>Nom *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, nomError && styles.inputError]}
                   placeholder="Ex : Dupont"
                   placeholderTextColor={colors.textMuted}
                   value={nom}
-                  onChangeText={setNom}
+                  onChangeText={t => { setNom(t); setNomError(false); }}
                   autoCapitalize="words"
                 />
+                {nomError && <Text style={styles.errorText}>Le nom est requis</Text>}
               </View>
             )}
             {missing.dateNaissance && (
               <View style={styles.field}>
-                <Text style={styles.label}>Ton anniversaire</Text>
+                <Text style={styles.label}>Ton anniversaire *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, dateError && styles.inputError]}
                   placeholder="JJ/MM/AAAA"
                   placeholderTextColor={colors.textMuted}
                   value={dateNaissance}
-                  onChangeText={t => setDateNaissance(formatDate(t))}
+                  onChangeText={t => { setDateNaissance(formatDate(t)); setDateError(false); }}
                   keyboardType="numeric"
                   maxLength={10}
                 />
+                {dateError && <Text style={styles.errorText}>L'anniversaire est requis</Text>}
               </View>
             )}
             {missing.nomChien && (
               <View style={styles.field}>
-                <Text style={styles.label}>Nom du chien</Text>
+                <Text style={styles.label}>Nom du chien *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, nomChienError && styles.inputError]}
                   placeholder="Ex : Albus"
                   placeholderTextColor={colors.textMuted}
                   value={nomChien}
-                  onChangeText={setNomChien}
+                  onChangeText={t => { setNomChien(t); setNomChienError(false); }}
                   autoCapitalize="words"
                 />
+                {nomChienError && <Text style={styles.errorText}>Le nom du chien est requis</Text>}
               </View>
             )}
 
             <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
               {saving ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.btnText}>Enregistrer</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.skip} onPress={onDismiss}>
-              <Text style={styles.skipText}>Plus tard</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -110,9 +120,9 @@ const styles = StyleSheet.create({
   field: { marginBottom: 14 },
   label: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8 },
   input: { fontFamily: 'DMSans_400Regular', fontSize: 15, backgroundColor: 'white', borderRadius: 10, padding: 14, color: colors.bordeaux, borderWidth: 1.5, borderColor: colors.border },
+  inputError: { borderColor: '#C43A3A' },
+  errorText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: '#C43A3A', marginTop: 6 },
   btn: { backgroundColor: colors.terra, borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 6 },
   btnDisabled: { opacity: 0.6 },
   btnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
-  skip: { alignItems: 'center', paddingTop: 14 },
-  skipText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
 });
