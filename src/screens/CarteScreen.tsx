@@ -1022,7 +1022,7 @@ export default function CarteScreen() {
 
     // Publication dans le feed
     const caption = `${baladeNom.trim()} · ${dist} km · ${fmtDuree(baladeElapsedSec)}`;
-    supabase.from('community_posts').insert({
+    const { error: postError } = await supabase.from('community_posts').insert({
       user_id: userId,
       type: 'balade',
       image_url: urls[0] || null,
@@ -1031,7 +1031,16 @@ export default function CarteScreen() {
       auto_generated: true,
       balade_id: baladeRow?.id || null,
       visibilite: baladeVisibilite,
-    }).then(() => {});
+    });
+    if (postError) {
+      setBaladeLoading(false);
+      Alert.alert(
+        'Balade enregistrée, mais pas partagée',
+        'Ta balade a bien été sauvegardée, mais elle n\'a pas pu être publiée dans le fil d\'actualité. Réessaie dans quelques instants.'
+      );
+      discardBaladeTracking();
+      return;
+    }
 
     // +25 points
     supabase.from('profils').select('points').eq('id', userId).single().then(({ data }) => {

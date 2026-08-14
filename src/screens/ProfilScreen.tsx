@@ -405,10 +405,9 @@ export default function ProfilScreen() {
   async function shareLink() {
     if (!profil?.id) return;
     const name = profil.prenom || 'moi';
-    const url = `thepack://profil?id=${profil.id}`;
     const webUrl = `https://thepackclub.fr/profil-public.html?id=${profil.id}`;
     try {
-      await Share.share({ message: `Suis ${name} sur The Pack 🐾\n${webUrl}`, url });
+      await Share.share({ message: `Suis ${name} sur The Pack 🐾\n${webUrl}`, url: webUrl });
     } catch {}
   }
 
