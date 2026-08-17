@@ -23,6 +23,7 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "The Pack continue d'enregistrer le trajet de ta balade même si ton téléphone est verrouillé ou que tu changes d'application, comme sur Strava.",
         "NSPhotoLibraryUsageDescription": "The Pack accède à ta galerie pour que tu puisses ajouter une photo de profil et partager des moments avec la meute.",
         "NSPhotoLibraryAddUsageDescription": "The Pack peut enregistrer des photos dans ta galerie.",
+        "NSContactsUsageDescription": "The Pack peut comparer les numéros de tes contacts à ceux des membres inscrits pour te suggérer des amis à suivre. Rien n'est envoyé sans ton accord.",
         "UIBackgroundModes": ["location"]
       }
     },
@@ -40,7 +41,8 @@
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CONTACTS"
       ],
       "config": {
         "googleMaps": {
@@ -66,6 +68,12 @@
       ],
       [
         "expo-task-manager"
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "The Pack peut comparer les numéros de tes contacts à ceux des membres inscrits pour te suggérer des amis à suivre. Rien n'est envoyé sans ton accord."
+        }
       ],
       [
         "expo-image-picker",

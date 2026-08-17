@@ -8,9 +8,11 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Contacts from 'expo-contacts';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
+import { normalizePhone } from '../lib/phone';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -827,6 +829,12 @@ export default function FeedScreen() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
 
+  // Amis trouves via les contacts du telephone
+  const [contactMatches, setContactMatches] = useState<MembreItem[]>([]);
+  const [contactMatchesLoading, setContactMatchesLoading] = useState(false);
+  const [contactMatchesModalVisible, setContactMatchesModalVisible] = useState(false);
+  const [contactMatchesSearched, setContactMatchesSearched] = useState(false);
+
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
   }, [session?.user?.id]);
@@ -887,6 +895,52 @@ export default function FeedScreen() {
   }
 
   const visibleSuggestions = suggestions.filter(s => !dismissedSuggestionIds.has(s.id) && !following.has(s.id));
+
+  // ── Amis via les contacts du téléphone ──
+
+  async function findFriendsFromContacts() {
+    const { status } = await Contacts.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission requise', "Autorise l'accès à tes contacts dans les réglages pour retrouver tes amis.");
+      return;
+    }
+    setContactMatchesLoading(true);
+    try {
+      const { data: contactsData } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
+      const phones = new Set<string>();
+      for (const c of contactsData) {
+        for (const p of c.phoneNumbers || []) {
+          const n = p.number ? normalizePhone(p.number) : null;
+          if (n) phones.add(n);
+        }
+      }
+      if (!phones.size) {
+        setContactMatches([]);
+        setContactMatchesSearched(true);
+        setContactMatchesModalVisible(true);
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('match-contacts', {
+        body: { phones: Array.from(phones) },
+      });
+      if (error) throw error;
+      const matches: MembreItem[] = (data?.matches || []).map((m: any) => ({
+        id: m.id,
+        user: { id: m.id, prenom: m.prenom || 'Membre', avatar_url: m.avatar_url, ambassadeur: null, explorateur: false },
+        ville: m.ville || null,
+        nomChien: null,
+      }));
+      setContactMatches(matches);
+      setContactMatchesSearched(true);
+      setContactMatchesModalVisible(true);
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || "Impossible de retrouver tes contacts pour le moment.");
+    } finally {
+      setContactMatchesLoading(false);
+    }
+  }
+
+  const visibleContactMatches = contactMatches.filter(m => !following.has(m.id));
 
   // ── Feed ──
 
@@ -1308,21 +1362,31 @@ export default function FeedScreen() {
             />
           }
           ListHeaderComponent={
-            <View style={styles.searchBar}>
-              <Ionicons name="search" size={15} color={colors.textMuted} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Rechercher un membre…"
-                placeholderTextColor={colors.textMuted}
-                value={search}
-                onChangeText={setSearch}
-              />
-              {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch('')}>
-                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                </TouchableOpacity>
-              )}
-            </View>
+            <>
+              <View style={styles.searchBar}>
+                <Ionicons name="search" size={15} color={colors.textMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Rechercher un membre…"
+                  placeholderTextColor={colors.textMuted}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+                {search.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearch('')}>
+                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity style={styles.findContactsBtn} onPress={findFriendsFromContacts} disabled={contactMatchesLoading}>
+                {contactMatchesLoading ? (
+                  <ActivityIndicator size="small" color={colors.terra} />
+                ) : (
+                  <Ionicons name="people-outline" size={16} color={colors.terra} />
+                )}
+                <Text style={styles.findContactsBtnText}>Trouver des amis via mes contacts</Text>
+              </TouchableOpacity>
+            </>
           }
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -1394,6 +1458,56 @@ export default function FeedScreen() {
           />
         </>
       )}
+
+      {/* Amis trouvés via les contacts */}
+      <Modal visible={contactMatchesModalVisible} animationType="slide" transparent onRequestClose={() => setContactMatchesModalVisible(false)}>
+        <View style={styles.contactModalOverlay}>
+          <View style={styles.contactModalCard}>
+            <View style={styles.contactModalHeader}>
+              <Text style={styles.contactModalTitle}>Amis dans tes contacts</Text>
+              <TouchableOpacity onPress={() => setContactMatchesModalVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {contactMatchesSearched && visibleContactMatches.length === 0 ? (
+              <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                <Text style={styles.emptyIcon}>🐾</Text>
+                <Text style={styles.emptyText}>Aucun de tes contacts n'est encore sur The Pack.</Text>
+                <Text style={styles.emptySubText}>Reviens quand tu leur auras montré l'app !</Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+                {visibleContactMatches.map(m => (
+                  <View key={m.id} style={styles.suggestRow}>
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}
+                      onPress={() => {
+                        setContactMatchesModalVisible(false);
+                        navigation.navigate('ProfilPublic', { userId: m.user.id, prenom: m.user.prenom, avatarUrl: m.user.avatar_url });
+                      }}
+                    >
+                      {m.user.avatar_url ? (
+                        <Image source={{ uri: m.user.avatar_url }} style={styles.suggestAvatar} />
+                      ) : (
+                        <View style={styles.suggestAvatarFallback}>
+                          <Text style={styles.suggestAvatarLetter}>{(m.user.prenom || '?')[0].toUpperCase()}</Text>
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.suggestRowName}>{m.user.prenom}</Text>
+                        {m.ville ? <Text style={styles.suggestRowSub}>{m.ville}</Text> : null}
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.suggestFollowBtn} onPress={() => toggleFollow(m.id)}>
+                      <Text style={styles.suggestFollowBtnText}>Suivre</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1426,6 +1540,15 @@ const styles = StyleSheet.create({
   suggestSub: { fontFamily: 'DMSans_400Regular', fontSize: 10.5, color: colors.textMuted, marginTop: 2, maxWidth: 94, textAlign: 'center' },
   suggestFollowBtn: { marginTop: 10, backgroundColor: colors.terra, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 16 },
   suggestFollowBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
+  findContactsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.white, marginHorizontal: 14, marginTop: 10, marginBottom: 4, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
+  findContactsBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  contactModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  contactModalCard: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  contactModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  contactModalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  suggestRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  suggestRowName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  suggestRowSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   postCard: { backgroundColor: colors.white, marginBottom: 8 },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
   postAvatarImg:     { width: 36, height: 36, borderRadius: 18 },

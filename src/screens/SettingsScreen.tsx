@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { savePushToken } from '../lib/notifications';
+import { normalizePhone } from '../lib/phone';
 
 const RACES = [
   'Affenpinscher', 'Airedale Terrier', 'Akita Américain', 'Akita Inu', 'Alaskan Malamute',
@@ -110,6 +111,7 @@ export default function SettingsScreen() {
   // Profil (human info only)
   const [prenom, setPrenom] = useState('');
   const [ville, setVille] = useState('');
+  const [telephone, setTelephone] = useState('');
   const [bio, setBio] = useState('');
   const [instagram, setInstagram] = useState('');
   const [tiktok, setTiktok] = useState('');
@@ -165,7 +167,7 @@ export default function SettingsScreen() {
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
-        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,rayon_km,prenom,ville,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,rayon_km,prenom,ville,telephone,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
         .eq('id', session.user.id).single(),
       supabase.from('chiens')
         .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
@@ -188,6 +190,7 @@ export default function SettingsScreen() {
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
+      setTelephone(data.telephone || '');
       setBio(data.bio || '');
       setInstagram(data.instagram_url || '');
       setTiktok(data.tiktok_url || '');
@@ -265,10 +268,15 @@ export default function SettingsScreen() {
     const humanBirth = dateMode === 'date' ? dateNaissance.trim() : (ageVal.trim() ? `${ageVal.trim()} ans` : '');
     if (!humanBirth) { Alert.alert('Champ requis', 'Ajoute ton anniversaire.'); return; }
 
+    if (telephone.trim() && !normalizePhone(telephone.trim())) {
+      Alert.alert('Numéro invalide', 'Vérifie ton numéro de téléphone (au moins 9 chiffres).');
+      return;
+    }
     setSavingProfil(true);
     const { error } = await supabase.from('profils').update({
       prenom: prenom.trim() || null,
       ville: ville.trim() || null,
+      telephone: telephone.trim() || null,
       bio: bio.trim() || null,
       instagram_url: instagram.trim() || null,
       tiktok_url: tiktok.trim() || null,
@@ -442,6 +450,13 @@ export default function SettingsScreen() {
           <Text style={styles.fieldLabel}>Ville</Text>
           <TextInput style={styles.fieldInput} value={ville} onChangeText={setVille}
             placeholder="Ex : Paris" placeholderTextColor={colors.textMuted} />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Téléphone</Text>
+          <TextInput style={styles.fieldInput} value={telephone} onChangeText={setTelephone}
+            placeholder="Ex : 06 12 34 56 78" placeholderTextColor={colors.textMuted}
+            keyboardType="phone-pad" />
+          <Text style={styles.fieldHint}>Optionnel — sert uniquement à te retrouver via tes contacts, jamais affiché publiquement.</Text>
         </View>
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Bio</Text>
@@ -1026,6 +1041,9 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 10,
     backgroundColor: colors.ivoryPale,
+  },
+  fieldHint: {
+    fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 6, lineHeight: 15,
   },
   // Mode toggle
   modeToggle: { flexDirection: 'row', gap: 8, marginBottom: 10 },
