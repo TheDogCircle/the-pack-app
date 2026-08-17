@@ -822,14 +822,71 @@ export default function FeedScreen() {
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
+  // Suggestions d'amis (façon "Suggestions pour toi" Instagram)
+  const [suggestions, setSuggestions] = useState<MembreItem[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
   }, [session?.user?.id]);
 
   useEffect(() => {
-    if (tab === 'feed') loadFeed();
+    if (tab === 'feed') { loadFeed(); loadSuggestions(); }
     else if (tab === 'membres') loadMembres();
   }, [tab, session?.user?.id]);
+
+  // ── Suggestions d'amis ──
+
+  async function loadSuggestions() {
+    const myId = session?.user?.id;
+    if (!myId) return;
+    setSuggestionsLoading(true);
+    const [{ data: myProfil }, { data: myFollowsData }] = await Promise.all([
+      supabase.from('profils').select('ville').eq('id', myId).maybeSingle(),
+      supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
+    ]);
+    const myVille = (myProfil?.ville || '').toLowerCase().trim();
+    const myFollowingSet = new Set((myFollowsData || []).map((f: any) => f.following_id));
+
+    const { data: candidates } = await supabase
+      .from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur')
+      .neq('id', myId).range(0, 300);
+    const pool = (candidates || []).filter((c: any) => !myFollowingSet.has(c.id));
+    if (!pool.length) { setSuggestions([]); setSuggestionsLoading(false); return; }
+
+    const poolIds = pool.map((c: any) => c.id);
+    const { data: poolFollowsData } = await supabase.from('follows')
+      .select('follower_id,following_id').in('follower_id', poolIds).eq('statut', 'accepte');
+    const mutualMap: Record<string, number> = {};
+    (poolFollowsData || []).forEach((f: any) => {
+      if (myFollowingSet.has(f.following_id)) mutualMap[f.follower_id] = (mutualMap[f.follower_id] || 0) + 1;
+    });
+
+    const ranked = pool
+      .map((c: any) => ({
+        c,
+        score: (mutualMap[c.id] || 0) * 10 + ((c.ville || '').toLowerCase().trim() === myVille && myVille ? 1 : 0),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15)
+      .map(({ c }) => ({
+        id: c.id,
+        user: { id: c.id, prenom: c.prenom || 'Membre', avatar_url: c.avatar_url, ambassadeur: c.ambassadeur || null, explorateur: false },
+        ville: c.ville || null,
+        nomChien: c.nom_chien || null,
+      }));
+
+    setMutuals(prev => ({ ...prev, ...mutualMap }));
+    setSuggestions(ranked);
+    setSuggestionsLoading(false);
+  }
+
+  function dismissSuggestion(id: string) {
+    setDismissedSuggestionIds(prev => new Set([...prev, id]));
+  }
+
+  const visibleSuggestions = suggestions.filter(s => !dismissedSuggestionIds.has(s.id) && !following.has(s.id));
 
   // ── Feed ──
 
@@ -1163,6 +1220,49 @@ export default function FeedScreen() {
                   <Text style={styles.emptySubText}>Sois le premier à partager un moment avec la meute !</Text>
                 </View>
               }
+              ListHeaderComponent={
+                visibleSuggestions.length > 0 ? (
+                  <View style={styles.suggestWrap}>
+                    <Text style={styles.suggestTitle}>Suggestions pour toi</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestScroll}>
+                      {visibleSuggestions.map(s => (
+                        <View key={s.id} style={styles.suggestCard}>
+                          <TouchableOpacity
+                            style={styles.suggestDismiss}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            onPress={() => dismissSuggestion(s.id)}
+                          >
+                            <Ionicons name="close" size={13} color={colors.textMuted} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => navigation.navigate('ProfilPublic', {
+                              userId: s.user.id, prenom: s.user.prenom, avatarUrl: s.user.avatar_url,
+                            })}
+                          >
+                            {s.user.avatar_url ? (
+                              <Image source={{ uri: s.user.avatar_url }} style={styles.suggestAvatar} />
+                            ) : (
+                              <View style={styles.suggestAvatarFallback}>
+                                <Text style={styles.suggestAvatarLetter}>{(s.user.prenom || '?')[0].toUpperCase()}</Text>
+                              </View>
+                            )}
+                            <Text style={styles.suggestName} numberOfLines={1}>{s.user.prenom}</Text>
+                            <Text style={styles.suggestSub} numberOfLines={1}>
+                              {(mutuals[s.id] || 0) > 0
+                                ? `${mutuals[s.id]} ami${mutuals[s.id] > 1 ? 's' : ''} en commun`
+                                : (s.ville || (s.nomChien ? `🐾 ${s.nomChien}` : ' '))}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.suggestFollowBtn} onPress={() => toggleFollow(s.id)}>
+                            <Text style={styles.suggestFollowBtnText}>Suivre</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null
+              }
               renderItem={({ item }) =>
                 item.type === 'nouveau_lieu' ? (
                   <NouveauLieuCard post={item} onLieuPress={openLieu} />
@@ -1314,6 +1414,18 @@ const styles = StyleSheet.create({
 
   // Feed
   feedList: { paddingBottom: 90 },
+  suggestWrap: { paddingTop: 14, paddingBottom: 6, backgroundColor: colors.white, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  suggestTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.bordeaux, marginBottom: 12, paddingHorizontal: 14 },
+  suggestScroll: { paddingHorizontal: 14, gap: 10, paddingBottom: 14 },
+  suggestCard: { width: 118, backgroundColor: colors.ivoryPale, borderRadius: 14, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  suggestDismiss: { position: 'absolute', top: 6, right: 6, zIndex: 1, padding: 2 },
+  suggestAvatar: { width: 52, height: 52, borderRadius: 26, marginBottom: 8 },
+  suggestAvatarFallback: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  suggestAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.ivory },
+  suggestName: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, maxWidth: 94 },
+  suggestSub: { fontFamily: 'DMSans_400Regular', fontSize: 10.5, color: colors.textMuted, marginTop: 2, maxWidth: 94, textAlign: 'center' },
+  suggestFollowBtn: { marginTop: 10, backgroundColor: colors.terra, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 16 },
+  suggestFollowBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
   postCard: { backgroundColor: colors.white, marginBottom: 8 },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
   postAvatarImg:     { width: 36, height: 36, borderRadius: 18 },
