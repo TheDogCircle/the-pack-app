@@ -20,8 +20,10 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "The Pack continue d'enregistrer le trajet de ta balade même si ton téléphone est verrouillé ou que tu changes d'application, comme sur Strava.",
         "NSPhotoLibraryUsageDescription": "The Pack accède à ta galerie pour que tu puisses ajouter une photo de profil et partager des moments avec la meute.",
-        "NSPhotoLibraryAddUsageDescription": "The Pack peut enregistrer des photos dans ta galerie."
+        "NSPhotoLibraryAddUsageDescription": "The Pack peut enregistrer des photos dans ta galerie.",
+        "UIBackgroundModes": ["location"]
       }
     },
     "android": {
@@ -33,6 +35,9 @@
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO"
@@ -53,8 +58,14 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute."
+          "locationWhenInUsePermission": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute.",
+          "locationAlwaysAndWhenInUsePermission": "The Pack continue d'enregistrer le trajet de ta balade même si ton téléphone est verrouillé ou que tu changes d'application, comme sur Strava.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
+      ],
+      [
+        "expo-task-manager"
       ],
       [
         "expo-image-picker",

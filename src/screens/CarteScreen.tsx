@@ -4,6 +4,7 @@ import {
   View, StyleSheet, Text, TouchableOpacity, ActivityIndicator,
   Animated, ScrollView, Linking, Dimensions, Modal, Keyboard,
   TextInput, KeyboardAvoidingView, Platform, Alert, FlatList, Image, Share, PanResponder, Pressable,
+  AppState,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -22,6 +23,7 @@ import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
+import { startBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeStartMs, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
 
 const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
@@ -520,11 +522,8 @@ export default function CarteScreen() {
   const [baladeElapsedSec, setBaladeElapsedSec] = useState(0);
   const [baladeLiveDistanceKm, setBaladeLiveDistanceKm] = useState(0);
   const [baladeSummaryVisible, setBaladeSummaryVisible] = useState(false);
-  const baladeWatchRef = useRef<Location.LocationSubscription | null>(null);
-  const baladeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const baladeStartMsRef = useRef<number | null>(null);
+  const baladePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const MAX_BALADE_PHOTOS = 5;
-  const BALADE_MIN_SEGMENT_KM = 0.003; // ~3m, filtre le bruit GPS
   const [fabOpen, setFabOpen] = useState(false);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextFetchRef = useRef(false);
@@ -883,27 +882,36 @@ export default function CarteScreen() {
     setBalades(data.map((b: any) => ({ ...b, profils: pm[b.user_id] || null })));
   }
 
-  // ── Suivi live d'une balade (façon Strava) ──
-  function baladeLocationCallback(pos: Location.LocationObject) {
-    const { latitude, longitude } = pos.coords;
-    setBaladeTrace(prev => {
-      const last = prev[prev.length - 1];
-      if (last) {
-        const segKm = haversine(last.latitude, last.longitude, latitude, longitude);
-        if (segKm < BALADE_MIN_SEGMENT_KM) return prev;
-        setBaladeLiveDistanceKm(d => d + segKm);
-      }
-      const t = baladeStartMsRef.current ? Math.round((Date.now() - baladeStartMsRef.current) / 1000) : 0;
-      return [...prev, { latitude, longitude, t }];
-    });
+  // ── Suivi live d'une balade (façon Strava), y compris en arriere-plan ──
+  // La trace elle-meme est ecrite par la tache d'arriere-plan (baladeTracking.ts)
+  // dans AsyncStorage, seule source fiable quand l'app est suspendue. Ce poll
+  // se contente de relire cette source toutes les 2s pour rafraichir l'UI.
+  async function pollBaladeState() {
+    const [trace, startMs] = await Promise.all([getBaladeTrace(), getBaladeStartMs()]);
+    if (!trace.length) return;
+    setBaladeTrace(trace);
+    setBaladeLiveDistanceKm(distanceKmOf(trace));
+    if (startMs) setBaladeElapsedSec(Math.round((Date.now() - startMs) / 1000));
   }
 
-  async function startBaladeWatcher() {
-    baladeWatchRef.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
-      baladeLocationCallback
-    );
+  function startBaladePoll() {
+    if (baladePollRef.current) clearInterval(baladePollRef.current);
+    baladePollRef.current = setInterval(pollBaladeState, 2000);
   }
+
+  function stopBaladePoll() {
+    if (baladePollRef.current) { clearInterval(baladePollRef.current); baladePollRef.current = null; }
+  }
+
+  // Force un rafraichissement immediat au retour au premier plan, plutot que
+  // d'attendre le prochain tick du poll (qui est de toute facon suspendu
+  // pendant que l'app est en arriere-plan).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active' && baladeTracking && !baladePaused) pollBaladeState();
+    });
+    return () => sub.remove();
+  }, [baladeTracking, baladePaused]);
 
   async function startBaladeTracking() {
     if (!userId) { showLoginPrompt(); return; }
@@ -912,38 +920,48 @@ export default function CarteScreen() {
       Alert.alert('Permission requise', "Autorise la géolocalisation dans les réglages pour suivre ta balade.");
       return;
     }
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (bg.status !== 'granted') {
+      Alert.alert(
+        'Suivi limité au premier plan',
+        "Sans l'autorisation \"Toujours\", ta balade s'arrêtera d'être enregistrée si tu verrouilles ton téléphone ou changes d'application. Tu peux l'activer dans les réglages.",
+      );
+    }
     setFabOpen(false);
     const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
-    setBaladeTrace([{ latitude: loc.coords.latitude, longitude: loc.coords.longitude, t: 0 }]);
+    const initial = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, t: 0 };
+    setBaladeTrace([initial]);
     setBaladeLiveDistanceKm(0);
     setBaladeElapsedSec(0);
     setBaladePaused(false);
     setBaladeTracking(true);
-    baladeStartMsRef.current = Date.now();
     mapRef.current?.animateToRegion({ latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 500);
-    baladeTimerRef.current = setInterval(() => setBaladeElapsedSec(s => s + 1), 1000);
-    await startBaladeWatcher();
+    await startBaladeBackgroundTracking(initial);
+    startBaladePoll();
   }
 
-  function pauseBaladeTracking() {
-    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
-    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+  async function pauseBaladeTracking() {
+    stopBaladePoll();
+    await stopBaladeBackgroundTracking();
     setBaladePaused(true);
   }
 
   async function resumeBaladeTracking() {
     setBaladePaused(false);
-    baladeTimerRef.current = setInterval(() => setBaladeElapsedSec(s => s + 1), 1000);
-    await startBaladeWatcher();
+    await resumeBaladeBackgroundTracking();
+    startBaladePoll();
   }
 
-  function stopBaladeTracking() {
-    if (baladeTrace.length < 2) {
+  async function stopBaladeTracking() {
+    const trace = await getBaladeTrace();
+    if (trace.length < 2) {
       Alert.alert('Balade trop courte', 'Marche un peu plus avant de terminer, pour avoir un vrai trajet à partager.');
       return;
     }
-    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
-    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+    setBaladeTrace(trace);
+    setBaladeLiveDistanceKm(distanceKmOf(trace));
+    stopBaladePoll();
+    await stopBaladeBackgroundTracking();
     setBaladeTracking(false);
     setBaladePaused(false);
     setBaladeSummaryVisible(true);
@@ -956,9 +974,10 @@ export default function CarteScreen() {
     ]);
   }
 
-  function discardBaladeTracking() {
-    if (baladeTimerRef.current) { clearInterval(baladeTimerRef.current); baladeTimerRef.current = null; }
-    baladeWatchRef.current?.remove(); baladeWatchRef.current = null;
+  async function discardBaladeTracking() {
+    stopBaladePoll();
+    await stopBaladeBackgroundTracking();
+    await clearBaladeTrace();
     setBaladeTracking(false); setBaladePaused(false); setBaladeSummaryVisible(false);
     setBaladeTrace([]); setBaladeElapsedSec(0); setBaladeLiveDistanceKm(0);
     setBaladeNom(''); setBaladeDesc(''); setBaladePhotoUris([]); setBaladeFiltres(FILTRES_VIDE);
