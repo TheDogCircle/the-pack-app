@@ -42,6 +42,7 @@ type CommunityPost = {
   fromMap?: boolean;
   nom_chien?: string | null;
   realPhotoId?: string | null;
+  photoGroupIds?: string[];
 };
 
 type Comment = {
@@ -114,9 +115,10 @@ type PostCardProps = {
   onLike: (postId: string) => void;
   onCommentPress: (post: CommunityPost) => void;
   onLieuPress: (lieuId: string) => void;
+  onDeletePress: (post: CommunityPost) => void;
 };
 
-function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostCardProps) {
+function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress }: PostCardProps) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
   const commentCount = post.community_post_comments.length;
@@ -137,6 +139,11 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress }: PostC
           <View style={styles.carouselCounter}>
             <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
           </View>
+        )}
+        {post.user_id === myUserId && (
+          <TouchableOpacity style={styles.postMenuBtn} onPress={() => onDeletePress(post)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
         )}
       </View>
 
@@ -257,12 +264,13 @@ function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPre
 
 // ─── BaladeCard ───────────────────────────────────────────────────────────────
 
-function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress }: {
+function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress }: {
   post: CommunityPost;
   myUserId: string;
   onLike: (postId: string) => void;
   onCommentPress: (post: CommunityPost) => void;
   onBaladePress: (post: CommunityPost) => void;
+  onDeletePress: (post: CommunityPost) => void;
 }) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
@@ -288,6 +296,11 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress }: {
           <View style={styles.carouselCounter}>
             <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
           </View>
+        )}
+        {post.user_id === myUserId && (
+          <TouchableOpacity style={styles.postMenuBtn} onPress={() => onDeletePress(post)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
         )}
       </View>
 
@@ -1074,6 +1087,7 @@ export default function FeedScreen() {
         fromMap: true,
         nom_chien: first.nom_chien || null,
         realPhotoId: first.id,
+        photoGroupIds: group.map((p: any) => p.id),
       };
     });
 
@@ -1128,6 +1142,34 @@ export default function FeedScreen() {
         notifyPhotoLike(post.user_id, post.id);
       }
     }
+  }
+
+  function deletePost(post: CommunityPost) {
+    if (!myUserId || post.user_id !== myUserId) return;
+    Alert.alert(
+      'Supprimer cette publication ?',
+      'Cette action est définitive.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer', style: 'destructive',
+          onPress: async () => {
+            try {
+              if (post.fromMap) {
+                const ids = post.photoGroupIds?.length ? post.photoGroupIds : (post.realPhotoId ? [post.realPhotoId] : []);
+                if (ids.length) await supabase.from('photos').delete().in('id', ids);
+              } else {
+                await supabase.from('community_posts').delete().eq('id', post.id);
+                if (post.balade_id) await supabase.from('balades').delete().eq('id', post.balade_id);
+              }
+              setPosts(prev => prev.filter(p => p.id !== post.id));
+            } catch (e: any) {
+              Alert.alert('Erreur', e.message || "Impossible de supprimer cette publication pour le moment.");
+            }
+          },
+        },
+      ],
+    );
   }
 
   function openLieu(lieuId: string) {
@@ -1327,6 +1369,7 @@ export default function FeedScreen() {
                     onLike={toggleLike}
                     onCommentPress={setCommentPost}
                     onBaladePress={openBalade}
+                    onDeletePress={deletePost}
                   />
                 ) : (
                   <PostCard
@@ -1335,6 +1378,7 @@ export default function FeedScreen() {
                     onLike={toggleLike}
                     onCommentPress={setCommentPost}
                     onLieuPress={openLieu}
+                    onDeletePress={deletePost}
                   />
                 )
               }
@@ -1569,6 +1613,7 @@ const styles = StyleSheet.create({
   carouselDotActive: { width: 18, backgroundColor: colors.bordeaux },
   carouselCounter: { backgroundColor: 'rgba(61,26,26,0.08)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   carouselCounterText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted },
+  postMenuBtn: { padding: 4, marginLeft: 4 },
   postActions: { flexDirection: 'row', gap: 16, paddingHorizontal: 14, paddingTop: 10 },
   postActionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
   postActionCount:{ fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
