@@ -94,6 +94,7 @@ const CATEGORIES: { key: string | null; label: string; icon: IoniconsName }[] = 
   { key: 'boutique',   label: 'Boutiques',      icon: 'bag-outline' },
   { key: 'hotel',      label: 'Hôtels',         icon: 'bed-outline' },
   { key: 'bar',        label: 'Bars',           icon: 'wine-outline' },
+  { key: 'educateur',  label: 'Éducateurs',     icon: 'school-outline' },
 ];
 
 const MAIN_CATS = CATEGORIES.slice(0, 5);  // Tout, Parcs, Espaces canins, Vétos, Toilettage
@@ -165,6 +166,7 @@ type LieuFull = Lieu & {
   eau: boolean | null; gamelles: boolean | null; chiens_laches: boolean | null; chiens_laisse: boolean | null;
   petits_chiens: boolean | null; moyens_chiens: boolean | null; grands_chiens: boolean | null;
   manager_user_id: string | null; google_photo_url: string | null;
+  plan: string | null;
 };
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null; fromCommunity?: boolean };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null; ambassadeur?: boolean | null };
@@ -2331,6 +2333,15 @@ export default function CarteScreen() {
                     <Ionicons name="navigate" size={16} color={colors.ivory} />
                     <Text style={styles.actionPrimaryText}>Itinéraire</Text>
                   </TouchableOpacity>
+                  {selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
+                    <TouchableOpacity
+                      style={styles.actionSecondary}
+                      onPress={() => navigation.navigate('Booking', { lieuId: selectedLieu.id, lieuNom: selectedLieu.nom })}
+                    >
+                      <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
+                      <Text style={styles.actionSecondaryText}>Réserver</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     style={[styles.actionSecondary, myAvis && styles.actionSecondaryActive]}
                     onPress={() => { setAvisNote(myAvis?.note || 0); setAvisComment(myAvis?.commentaire || ''); setAvisModal(true); }}

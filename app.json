@@ -3,7 +3,7 @@
     "name": "The Pack Club",
     "slug": "the-pack-app",
     "scheme": "thepack",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,7 +24,9 @@
         "NSPhotoLibraryUsageDescription": "The Pack accède à ta galerie pour que tu puisses ajouter une photo de profil et partager des moments avec la meute.",
         "NSPhotoLibraryAddUsageDescription": "The Pack peut enregistrer des photos dans ta galerie.",
         "NSContactsUsageDescription": "The Pack peut comparer les numéros de tes contacts à ceux des membres inscrits pour te suggérer des amis à suivre. Rien n'est envoyé sans ton accord.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -90,7 +92,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "@stripe/stripe-react-native"
     ],
     "extra": {
       "eas": {

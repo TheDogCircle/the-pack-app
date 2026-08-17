@@ -14,8 +14,10 @@ import {
   DMSans_500Medium,
 } from '@expo-google-fonts/dm-sans';
 import * as Updates from 'expo-updates';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
+import { STRIPE_PUBLISHABLE_KEY } from './src/lib/stripeConfig';
 
 async function checkForOTAUpdate() {
   try {
@@ -66,9 +68,9 @@ export default function App() {
   if (!fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#3D1A1A' }} />;
 
   return (
-    <>
+    <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
       <StatusBar style="light" />
       <Navigation />
-    </>
+    </StripeProvider>
   );
 }

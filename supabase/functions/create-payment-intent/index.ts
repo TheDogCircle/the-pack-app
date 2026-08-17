@@ -57,8 +57,10 @@ Deno.serve(async (req) => {
 
     const heure_fin = addMinutes(heure_debut, prestation.duree)
 
-    // Verifie la disponibilite cote serveur (le calcul de carte.html est purement client)
-    const jour = new Date(`${date}T12:00:00Z`).getUTCDay()
+    // Verifie la disponibilite cote serveur (le calcul de carte.html est purement client).
+    // disponibilites.jour suit la convention 0=lundi...6=dimanche (cf. espace-pro.html),
+    // pas le getDay() natif de JS/Date qui est 0=dimanche : on convertit.
+    const jour = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7
     const { data: dispo, error: dispoErr } = await supabaseAdmin
       .from('disponibilites')
       .select('heure_debut, heure_fin')
