@@ -93,7 +93,12 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-apple-authentication",
-      "@stripe/stripe-react-native"
+      [
+        "@stripe/stripe-react-native",
+        {
+          "enableGooglePay": false
+        }
+      ]
     ],
     "extra": {
       "eas": {
