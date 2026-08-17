@@ -94,8 +94,10 @@ const CATEGORIES: { key: string | null; label: string; icon: IoniconsName }[] = 
   { key: 'boutique',   label: 'Boutiques',      icon: 'bag-outline' },
   { key: 'hotel',      label: 'Hôtels',         icon: 'bed-outline' },
   { key: 'bar',        label: 'Bars',           icon: 'wine-outline' },
-  { key: 'educateur',  label: 'Éducateurs',     icon: 'school-outline' },
 ];
+// Le filtre "Éducateurs" n'est pas encore ajoute a la liste ci-dessus : a activer
+// une fois qu'on aura reellement des educateurs Pro/Premium sur la plateforme,
+// pour ne pas montrer une categorie vide.
 
 const MAIN_CATS = CATEGORIES.slice(0, 5);  // Tout, Parcs, Espaces canins, Vétos, Toilettage
 const AUTRES_CATS = CATEGORIES.slice(5);   // Restos, Cafés, Plages, Boutiques, Hôtels, Bars
