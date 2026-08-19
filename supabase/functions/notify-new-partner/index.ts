@@ -21,26 +21,48 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  const { data: users, error: usersError } = await supabase
-    .from('profils')
-    .select('id, push_token')
-    .or('notif_partner.is.null,notif_partner.eq.true')
-    .not('push_token', 'is', null);
+  // Garde-fou : un lieu revendique par un compte de test ne notifie jamais le
+  // grand public, seulement l'appareil de test dedie.
+  const testUserIds = (Deno.env.get('TEST_USER_IDS') ?? '').split(',').filter(Boolean);
+  const testPushToken = Deno.env.get('TEST_PUSH_TOKEN');
+  const isTestLieu = testUserIds.includes(record.manager_user_id);
 
-  console.log('[notify-new-partner] users query error:', usersError?.message ?? 'none', '| users found:', users?.length ?? 0);
+  let messages: object[];
 
-  if (!users || users.length === 0) {
-    return new Response(JSON.stringify({ sent: 0, reason: 'no matching users' }), { status: 200 });
+  if (isTestLieu) {
+    console.log('[notify-new-partner] lieu revendique par un compte de test — notification limitee a TEST_PUSH_TOKEN');
+    messages = testPushToken
+      ? [{
+          to: testPushToken,
+          title: '🏪 [TEST] Nouveau partenaire',
+          body: `"${record.nom}" vient de rejoindre The Pack !`,
+          data: { type: 'new_partner', lieuId: record.id },
+          sound: 'default',
+          badge: 1,
+        }]
+      : [];
+  } else {
+    const { data: users, error: usersError } = await supabase
+      .from('profils')
+      .select('id, push_token')
+      .or('notif_partner.is.null,notif_partner.eq.true')
+      .not('push_token', 'is', null);
+
+    console.log('[notify-new-partner] users query error:', usersError?.message ?? 'none', '| users found:', users?.length ?? 0);
+
+    messages = (users || []).map((u: any) => ({
+      to: u.push_token,
+      title: '🏪 Nouveau partenaire',
+      body: `"${record.nom}" vient de rejoindre The Pack !`,
+      data: { type: 'new_partner', lieuId: record.id },
+      sound: 'default',
+      badge: 1,
+    }));
   }
 
-  const messages = users.map((u: any) => ({
-    to: u.push_token,
-    title: '🏪 Nouveau partenaire',
-    body: `"${record.nom}" vient de rejoindre The Pack !`,
-    data: { type: 'new_partner', lieuId: record.id },
-    sound: 'default',
-    badge: 1,
-  }));
+  if (messages.length === 0) {
+    return new Response(JSON.stringify({ sent: 0, reason: 'no matching users' }), { status: 200 });
+  }
 
   for (let i = 0; i < messages.length; i += 100) {
     const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {

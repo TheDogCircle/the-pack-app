@@ -28,6 +28,32 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
+  // Garde-fou : un lieu cree/gere par un compte de test ne genere ni post de
+  // feed ni notification au grand public — juste un ping sur l'appareil de test.
+  const testUserIds = (Deno.env.get('TEST_USER_IDS') ?? '').split(',').filter(Boolean);
+  const testPushToken = Deno.env.get('TEST_PUSH_TOKEN');
+  const isTestLieu = (!!record.manager_user_id && testUserIds.includes(record.manager_user_id))
+    || (!!record.submitted_by && testUserIds.includes(record.submitted_by));
+
+  if (isTestLieu) {
+    console.log('[notify-new-lieu] lieu de test — pas de post feed, notification limitee a TEST_PUSH_TOKEN');
+    if (testPushToken) {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify([{
+          to: testPushToken,
+          title: '🐶 [TEST] Nouveau lieu',
+          body: `"${record.nom}" vient d'être ajouté.`,
+          data: { type: 'new_lieu', lieuId: record.id },
+          sound: 'default',
+          badge: 1,
+        }]),
+      });
+    }
+    return new Response(JSON.stringify({ sent: testPushToken ? 1 : 0, test: true }), { status: 200 });
+  }
+
   // 0a. Auto-validate photos and videos attached to this lieu
   await Promise.all([
     supabase.from('photos').update({ validee: true }).eq('lieu_id', record.id).eq('validee', false),
