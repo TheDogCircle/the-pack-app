@@ -707,6 +707,16 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Réservations */}
+      <View style={styles.section}>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Réservations</Text></View>
+        <TouchableOpacity style={[styles.menuRow, { borderBottomWidth: 0 }]} onPress={() => navigation.navigate('MesReservations')}>
+          <Ionicons name="calendar-outline" size={20} color={colors.bordeaux} />
+          <Text style={styles.menuRowText}>Mes réservations</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+
       {/* Compte */}
       <View style={styles.section}>
         <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Mon compte</Text></View>

@@ -20,6 +20,7 @@ import ProfilScreen from '../screens/ProfilScreen';
 import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BookingScreen from '../screens/BookingScreen';
+import MesReservationsScreen from '../screens/MesReservationsScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import { colors } from '../lib/theme';
@@ -31,6 +32,7 @@ export type RootStackParamList = {
   ProfilPublic: { userId: string; prenom: string; avatarUrl?: string };
   Settings: undefined;
   Booking: { lieuId: string; lieuNom: string };
+  MesReservations: undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -381,6 +383,18 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: 'Réserver',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="MesReservations"
+          component={MesReservationsScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Mes réservations',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}
