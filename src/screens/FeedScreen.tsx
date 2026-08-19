@@ -18,6 +18,7 @@ import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
 import MessagerieScreen from './MessagerieScreen';
 
@@ -918,16 +919,26 @@ export default function FeedScreen() {
   // ── Amis via les contacts du téléphone ──
 
   async function findFriendsFromContacts() {
+    const dbg = (title: string, detail: any) => {
+      supabase.from('push_debug_logs').insert({
+        to_token: 'CONTACTS_DEBUG', title, detail: typeof detail === 'string' ? detail : JSON.stringify(detail),
+      }).then(() => {}, () => {});
+    };
+    dbg('start', { at: new Date().toISOString() });
     const { status } = await Contacts.requestPermissionsAsync();
+    dbg('permission', { status });
     if (status !== 'granted') {
       Alert.alert('Permission requise', "Autorise l'accès à tes contacts dans les réglages pour retrouver tes amis.");
       return;
     }
     setContactMatchesLoading(true);
     try {
+      const t0 = Date.now();
       const { data: contactsData } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
+      dbg('contacts_fetched', { count: contactsData.length, ms: Date.now() - t0 });
       const phones = new Set<string>();
       const phoneToContact = new Map<string, { name: string; phone: string }>();
+      const t1 = Date.now();
       for (const c of contactsData) {
         for (const p of c.phoneNumbers || []) {
           const n = p.number ? normalizePhone(p.number) : null;
@@ -938,6 +949,7 @@ export default function FeedScreen() {
           }
         }
       }
+      dbg('contacts_processed', { uniquePhones: phones.size, ms: Date.now() - t1 });
       if (!phones.size) {
         setContactMatches([]);
         setInviteCandidates([]);
@@ -945,9 +957,11 @@ export default function FeedScreen() {
         setContactMatchesModalVisible(true);
         return;
       }
+      const t2 = Date.now();
       const { data, error } = await supabase.functions.invoke('match-contacts', {
         body: { phones: Array.from(phones) },
       });
+      dbg('match_contacts_response', { ms: Date.now() - t2, error: error?.message, matches: data?.matches?.length, matchedPhones: data?.matchedPhones?.length });
       if (error) throw error;
       const matches: MembreItem[] = (data?.matches || []).map((m: any) => ({
         id: m.id,
@@ -959,13 +973,20 @@ export default function FeedScreen() {
       const invites = Array.from(phoneToContact.entries())
         .filter(([norm]) => !matchedPhones.has(norm))
         .map(([, c]) => c)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => {
+          // Pas de localeCompare : autre methode dependante des donnees ICU
+          // absentes de ce build Hermes, meme categorie de plantage que normalize().
+          const an = a.name.toLowerCase(), bn = b.name.toLowerCase();
+          return an < bn ? -1 : an > bn ? 1 : 0;
+        });
+      dbg('done', { matches: matches.length, invites: invites.length });
       setContactMatches(matches);
       setInviteCandidates(invites);
       setInviteSearch('');
       setContactMatchesSearched(true);
       setContactMatchesModalVisible(true);
     } catch (e: any) {
+      dbg('caught_error', { message: e?.message, stack: String(e?.stack).slice(0, 500) });
       Alert.alert('Erreur', e.message || "Impossible de retrouver tes contacts pour le moment.");
     } finally {
       setContactMatchesLoading(false);
@@ -1585,6 +1606,7 @@ export default function FeedScreen() {
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
+            <ErrorBoundary label="contacts_modal" onClose={() => setContactMatchesModalVisible(false)}>
             {contactMatchesSearched && visibleContactMatches.length === 0 && inviteCandidates.length === 0 ? (
               <View style={{ paddingVertical: 30, alignItems: 'center' }}>
                 <Text style={styles.emptyIcon}>🐾</Text>
@@ -1667,6 +1689,7 @@ export default function FeedScreen() {
                 )}
               </ScrollView>
             )}
+            </ErrorBoundary>
           </View>
         </View>
       </Modal>
@@ -1681,6 +1704,7 @@ export default function FeedScreen() {
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
+            <ErrorBoundary label="region_modal" onClose={() => setRegionPickerVisible(false)}>
             <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
               <TouchableOpacity
                 style={styles.regionOptionRow}
@@ -1705,6 +1729,7 @@ export default function FeedScreen() {
                 );
               })}
             </ScrollView>
+            </ErrorBoundary>
           </View>
         </View>
       </Modal>
