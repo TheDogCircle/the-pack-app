@@ -31,13 +31,13 @@ Deno.serve(async (req) => {
 
     const { phones } = await req.json()
     if (!Array.isArray(phones) || !phones.length) {
-      return new Response(JSON.stringify({ matches: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ matches: [], matchedPhones: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
     // Les numeros envoyes par le client sont deja normalises (lib/phone.ts),
     // mais on re-normalise cote serveur par prudence (defense en profondeur).
     const wanted = new Set(phones.map((p: string) => normalizePhone(String(p))).filter(Boolean))
     if (!wanted.size) {
-      return new Response(JSON.stringify({ matches: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ matches: [], matchedPhones: [] }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
     const { data: candidates, error: qErr } = await supabaseAdmin
@@ -47,11 +47,22 @@ Deno.serve(async (req) => {
       .neq('id', caller.id)
     if (qErr) throw qErr
 
+    const matchedPhonesSet = new Set<string>()
     const matches = (candidates || [])
-      .filter(c => c.telephone && wanted.has(normalizePhone(c.telephone)))
+      .filter(c => {
+        if (!c.telephone) return false
+        const n = normalizePhone(c.telephone)
+        if (!n || !wanted.has(n)) return false
+        matchedPhonesSet.add(n)
+        return true
+      })
       .map(c => ({ id: c.id, prenom: c.prenom, avatar_url: c.avatar_url, ville: c.ville }))
 
-    return new Response(JSON.stringify({ matches }), {
+    // matchedPhones ne fait que renvoyer au client les numeros QU'IL A LUI-MEME
+    // envoyes (donc deja en sa possession) qui ont trouve une correspondance —
+    // ca lui permet de savoir quels contacts inviter sans exposer a qui
+    // appartient quel numero.
+    return new Response(JSON.stringify({ matches, matchedPhones: Array.from(matchedPhonesSet) }), {
       headers: { ...CORS, 'Content-Type': 'application/json' },
     })
   } catch (err) {

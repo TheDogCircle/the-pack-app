@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, TextInput, Alert,
   Modal, Keyboard, Platform, Dimensions, ScrollView, KeyboardAvoidingView,
+  Share, Linking,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -847,6 +848,7 @@ export default function FeedScreen() {
   const [contactMatchesLoading, setContactMatchesLoading] = useState(false);
   const [contactMatchesModalVisible, setContactMatchesModalVisible] = useState(false);
   const [contactMatchesSearched, setContactMatchesSearched] = useState(false);
+  const [inviteCandidates, setInviteCandidates] = useState<{ name: string; phone: string }[]>([]);
 
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
@@ -921,14 +923,20 @@ export default function FeedScreen() {
     try {
       const { data: contactsData } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
       const phones = new Set<string>();
+      const phoneToContact = new Map<string, { name: string; phone: string }>();
       for (const c of contactsData) {
         for (const p of c.phoneNumbers || []) {
           const n = p.number ? normalizePhone(p.number) : null;
-          if (n) phones.add(n);
+          if (!n) continue;
+          phones.add(n);
+          if (!phoneToContact.has(n)) {
+            phoneToContact.set(n, { name: c.name || 'Contact', phone: p.number! });
+          }
         }
       }
       if (!phones.size) {
         setContactMatches([]);
+        setInviteCandidates([]);
         setContactMatchesSearched(true);
         setContactMatchesModalVisible(true);
         return;
@@ -943,7 +951,14 @@ export default function FeedScreen() {
         ville: m.ville || null,
         nomChien: null,
       }));
+      const matchedPhones = new Set<string>(data?.matchedPhones || []);
+      const invites = Array.from(phoneToContact.entries())
+        .filter(([norm]) => !matchedPhones.has(norm))
+        .map(([, c]) => c)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 300);
       setContactMatches(matches);
+      setInviteCandidates(invites);
       setContactMatchesSearched(true);
       setContactMatchesModalVisible(true);
     } catch (e: any) {
@@ -954,6 +969,19 @@ export default function FeedScreen() {
   }
 
   const visibleContactMatches = contactMatches.filter(m => !following.has(m.id));
+
+  async function inviteContact(contact: { name: string; phone: string }) {
+    const message = "Salut ! Je t'invite à rejoindre The Pack Club 🐾 la carte et la communauté des amoureux de chiens. Télécharge l'appli ici : https://thepackclub.fr";
+    const digits = contact.phone.replace(/[^\d+]/g, '');
+    const smsUrl = `sms:${digits}${Platform.OS === 'ios' ? '&' : '?'}body=${encodeURIComponent(message)}`;
+    try {
+      const can = await Linking.canOpenURL(smsUrl);
+      if (can) { await Linking.openURL(smsUrl); return; }
+    } catch {}
+    try {
+      await Share.share({ message: `${message}` });
+    } catch {}
+  }
 
   // ── Feed ──
 
@@ -1513,7 +1541,7 @@ export default function FeedScreen() {
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
-            {contactMatchesSearched && visibleContactMatches.length === 0 ? (
+            {contactMatchesSearched && visibleContactMatches.length === 0 && inviteCandidates.length === 0 ? (
               <View style={{ paddingVertical: 30, alignItems: 'center' }}>
                 <Text style={styles.emptyIcon}>🐾</Text>
                 <Text style={styles.emptyText}>Aucun de tes contacts n'est encore sur The Pack.</Text>
@@ -1547,6 +1575,29 @@ export default function FeedScreen() {
                     </TouchableOpacity>
                   </View>
                 ))}
+
+                {inviteCandidates.length > 0 && (
+                  <>
+                    <Text style={styles.inviteSectionTitle}>
+                      Pas encore sur l'app ({inviteCandidates.length})
+                    </Text>
+                    {inviteCandidates.map((c, i) => (
+                      <View key={`${c.phone}-${i}`} style={styles.suggestRow}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                          <View style={styles.suggestAvatarFallback}>
+                            <Text style={styles.suggestAvatarLetter}>{c.name[0]?.toUpperCase() || '?'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.suggestRowName} numberOfLines={1}>{c.name}</Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity style={styles.inviteBtn} onPress={() => inviteContact(c)}>
+                          <Text style={styles.inviteBtnText}>Inviter</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </>
+                )}
               </ScrollView>
             )}
           </View>
@@ -1593,6 +1644,9 @@ const styles = StyleSheet.create({
   suggestRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   suggestRowName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   suggestRowSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  inviteSectionTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, marginTop: 8, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
+  inviteBtn: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.terra, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 16 },
+  inviteBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
   postCard: { backgroundColor: colors.white, marginBottom: 8 },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
   postAvatarImg:     { width: 36, height: 36, borderRadius: 18 },
