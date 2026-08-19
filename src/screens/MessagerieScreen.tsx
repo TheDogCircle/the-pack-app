@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard,
@@ -700,6 +700,10 @@ export default function MessagerieScreen({
     );
   }
 
+  // Pour la liste inversee (cf. plus bas) : ordre du plus recent au plus ancien.
+  // Memoise pour ne pas recalculer a chaque frappe dans le champ de saisie.
+  const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder à la messagerie et organiser des balades avec la meute." />;
 
@@ -712,24 +716,24 @@ export default function MessagerieScreen({
         {msgLoading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
           <FlatList
             ref={flatListRef}
-            data={messages}
+            // Liste inversee (comme WhatsApp/Instagram) : index 0 = message le plus recent,
+            // affiche tout en bas. Plus besoin de scrollToEnd/onLayout/onContentSizeChange —
+            // ces approches se sont averees peu fiables (elles ne scrollaient qu'apres le
+            // premier rendu, ou seulement jusqu'a la fin des ~10 premiers items rendus par
+            // defaut par FlatList). Une liste inversee demarre "en bas" par construction.
+            inverted
+            data={reversedMessages}
             keyExtractor={m => m.id}
             contentContainerStyle={[s.messagesList, messages.length === 0 && { flex: 1 }]}
-            // initialNumToRender doit couvrir tous les messages charges (limite de 100 dans
-            // loadMessages) : par defaut FlatList n'en rend que 10 au premier affichage, donc
-            // scrollToEnd() n'atteignait que la fin de ce lot partiel, pas le vrai dernier
-            // message, des qu'il y avait plus de ~10 messages dans la conversation.
-            initialNumToRender={100}
-            // Garantit qu'on atterrit toujours sur le tout dernier message, y compris
-            // quand une image met du temps a se charger et fait grandir le contenu apres
-            // le premier scroll (un simple setTimeout ratait ce cas).
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            ListEmptyComponent={<View style={s.emptyChat}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
+            // scaleY(-1) contre-inverse : sur une liste inverted, le ListEmptyComponent
+            // s'affiche autrement a l'envers (aucune donnee pour compenser le flip de liste).
+            ListEmptyComponent={<View style={[s.emptyChat, { transform: [{ scaleY: -1 }] }]}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
             renderItem={({ item: m, index }) => {
               const isMe = m.user_id === myUserId;
-              const showSender = !isMe && m.user_id !== messages[index - 1]?.user_id;
-              const showTime = !messages[index + 1] || new Date(messages[index + 1].created_at).getTime() - new Date(m.created_at).getTime() > 300000;
+              // Dans le tableau inverse, l'element suivant (index+1) est chronologiquement
+              // ANTERIEUR, et l'element precedent (index-1) est chronologiquement POSTERIEUR.
+              const showSender = !isMe && m.user_id !== reversedMessages[index + 1]?.user_id;
+              const showTime = !reversedMessages[index - 1] || new Date(reversedMessages[index - 1].created_at).getTime() - new Date(m.created_at).getTime() > 300000;
               return (
                 <View style={[s.msgRow, isMe && s.msgRowMe]}>
                   {!isMe && (
@@ -1208,7 +1212,9 @@ const s = StyleSheet.create({
 
   fab: { position: 'absolute', bottom: 28, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8 },
 
-  messagesList: { padding: 12, paddingBottom: 16 },
+  // paddingTop (pas paddingBottom) car la liste est inversee : le "haut" du contenu
+  // non-inverse correspond visuellement au bas de l'ecran, pres de la barre de saisie.
+  messagesList: { padding: 12, paddingTop: 16 },
   emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 48 },
   emptyChatText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center' },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginVertical: 2 },
