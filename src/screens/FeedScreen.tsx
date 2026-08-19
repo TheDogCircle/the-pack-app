@@ -14,6 +14,7 @@ import { supabase, uploadToR2 } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
 import { normalizePhone } from '../lib/phone';
+import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -835,6 +836,8 @@ export default function FeedScreen() {
   const [membresLoading, setMembresLoading] = useState(false);
   const [membresRefreshing, setMembresRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+  const [regionFilter, setRegionFilter] = useState<string | null>(null);
+  const [regionPickerVisible, setRegionPickerVisible] = useState(false);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
@@ -849,6 +852,7 @@ export default function FeedScreen() {
   const [contactMatchesModalVisible, setContactMatchesModalVisible] = useState(false);
   const [contactMatchesSearched, setContactMatchesSearched] = useState(false);
   const [inviteCandidates, setInviteCandidates] = useState<{ name: string; phone: string }[]>([]);
+  const [inviteSearch, setInviteSearch] = useState('');
 
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
@@ -955,10 +959,10 @@ export default function FeedScreen() {
       const invites = Array.from(phoneToContact.entries())
         .filter(([norm]) => !matchedPhones.has(norm))
         .map(([, c]) => c)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .slice(0, 300);
+        .sort((a, b) => a.name.localeCompare(b.name));
       setContactMatches(matches);
       setInviteCandidates(invites);
+      setInviteSearch('');
       setContactMatchesSearched(true);
       setContactMatchesModalVisible(true);
     } catch (e: any) {
@@ -969,6 +973,9 @@ export default function FeedScreen() {
   }
 
   const visibleContactMatches = contactMatches.filter(m => !following.has(m.id));
+  const filteredInviteCandidates = inviteSearch.length === 0
+    ? inviteCandidates
+    : inviteCandidates.filter(c => normalizeText(c.name).includes(normalizeText(inviteSearch)));
 
   async function inviteContact(contact: { name: string; phone: string }) {
     const message = "Salut ! Je t'invite à rejoindre The Pack Club 🐾 la carte et la communauté des amoureux de chiens. Télécharge l'appli ici : https://thepackclub.fr";
@@ -1276,16 +1283,17 @@ export default function FeedScreen() {
     }
   }
 
-  const filteredMembres = search.length > 0
-    ? membres.filter(m => {
-        const q = search.toLowerCase();
-        return (
-          (m.user.prenom || '').toLowerCase().includes(q) ||
-          (m.nomChien || '').toLowerCase().includes(q) ||
-          (m.ville || '').toLowerCase().includes(q)
-        );
-      })
-    : membres;
+  const filteredMembres = membres
+    .filter(m => {
+      if (search.length === 0) return true;
+      const q = search.toLowerCase();
+      return (
+        (m.user.prenom || '').toLowerCase().includes(q) ||
+        (m.nomChien || '').toLowerCase().includes(q) ||
+        (m.ville || '').toLowerCase().includes(q)
+      );
+    })
+    .filter(m => !regionFilter || getRegion(m.ville) === regionFilter);
 
   // ── Render ──
 
@@ -1450,6 +1458,16 @@ export default function FeedScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+              <TouchableOpacity style={styles.regionFilterBtn} onPress={() => setRegionPickerVisible(true)}>
+                <Ionicons name="location-outline" size={14} color={colors.terra} />
+                <Text style={styles.regionFilterBtnText}>{regionFilter || 'Toutes les régions'}</Text>
+                <Ionicons name="chevron-down" size={14} color={colors.terra} />
+                {regionFilter && (
+                  <TouchableOpacity onPress={() => setRegionFilter(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={15} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
               <TouchableOpacity style={styles.findContactsBtn} onPress={findFriendsFromContacts} disabled={contactMatchesLoading}>
                 {contactMatchesLoading ? (
                   <ActivityIndicator size="small" color={colors.terra} />
@@ -1581,7 +1599,25 @@ export default function FeedScreen() {
                     <Text style={styles.inviteSectionTitle}>
                       Pas encore sur l'app ({inviteCandidates.length})
                     </Text>
-                    {inviteCandidates.map((c, i) => (
+                    <View style={styles.inviteSearchBar}>
+                      <Ionicons name="search" size={14} color={colors.textMuted} />
+                      <TextInput
+                        style={styles.inviteSearchInput}
+                        placeholder="Chercher un contact…"
+                        placeholderTextColor={colors.textMuted}
+                        value={inviteSearch}
+                        onChangeText={setInviteSearch}
+                      />
+                      {inviteSearch.length > 0 && (
+                        <TouchableOpacity onPress={() => setInviteSearch('')}>
+                          <Ionicons name="close-circle" size={15} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {filteredInviteCandidates.length === 0 && (
+                      <Text style={styles.emptySubText}>Aucun contact ne correspond à « {inviteSearch} ».</Text>
+                    )}
+                    {filteredInviteCandidates.map((c, i) => (
                       <View key={`${c.phone}-${i}`} style={styles.suggestRow}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                           <View style={styles.suggestAvatarFallback}>
@@ -1600,6 +1636,44 @@ export default function FeedScreen() {
                 )}
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Filtre région */}
+      <Modal visible={regionPickerVisible} animationType="slide" transparent onRequestClose={() => setRegionPickerVisible(false)}>
+        <View style={styles.contactModalOverlay}>
+          <View style={styles.contactModalCard}>
+            <View style={styles.contactModalHeader}>
+              <Text style={styles.contactModalTitle}>Filtrer par région</Text>
+              <TouchableOpacity onPress={() => setRegionPickerVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={styles.regionOptionRow}
+                onPress={() => { setRegionFilter(null); setRegionPickerVisible(false); }}
+              >
+                <Text style={[styles.regionOptionText, !regionFilter && styles.regionOptionTextActive]}>Toutes les régions</Text>
+                {!regionFilter && <Ionicons name="checkmark" size={18} color={colors.terra} />}
+              </TouchableOpacity>
+              {REGIONS.map(r => {
+                const count = membres.filter(m => getRegion(m.ville) === r).length;
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    style={styles.regionOptionRow}
+                    onPress={() => { setRegionFilter(r); setRegionPickerVisible(false); }}
+                  >
+                    <Text style={[styles.regionOptionText, regionFilter === r && styles.regionOptionTextActive]}>
+                      {r}{count > 0 ? ` (${count})` : ''}
+                    </Text>
+                    {regionFilter === r && <Ionicons name="checkmark" size={18} color={colors.terra} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1637,6 +1711,11 @@ const styles = StyleSheet.create({
   suggestFollowBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
   findContactsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.white, marginHorizontal: 14, marginTop: 10, marginBottom: 4, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
   findContactsBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  regionFilterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: colors.white, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border, marginBottom: 4 },
+  regionFilterBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
+  regionOptionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border },
+  regionOptionText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  regionOptionTextActive: { fontFamily: 'DMSans_500Medium', color: colors.terra },
   contactModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   contactModalCard: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
   contactModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
@@ -1645,6 +1724,8 @@ const styles = StyleSheet.create({
   suggestRowName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   suggestRowSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   inviteSectionTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, marginTop: 8, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
+  inviteSearchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.ivoryLight, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 8 },
+  inviteSearchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
   inviteBtn: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.terra, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 16 },
   inviteBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
   postCard: { backgroundColor: colors.white, marginBottom: 8 },
