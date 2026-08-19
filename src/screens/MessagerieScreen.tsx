@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { sendPushNotification } from '../lib/notifications';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -23,9 +24,13 @@ type ConvMember = { user_id: string; prenom: string; avatar_url: string | null }
 type Conversation = {
   id: string; nom: string | null; created_by: string;
   members: ConvMember[];
-  last_message: { contenu: string; created_at: string; user_id: string } | null;
+  last_message: { contenu: string; image_url: string | null; created_at: string; user_id: string } | null;
 };
-type Message = { id: string; user_id: string; contenu: string; created_at: string; prenom: string; avatar_url: string | null };
+type Message = {
+  id: string; user_id: string; contenu: string; image_url: string | null; created_at: string;
+  prenom: string; avatar_url: string | null;
+  likeCount: number; likedByMe: boolean;
+};
 type Contact = { id: string; prenom: string; avatar_url: string | null; ville: string | null };
 type GroupeType = 'balade' | 'education' | 'rencontre';
 type Groupe = {
@@ -166,6 +171,9 @@ export default function MessagerieScreen({
   const [memberSearch, setMemberSearch] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+  const [sendingPhoto, setSendingPhoto] = useState(false);
+  const [groupMenuVisible, setGroupMenuVisible] = useState(false);
+  const [membersModalVisible, setMembersModalVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const channelRef = useRef<any>(null);
 
@@ -205,7 +213,12 @@ export default function MessagerieScreen({
 
   // Ouvre directement une conversation quand on arrive via une notification push
   useEffect(() => {
-    if (!pendingConversationId || !conversations.length) return;
+    if (!pendingConversationId) return;
+    supabase.from('push_debug_logs').insert({
+      to_token: 'MSG_EFFECT', title: 'MessagerieScreen pendingConversationId effect',
+      detail: JSON.stringify({ pendingConversationId, conversationsCount: conversations.length, ids: conversations.map(c => c.id) }),
+    }).then(() => {}, () => {});
+    if (!conversations.length) return;
     const conv = conversations.find(c => c.id === pendingConversationId);
     if (conv) {
       openConversation(conv);
@@ -254,32 +267,7 @@ export default function MessagerieScreen({
           </TouchableOpacity>
         ),
         headerRight: () => (
-          <TouchableOpacity
-            onPress={() => {
-              const isCreator = selectedConv.created_by === myUserId;
-              const buttons: any[] = [
-                {
-                  text: 'Quitter la conversation',
-                  onPress: () => Alert.alert('Quitter ?', 'Tu ne recevras plus les messages.', [
-                    { text: 'Annuler', style: 'cancel' },
-                    { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
-                  ]),
-                },
-                ...(isCreator ? [{
-                  text: 'Supprimer pour tout le monde',
-                  style: 'destructive',
-                  onPress: () => Alert.alert('Supprimer ?', 'Supprimée définitivement pour tous.', [
-                    { text: 'Annuler', style: 'cancel' },
-                    { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
-                  ]),
-                }] : []),
-                { text: myMuted ? 'Activer les notifications' : 'Désactiver les notifications', onPress: toggleMute },
-                { text: 'Annuler', style: 'cancel' },
-              ];
-              Alert.alert(convDisplayName(selectedConv), undefined, buttons);
-            }}
-            style={{ marginRight: 12, padding: 4 }}
-          >
+          <TouchableOpacity onPress={() => setGroupMenuVisible(true)} style={{ marginRight: 12, padding: 4 }}>
             <Ionicons name="ellipsis-vertical" size={22} color={colors.ivory} />
           </TouchableOpacity>
         ),
@@ -315,7 +303,7 @@ export default function MessagerieScreen({
     });
     const lastMsgResults = await Promise.all(
       convIds.map((cid: string) =>
-        supabase.from('messages').select('contenu,created_at,user_id')
+        supabase.from('messages').select('contenu,image_url,created_at,user_id')
           .eq('conversation_id', cid).eq('actif', true)
           .order('created_at', { ascending: false }).limit(1)
       )
@@ -326,7 +314,12 @@ export default function MessagerieScreen({
       id: c.id, nom: c.nom, created_by: c.created_by,
       members: membersByConv[c.id] || [],
       last_message: lastMessages[c.id] || null,
-    })).sort((a, b) => (b.last_message?.created_at || '0').localeCompare(a.last_message?.created_at || '0'));
+    })).sort((a, b) => {
+      // Pas de localeCompare (cf. villeRegion.ts / normalizeText) : comparaison
+      // simple, suffisante pour des dates ISO 8601.
+      const ad = a.last_message?.created_at || '0', bd = b.last_message?.created_at || '0';
+      return ad < bd ? 1 : ad > bd ? -1 : 0;
+    });
     setConversations(list);
     setLoading(false);
   }
@@ -342,10 +335,24 @@ export default function MessagerieScreen({
         async (payload) => {
           const m = payload.new as any;
           const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
-          const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null };
+          const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null, likeCount: 0, likedByMe: false };
           setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
-        }).subscribe();
+        })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_likes' },
+        (payload) => {
+          const l = payload.new as any;
+          setMessages(prev => prev.map(m => m.id === l.message_id
+            ? { ...m, likeCount: m.likeCount + (l.user_id === myUserId ? 0 : 1) }
+            : m));
+        })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_likes' },
+        (payload) => {
+          const l = payload.old as any;
+          setMessages(prev => prev.map(m => m.id === l.message_id
+            ? { ...m, likeCount: Math.max(0, m.likeCount - (l.user_id === myUserId ? 0 : 1)) }
+            : m));
+        })
+      .subscribe();
     if (myUserId) {
       const { data: memberRow } = await supabase.from('conversation_members').select('muted').eq('conversation_id', conv.id).eq('user_id', myUserId).maybeSingle();
       setMyMuted(memberRow?.muted ?? false);
@@ -364,15 +371,84 @@ export default function MessagerieScreen({
 
   async function loadMessages(convId: string) {
     const { data } = await supabase.from('messages')
-      .select('id,user_id,contenu,created_at').eq('conversation_id', convId).eq('actif', true)
+      .select('id,user_id,contenu,image_url,created_at').eq('conversation_id', convId).eq('actif', true)
       .order('created_at', { ascending: true }).limit(100);
     if (!data?.length) { setMessages([]); return; }
     const userIds = [...new Set(data.map((m: any) => m.user_id))];
-    const { data: profils } = await supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds);
+    const messageIds = data.map((m: any) => m.id);
+    const [{ data: profils }, { data: likes }] = await Promise.all([
+      supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds),
+      supabase.from('message_likes').select('message_id,user_id').in('message_id', messageIds),
+    ]);
     const pm: Record<string, any> = {};
     (profils || []).forEach((p: any) => { pm[p.id] = p; });
-    setMessages(data.map((m: any) => ({ ...m, prenom: pm[m.user_id]?.prenom || 'Membre', avatar_url: pm[m.user_id]?.avatar_url || null })));
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 60);
+    const likeCounts: Record<string, number> = {};
+    const likedByMeSet = new Set<string>();
+    (likes || []).forEach((l: any) => {
+      likeCounts[l.message_id] = (likeCounts[l.message_id] || 0) + 1;
+      if (l.user_id === myUserId) likedByMeSet.add(l.message_id);
+    });
+    setMessages(data.map((m: any) => ({
+      ...m,
+      prenom: pm[m.user_id]?.prenom || 'Membre',
+      avatar_url: pm[m.user_id]?.avatar_url || null,
+      likeCount: likeCounts[m.id] || 0,
+      likedByMe: likedByMeSet.has(m.id),
+    })));
+  }
+
+  async function toggleLike(message: Message) {
+    if (!myUserId) return;
+    const wasLiked = message.likedByMe;
+    setMessages(prev => prev.map(m => m.id === message.id
+      ? { ...m, likedByMe: !wasLiked, likeCount: m.likeCount + (wasLiked ? -1 : 1) }
+      : m));
+    if (wasLiked) {
+      await supabase.from('message_likes').delete().eq('message_id', message.id).eq('user_id', myUserId);
+    } else {
+      const { error } = await supabase.from('message_likes').insert({ message_id: message.id, user_id: myUserId });
+      // Contrainte unique : si deja like (course entre deux taps rapides), on ignore l'erreur.
+      if (error && error.code !== '23505') {
+        setMessages(prev => prev.map(m => m.id === message.id ? { ...m, likedByMe: false, likeCount: Math.max(0, m.likeCount - 1) } : m));
+      }
+    }
+  }
+
+  async function pickAndSendPhoto() {
+    if (!selectedConv || !myUserId || sendingPhoto) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], allowsEditing: true, quality: 0.8,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    setSendingPhoto(true);
+    try {
+      const uri = result.assets[0].uri;
+      const ext = uri.split('.').pop() || 'jpg';
+      const path = `messages/${myUserId}-${Date.now()}.${ext}`;
+      const formData = new FormData();
+      formData.append('file', { uri, name: path, type: `image/${ext}` } as any);
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+      const { data, error } = await supabase.from('messages').insert({
+        conversation_id: selectedConv.id, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
+      }).select('id,created_at').single();
+      if (error) throw error;
+      const optimistic: Message = {
+        id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
+        created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null,
+        likeCount: 0, likedByMe: false,
+      };
+      setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
+      notifyOtherMembers('📷 Photo', selectedConv);
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || "Impossible d'envoyer la photo.");
+    } finally {
+      setSendingPhoto(false);
+    }
   }
 
   async function sendMessage() {
@@ -384,9 +460,8 @@ export default function MessagerieScreen({
       conversation_id: selectedConv.id, user_id: myUserId, contenu: text,
     }).select('id,created_at').single();
     if (!error) {
-      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null };
+      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, likeCount: 0, likedByMe: false };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
       notifyOtherMembers(text, selectedConv);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
@@ -630,23 +705,20 @@ export default function MessagerieScreen({
 
   // ── Chat view ──
   if (selectedConv) {
+    const isCreator = selectedConv.created_by === myUserId;
     return (
+      <ErrorBoundary label="chat_view" onClose={closeConversation}>
       <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.participantsBar} style={s.participantsScroll}>
-          {selectedConv.members.map(m => (
-            <View key={m.user_id} style={s.participantItem}>
-              {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.participantAvatar} /> : <View style={[s.participantAvatar, s.participantAvatarFallback]}><Text style={s.participantAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
-              {m.user_id === myUserId ? <View style={s.meeDot} /> : null}
-              <Text style={s.participantName} numberOfLines={1}>{m.user_id === myUserId ? 'Moi' : m.prenom}</Text>
-            </View>
-          ))}
-        </ScrollView>
         {msgLoading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
           <FlatList
             ref={flatListRef}
             data={messages}
             keyExtractor={m => m.id}
             contentContainerStyle={[s.messagesList, messages.length === 0 && { flex: 1 }]}
+            // Garantit qu'on atterrit toujours sur le tout dernier message, y compris
+            // quand une image met du temps a se charger et fait grandir le contenu apres
+            // le premier scroll (un simple setTimeout ratait ce cas).
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
             ListEmptyComponent={<View style={s.emptyChat}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
             renderItem={({ item: m, index }) => {
               const isMe = m.user_id === myUserId;
@@ -661,10 +733,22 @@ export default function MessagerieScreen({
                   )}
                   <View style={[s.msgBubbleWrap, isMe && s.msgBubbleWrapMe]}>
                     {showSender && <Text style={s.msgSender}>{m.prenom}</Text>}
-                    <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
-                      <Text style={[s.msgText, isMe && s.msgTextMe]}>{m.contenu}</Text>
+                    <TouchableOpacity activeOpacity={0.85} onLongPress={() => toggleLike(m)}>
+                      {m.image_url ? (
+                        <Image source={{ uri: m.image_url }} style={s.msgImage} resizeMode="cover" />
+                      ) : (
+                        <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
+                          <Text style={[s.msgText, isMe && s.msgTextMe]}>{m.contenu}</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    <View style={[s.msgFooterRow, isMe && s.msgFooterRowMe]}>
+                      {showTime && <Text style={[s.msgTime, isMe && s.msgTimeMe]}>{fmtTime(m.created_at)}</Text>}
+                      <TouchableOpacity style={s.likeBtn} onPress={() => toggleLike(m)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                        <Ionicons name={m.likedByMe ? 'heart' : 'heart-outline'} size={14} color={m.likedByMe ? colors.terra : colors.textMuted} />
+                        {m.likeCount > 0 && <Text style={s.likeCount}>{m.likeCount}</Text>}
+                      </TouchableOpacity>
                     </View>
-                    {showTime && <Text style={[s.msgTime, isMe && s.msgTimeMe]}>{fmtTime(m.created_at)}</Text>}
                   </View>
                 </View>
               );
@@ -672,12 +756,85 @@ export default function MessagerieScreen({
           />
         )}
         <View style={[s.inputBar, { paddingBottom: kbVisible ? 10 : Math.max(insets.bottom, 10) }]}>
+          <TouchableOpacity style={s.photoBtn} onPress={pickAndSendPhoto} disabled={sendingPhoto}>
+            {sendingPhoto ? <ActivityIndicator size="small" color={colors.terra} /> : <Ionicons name="image-outline" size={22} color={colors.terra} />}
+          </TouchableOpacity>
           <TextInput style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
           <TouchableOpacity style={[s.sendBtn, (!inputText.trim() || sending) && s.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim() || sending}>
             {sending ? <ActivityIndicator size="small" color={colors.ivory} /> : <Ionicons name="send" size={18} color={colors.ivory} />}
           </TouchableOpacity>
         </View>
+
+        {/* Menu du groupe (façon Instagram) */}
+        <Modal visible={groupMenuVisible} animationType="slide" transparent onRequestClose={() => setGroupMenuVisible(false)}>
+          <TouchableOpacity style={s.groupMenuOverlay} activeOpacity={1} onPress={() => setGroupMenuVisible(false)}>
+            <View style={s.groupMenuSheet}>
+              <View style={s.groupMenuHandle} />
+              <Text style={s.groupMenuTitle}>{convDisplayName(selectedConv)}</Text>
+              <TouchableOpacity style={s.groupMenuRow} onPress={() => { setGroupMenuVisible(false); setMembersModalVisible(true); }}>
+                <Ionicons name="people-outline" size={20} color={colors.bordeaux} />
+                <Text style={s.groupMenuRowText}>Voir les membres ({selectedConv.members.length})</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.groupMenuRow} onPress={() => { setGroupMenuVisible(false); toggleMute(); }}>
+                <Ionicons name={myMuted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color={colors.bordeaux} />
+                <Text style={s.groupMenuRowText}>{myMuted ? 'Activer les notifications' : 'Mettre en sourdine'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.groupMenuRow}
+                onPress={() => {
+                  setGroupMenuVisible(false);
+                  Alert.alert('Quitter ?', 'Tu ne recevras plus les messages.', [
+                    { text: 'Annuler', style: 'cancel' },
+                    { text: 'Quitter', style: 'destructive', onPress: leaveConversation },
+                  ]);
+                }}
+              >
+                <Ionicons name="exit-outline" size={20} color="#C62828" />
+                <Text style={[s.groupMenuRowText, { color: '#C62828' }]}>Quitter la discussion</Text>
+              </TouchableOpacity>
+              {isCreator && (
+                <TouchableOpacity
+                  style={[s.groupMenuRow, { borderBottomWidth: 0 }]}
+                  onPress={() => {
+                    setGroupMenuVisible(false);
+                    Alert.alert('Supprimer ?', 'Supprimée définitivement pour tous.', [
+                      { text: 'Annuler', style: 'cancel' },
+                      { text: 'Supprimer', style: 'destructive', onPress: deleteConversation },
+                    ]);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#C62828" />
+                  <Text style={[s.groupMenuRowText, { color: '#C62828' }]}>Supprimer pour tout le monde</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Liste des membres */}
+        <Modal visible={membersModalVisible} animationType="slide" transparent onRequestClose={() => setMembersModalVisible(false)}>
+          <View style={s.groupMenuOverlay}>
+            <View style={s.groupMenuSheet}>
+              <View style={s.groupMenuHandle} />
+              <View style={s.membersHeader}>
+                <Text style={s.groupMenuTitle}>Membres</Text>
+                <TouchableOpacity onPress={() => setMembersModalVisible(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 420 }}>
+                {selectedConv.members.map(m => (
+                  <View key={m.user_id} style={s.memberListRow}>
+                    {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
+                    <Text style={s.memberName}>{m.user_id === myUserId ? 'Moi' : m.prenom}</Text>
+                    {m.user_id === selectedConv.created_by && <Text style={s.memberOwnerTag}>Créateur</Text>}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
+      </ErrorBoundary>
     );
   }
 
@@ -727,7 +884,7 @@ export default function MessagerieScreen({
               renderItem={({ item: conv }) => {
                 const lastMsg = conv.last_message;
                 const sender = lastMsg ? conv.members.find(m => m.user_id === lastMsg.user_id) : null;
-                const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.contenu}` : 'Aucun message';
+                const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.image_url ? '📷 Photo' : lastMsg.contenu}` : 'Aucun message';
                 return (
                   <TouchableOpacity style={s.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
                     {renderConvAvatar(conv)}
@@ -768,7 +925,7 @@ export default function MessagerieScreen({
                     {groupChatConversations.map(conv => {
                       const lastMsg = conv.last_message;
                       const sender = lastMsg ? conv.members.find(m => m.user_id === lastMsg.user_id) : null;
-                      const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.contenu}` : 'Aucun message';
+                      const preview = lastMsg ? `${lastMsg.user_id === myUserId ? 'Moi' : (sender?.prenom || 'Membre')} : ${lastMsg.image_url ? '📷 Photo' : lastMsg.contenu}` : 'Aucun message';
                       return (
                         <TouchableOpacity key={conv.id} style={s.convRow} onPress={() => openConversation(conv)} activeOpacity={0.7}>
                           {renderConvAvatar(conv)}
@@ -1064,7 +1221,13 @@ const s = StyleSheet.create({
   msgTextMe: { color: colors.ivory },
   msgTime: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginLeft: 12, marginTop: 2 },
   msgTimeMe: { marginLeft: 0, marginRight: 12 },
+  msgImage: { width: 200, height: 200, borderRadius: 16 },
+  msgFooterRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  msgFooterRowMe: { flexDirection: 'row-reverse' },
+  likeBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 2 },
+  likeCount: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
+  photoBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   input: { flex: 1, minHeight: 40, maxHeight: 110, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.ivoryPale },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   sendBtnDisabled: { backgroundColor: colors.border },
@@ -1104,14 +1267,15 @@ const s = StyleSheet.create({
   createBtnDisabled: { opacity: 0.45 },
   createBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
 
-  participantsScroll: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, flexGrow: 0 },
-  participantsBar: { paddingHorizontal: 12, paddingVertical: 10, gap: 16, alignItems: 'flex-start' },
-  participantItem: { alignItems: 'center', gap: 4, width: 52 },
-  participantAvatar: { width: 40, height: 40, borderRadius: 20 },
-  participantAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
-  participantAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
-  participantName: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, textAlign: 'center', width: 52 },
-  meeDot: { position: 'absolute', top: 28, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.terra, borderWidth: 1.5, borderColor: colors.white },
+  groupMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  groupMenuSheet: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 36 },
+  groupMenuHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
+  groupMenuTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, marginBottom: 8 },
+  groupMenuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  groupMenuRowText: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  membersHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  memberListRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  memberOwnerTag: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, backgroundColor: colors.terra + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
 });
 
 // ── Groupe card styles ───────────────────────────────────────────────────────
