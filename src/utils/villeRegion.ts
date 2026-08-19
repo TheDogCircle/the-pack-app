@@ -1,5 +1,24 @@
+// Remplacement manuel des caracteres accentues (pas de String.prototype.normalize :
+// Hermes, le moteur JS de React Native, n'embarque pas les donnees ICU necessaires
+// et lance une exception a l'execution — ca faisait planter l'app des qu'un nom
+// contenait un accent).
+const ACCENTS: Record<string, string> = {
+  à: 'a', â: 'a', ä: 'a', á: 'a', ã: 'a', å: 'a',
+  ç: 'c',
+  é: 'e', è: 'e', ê: 'e', ë: 'e',
+  î: 'i', ï: 'i', ì: 'i', í: 'i',
+  ô: 'o', ö: 'o', ò: 'o', ó: 'o', õ: 'o',
+  ù: 'u', û: 'u', ü: 'u', ú: 'u',
+  ÿ: 'y', ñ: 'n', œ: 'oe', æ: 'ae',
+};
+
 export function normalizeText(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  return s
+    .toLowerCase()
+    .split('')
+    .map(ch => ACCENTS[ch] ?? ch)
+    .join('')
+    .trim();
 }
 
 export const REGIONS = [
