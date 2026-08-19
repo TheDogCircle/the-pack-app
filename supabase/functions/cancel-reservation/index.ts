@@ -70,13 +70,17 @@ Deno.serve(async (req) => {
     const totalCents = Math.round(Number(resa.montant_ht) * 100)
     const refundAmountCents = Math.round(totalCents * refundPercent)
 
-    // refund_application_fee: Stripe rembourse automatiquement une part de la
+    // refund_application_fee : Stripe rembourse automatiquement une part de la
     // commission proportionnelle au montant rembourse — jamais la commission
     // sur la part effectivement conservee par le prestataire.
+    // reverse_transfer : obligatoire des lors que refund_application_fee est utilise
+    // sur une charge avec transfer_data.destination (paiement Connect) — reprend
+    // proportionnellement la part deja versee au prestataire.
     const refund = await stripe.refunds.create({
       payment_intent: resa.stripe_payment_intent_id,
       amount: refundAmountCents,
       refund_application_fee: true,
+      reverse_transfer: true,
     })
 
     const montantRembourse = refundAmountCents / 100
