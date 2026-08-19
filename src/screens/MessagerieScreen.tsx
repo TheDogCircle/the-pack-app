@@ -715,10 +715,16 @@ export default function MessagerieScreen({
             data={messages}
             keyExtractor={m => m.id}
             contentContainerStyle={[s.messagesList, messages.length === 0 && { flex: 1 }]}
+            // initialNumToRender doit couvrir tous les messages charges (limite de 100 dans
+            // loadMessages) : par defaut FlatList n'en rend que 10 au premier affichage, donc
+            // scrollToEnd() n'atteignait que la fin de ce lot partiel, pas le vrai dernier
+            // message, des qu'il y avait plus de ~10 messages dans la conversation.
+            initialNumToRender={100}
             // Garantit qu'on atterrit toujours sur le tout dernier message, y compris
             // quand une image met du temps a se charger et fait grandir le contenu apres
             // le premier scroll (un simple setTimeout ratait ce cas).
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
             ListEmptyComponent={<View style={s.emptyChat}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
             renderItem={({ item: m, index }) => {
               const isMe = m.user_id === myUserId;
