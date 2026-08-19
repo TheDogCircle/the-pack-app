@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, TextInput, Alert,
@@ -973,9 +973,19 @@ export default function FeedScreen() {
   }
 
   const visibleContactMatches = contactMatches.filter(m => !following.has(m.id));
-  const filteredInviteCandidates = inviteSearch.length === 0
-    ? inviteCandidates
-    : inviteCandidates.filter(c => normalizeText(c.name).includes(normalizeText(inviteSearch)));
+  // Cherche sur l'ensemble des contacts, mais n'affiche qu'un lot raisonnable par defaut
+  // (rendu ScrollView non-virtualise) — le champ de recherche donne acces au reste sans
+  // avoir a tout afficher d'un coup, ce qui rendait l'ouverture du modal lente sur les
+  // gros carnets de contacts.
+  const filteredInviteCandidates = useMemo(() => (
+    inviteSearch.length === 0
+      ? inviteCandidates
+      : inviteCandidates.filter(c => normalizeText(c.name).includes(normalizeText(inviteSearch)))
+  ), [inviteCandidates, inviteSearch]);
+  const INVITE_DISPLAY_LIMIT = 150;
+  const displayedInviteCandidates = inviteSearch.length === 0
+    ? filteredInviteCandidates.slice(0, INVITE_DISPLAY_LIMIT)
+    : filteredInviteCandidates;
 
   async function inviteContact(contact: { name: string; phone: string }) {
     const message = "Salut ! Je t'invite à rejoindre The Pack Club 🐾 la carte et la communauté des amoureux de chiens. Télécharge l'appli ici : https://thepackclub.fr";
@@ -1283,7 +1293,22 @@ export default function FeedScreen() {
     }
   }
 
-  const filteredMembres = membres
+  // Memoise : le calcul de region par membre (accents geres a la main, cf. villeRegion.ts)
+  // ne doit tourner qu'a chaque changement reel de donnees, pas a chaque frappe clavier —
+  // sinon l'input de recherche devient perceptiblement lent (re-render sur chaque touche).
+  const membreRegions = useMemo(() => {
+    const map = new Map<string, string>();
+    membres.forEach(m => map.set(m.id, getRegion(m.ville)));
+    return map;
+  }, [membres]);
+
+  const regionCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    membreRegions.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+    return counts;
+  }, [membreRegions]);
+
+  const filteredMembres = useMemo(() => membres
     .filter(m => {
       if (search.length === 0) return true;
       const q = search.toLowerCase();
@@ -1293,7 +1318,8 @@ export default function FeedScreen() {
         (m.ville || '').toLowerCase().includes(q)
       );
     })
-    .filter(m => !regionFilter || getRegion(m.ville) === regionFilter);
+    .filter(m => !regionFilter || membreRegions.get(m.id) === regionFilter),
+    [membres, search, regionFilter, membreRegions]);
 
   // ── Render ──
 
@@ -1617,7 +1643,7 @@ export default function FeedScreen() {
                     {filteredInviteCandidates.length === 0 && (
                       <Text style={styles.emptySubText}>Aucun contact ne correspond à « {inviteSearch} ».</Text>
                     )}
-                    {filteredInviteCandidates.map((c, i) => (
+                    {displayedInviteCandidates.map((c, i) => (
                       <View key={`${c.phone}-${i}`} style={styles.suggestRow}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                           <View style={styles.suggestAvatarFallback}>
@@ -1632,6 +1658,11 @@ export default function FeedScreen() {
                         </TouchableOpacity>
                       </View>
                     ))}
+                    {inviteSearch.length === 0 && filteredInviteCandidates.length > INVITE_DISPLAY_LIMIT && (
+                      <Text style={styles.emptySubText}>
+                        + {filteredInviteCandidates.length - INVITE_DISPLAY_LIMIT} autres — tape un nom pour les chercher.
+                      </Text>
+                    )}
                   </>
                 )}
               </ScrollView>
@@ -1659,7 +1690,7 @@ export default function FeedScreen() {
                 {!regionFilter && <Ionicons name="checkmark" size={18} color={colors.terra} />}
               </TouchableOpacity>
               {REGIONS.map(r => {
-                const count = membres.filter(m => getRegion(m.ville) === r).length;
+                const count = regionCounts[r] || 0;
                 return (
                   <TouchableOpacity
                     key={r}
