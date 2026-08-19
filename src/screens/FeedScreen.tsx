@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Contacts from 'expo-contacts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -846,6 +847,19 @@ export default function FeedScreen() {
   const [suggestions, setSuggestions] = useState<MembreItem[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
+  const [suggestionsCollapsed, setSuggestionsCollapsed] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('suggestions_collapsed').then(v => { if (v === '1') setSuggestionsCollapsed(true); });
+  }, []);
+
+  function toggleSuggestionsCollapsed() {
+    setSuggestionsCollapsed(prev => {
+      const next = !prev;
+      AsyncStorage.setItem('suggestions_collapsed', next ? '1' : '0').catch(() => {});
+      return next;
+    });
+  }
 
   // Amis trouves via les contacts du telephone
   const [contactMatches, setContactMatches] = useState<MembreItem[]>([]);
@@ -1402,7 +1416,11 @@ export default function FeedScreen() {
               ListHeaderComponent={
                 visibleSuggestions.length > 0 ? (
                   <View style={styles.suggestWrap}>
-                    <Text style={styles.suggestTitle}>Suggestions pour toi</Text>
+                    <TouchableOpacity style={styles.suggestTitleRow} onPress={toggleSuggestionsCollapsed} activeOpacity={0.7}>
+                      <Text style={styles.suggestTitle}>Suggestions pour toi</Text>
+                      <Ionicons name={suggestionsCollapsed ? 'chevron-down' : 'chevron-up'} size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                    {suggestionsCollapsed ? null : (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestScroll}>
                       {visibleSuggestions.map(s => (
                         <View key={s.id} style={styles.suggestCard}>
@@ -1439,6 +1457,7 @@ export default function FeedScreen() {
                         </View>
                       ))}
                     </ScrollView>
+                    )}
                   </View>
                 ) : null
               }
@@ -1754,7 +1773,8 @@ const styles = StyleSheet.create({
   // Feed
   feedList: { paddingBottom: 90 },
   suggestWrap: { paddingTop: 14, paddingBottom: 6, backgroundColor: colors.white, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
-  suggestTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.bordeaux, marginBottom: 12, paddingHorizontal: 14 },
+  suggestTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 14 },
+  suggestTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.bordeaux },
   suggestScroll: { paddingHorizontal: 14, gap: 10, paddingBottom: 14 },
   suggestCard: { width: 118, backgroundColor: colors.ivoryPale, borderRadius: 14, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   suggestDismiss: { position: 'absolute', top: 6, right: 6, zIndex: 1, padding: 2 },
