@@ -2367,11 +2367,11 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                   {selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
                     <TouchableOpacity
-                      style={styles.actionSecondary}
+                      style={styles.actionReserver}
                       onPress={() => navigation.navigate('Booking', { lieuId: selectedLieu.id, lieuNom: selectedLieu.nom })}
                     >
                       <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
-                      <Text style={styles.actionSecondaryText}>Réserver</Text>
+                      <Text style={styles.actionSecondaryText} numberOfLines={1}>Réserver</Text>
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity
@@ -2379,7 +2379,7 @@ export default function CarteScreen() {
                     onPress={() => { setAvisNote(myAvis?.note || 0); setAvisComment(myAvis?.commentaire || ''); setAvisModal(true); }}
                   >
                     <Ionicons name={myAvis ? 'star' : 'star-outline'} size={16} color={colors.ivory} />
-                    <Text style={styles.actionSecondaryText}>
+                    <Text style={styles.actionSecondaryText} numberOfLines={1}>
                       {myAvis ? 'Mon avis' : 'Avis'}
                     </Text>
                   </TouchableOpacity>
@@ -4284,8 +4284,16 @@ const styles = StyleSheet.create({
   actionPrimaryText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 13 },
   actionSecondary: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    borderRadius: 12, paddingVertical: 12, borderWidth: 1, borderColor: '#C4693A',
-    backgroundColor: '#C4693A', minWidth: 60,
+    borderRadius: 12, paddingVertical: 12, paddingHorizontal: 8, borderWidth: 1, borderColor: '#C4693A',
+    backgroundColor: '#C4693A', minWidth: 78,
+  },
+  // Style dedie (pas juste actionSecondary) : "Réserver" est plus long que les autres
+  // libellés de ce groupe de boutons (Avis, Mon avis) et se faisait couper/ecraser
+  // quand les 5 boutons de la rangee se partageaient un minWidth commun de 60.
+  actionReserver: {
+    flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    borderRadius: 12, paddingVertical: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: '#C4693A',
+    backgroundColor: '#C4693A', minWidth: 118,
   },
   actionSecondaryActive: { borderColor: '#C4693A', backgroundColor: '#C4693A' },
   actionSecondaryText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 12 },
