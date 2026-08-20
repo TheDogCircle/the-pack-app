@@ -498,6 +498,7 @@ export default function CarteScreen() {
   const [recommendedLieux, setRecommendedLieux] = useState<DiscoverLieu[]>([]);
   const [friendPickLieux, setFriendPickLieux] = useState<DiscoverLieu[]>([]);
   const [nearbyDiscoverLieux, setNearbyDiscoverLieux] = useState<DiscoverLieu[]>([]);
+  const [educateurDiscoverLieux, setEducateurDiscoverLieux] = useState<DiscoverLieu[]>([]);
   const [recentDiscoverLieux, setRecentDiscoverLieux] = useState<DiscoverLieu[]>([]);
   const [topDiscoverLieux, setTopDiscoverLieux] = useState<DiscoverLieu[]>([]);
   const [featuredDiscoverLieu, setFeaturedDiscoverLieu] = useState<DiscoverLieu | null>(null);
@@ -748,9 +749,13 @@ export default function CarteScreen() {
     }
     qNearby = (qNearby as any).limit(60);
 
+    const qEducateurs = supabase.from('lieux')
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant,plan')
+      .eq('actif', true).eq('cat', 'educateur').limit(20);
+
     // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
-    const [rTop, rRecent, rNearby, signals] = await Promise.all([
-      qTop, qRecent, qNearby, loadUserSignals(userId),
+    const [rTop, rRecent, rNearby, rEducateurs, signals] = await Promise.all([
+      qTop, qRecent, qNearby, qEducateurs, loadUserSignals(userId),
     ]);
 
     let nearbyRaw: DiscoverLieu[] = (rNearby.data || []) as DiscoverLieu[];
@@ -765,6 +770,19 @@ export default function CarteScreen() {
     const recent: DiscoverLieu[] = (rRecent.data || []) as DiscoverLieu[];
     const nearby = nearbyRaw.slice(0, 15);
 
+    // Educateurs : uniquement les plans pro/premium (reservation en ligne active), tries
+    // par distance si on a la position, sinon par note.
+    let educateursRaw: DiscoverLieu[] = ((rEducateurs.data || []) as any[])
+      .filter(l => ['pro', 'premium'].includes(l.plan)) as DiscoverLieu[];
+    if (userLat && userLng) {
+      educateursRaw = educateursRaw
+        .map(l => ({ ...l, distance: l.lat && l.lng ? haversine(userLat!, userLng!, l.lat, l.lng) : undefined }))
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+    } else {
+      educateursRaw = educateursRaw.sort((a, b) => (b.note_moyenne ?? 0) - (a.note_moyenne ?? 0));
+    }
+    const educateurs = educateursRaw.slice(0, 15);
+
     // Pool de candidats pour le scoring personnalisé: top-rated + proches + récents, dédupliqués
     const candidatesMap = new Map<string, DiscoverLieu>();
     [...top, ...nearbyRaw.slice(0, 40), ...recent].forEach(l => { if (!candidatesMap.has(l.id)) candidatesMap.set(l.id, l); });
@@ -774,7 +792,7 @@ export default function CarteScreen() {
     const friendPicks = filterFriendPicks(candidates, signals, 10);
 
     // Une seule requête photo pour toutes les sections
-    const allIds = [...new Set([...top, ...recent, ...nearby, ...recommended, ...friendPicks].map(l => l.id))];
+    const allIds = [...new Set([...top, ...recent, ...nearby, ...recommended, ...friendPicks, ...educateurs].map(l => l.id))];
     const photoMap = await fetchPhotosForLieux(allIds);
     const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || l.google_photo_url || null });
 
@@ -783,12 +801,14 @@ export default function CarteScreen() {
     const nearbyE = nearby.map(enrich);
     const recommendedE = recommended.map(enrich);
     const friendPicksE = friendPicks.map(enrich);
+    const educateursE = educateurs.map(enrich);
 
     setTopDiscoverLieux(topE);
     setRecentDiscoverLieux(recentE);
     setNearbyDiscoverLieux(nearbyE);
     setRecommendedLieux(recommendedE);
     setFriendPickLieux(friendPicksE);
+    setEducateurDiscoverLieux(educateursE);
     setFeaturedDiscoverLieu(nearbyE.find(l => l.photoUrl) || recommendedE.find(l => l.photoUrl) || nearbyE[0] || recommendedE[0] || null);
 
     await loadDiscoverPhotos();
@@ -798,13 +818,14 @@ export default function CarteScreen() {
 
     // Récupération Google Photos en tâche de fond pour les lieux sans photo, dédupliquée
     const seen = new Set<string>();
-    [...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE]
+    [...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE, ...educateursE]
       .filter(l => !l.photoUrl && !seen.has(l.id) && (seen.add(l.id), true))
       .forEach(l => fetchGooglePhotoFor(l).then(url => {
         if (!url) return;
         const patch = (list: DiscoverLieu[]) => list.map(p => p.id === l.id ? { ...p, photoUrl: url } : p);
         setTopDiscoverLieux(patch); setRecentDiscoverLieux(patch);
         setNearbyDiscoverLieux(patch); setRecommendedLieux(patch); setFriendPickLieux(patch);
+        setEducateurDiscoverLieux(patch);
         setFeaturedDiscoverLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp);
       }));
   }
@@ -2676,6 +2697,17 @@ export default function CarteScreen() {
                     <Text style={dstyles.sectionTitle}>{myDogName ? `Près de ${myDogName}` : 'Près de toi'}</Text>
                     <FlatList
                       data={nearbyDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
+                      keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
+                      renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
+                    />
+                  </View>
+                )}
+
+                {educateurDiscoverLieux.length > 0 && (
+                  <View style={dstyles.section}>
+                    <Text style={dstyles.sectionTitle}>Éducateurs près de chez toi</Text>
+                    <FlatList
+                      data={educateurDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
                       keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
                       renderItem={({ item }) => <DiscoverCard lieu={item} onPress={() => openDiscoverLieu(item.id)} />}
                     />
