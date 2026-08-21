@@ -70,7 +70,7 @@ serve(async (req) => {
     if (clientProfil?.push_token) {
       await sendPush(
         clientProfil.push_token,
-        isPaidBooking ? '✅ Réservation confirmée' : '📅 Demande de RDV envoyée',
+        isPaidBooking ? 'Réservation confirmée' : 'Demande de RDV envoyée',
         isPaidBooking
           ? `Votre RDV chez ${lieuNom} le ${dateStr} à ${resa.heure_debut.slice(0,5)} est confirmé et payé.`
           : `Votre demande chez ${lieuNom} le ${dateStr} à ${resa.heure_debut.slice(0,5)} a bien été reçue.`,
@@ -113,7 +113,7 @@ serve(async (req) => {
     if (proProfil?.push_token) {
       await sendPush(
         proProfil.push_token,
-        isPaidBooking ? '💶 Nouveau RDV payé !' : '📅 Nouveau rendez-vous !',
+        isPaidBooking ? 'Nouveau RDV payé !' : 'Nouveau rendez-vous !',
         isPaidBooking
           ? `${resa.client_prenom || 'Un client'} a réservé et payé ${prestNom} le ${dateStr}.`
           : `${resa.client_prenom || 'Un client'} demande un RDV pour ${prestNom} le ${dateStr}.`,

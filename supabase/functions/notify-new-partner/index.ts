@@ -34,7 +34,7 @@ serve(async (req) => {
     messages = testPushToken
       ? [{
           to: testPushToken,
-          title: '🏪 [TEST] Nouveau partenaire',
+          title: '[TEST] Nouveau partenaire',
           body: `"${record.nom}" vient de rejoindre The Pack !`,
           data: { type: 'new_partner', lieuId: record.id },
           sound: 'default',
@@ -52,7 +52,7 @@ serve(async (req) => {
 
     messages = (users || []).map((u: any) => ({
       to: u.push_token,
-      title: '🏪 Nouveau partenaire',
+      title: 'Nouveau partenaire',
       body: `"${record.nom}" vient de rejoindre The Pack !`,
       data: { type: 'new_partner', lieuId: record.id },
       sound: 'default',

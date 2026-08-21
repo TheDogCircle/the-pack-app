@@ -33,7 +33,7 @@ serve(async (req) => {
     messages = testPushToken
       ? [{
           to: testPushToken,
-          title: '✨ [TEST] Nouvelle offre',
+          title: '[TEST] Nouvelle offre',
           body: `${lieuNom} propose "${record.nom}" !`,
           data: { type: 'new_offer', lieuId: record.lieu_id },
           sound: 'default',
@@ -51,7 +51,7 @@ serve(async (req) => {
 
     messages = (users || []).map((u: any) => ({
       to: u.push_token,
-      title: '✨ Nouvelle offre',
+      title: 'Nouvelle offre',
       body: `${lieuNom} propose "${record.nom}" !`,
       data: { type: 'new_offer', lieuId: record.lieu_id },
       sound: 'default',

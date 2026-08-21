@@ -43,7 +43,7 @@ serve(async (req) => {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify([{
           to: testPushToken,
-          title: '🐶 [TEST] Nouveau lieu',
+          title: '[TEST] Nouveau lieu',
           body: `"${record.nom}" vient d'être ajouté.`,
           data: { type: 'new_lieu', lieuId: record.id },
           sound: 'default',
@@ -93,7 +93,7 @@ serve(async (req) => {
     if (submitter?.push_token) {
       messages.push({
         to: submitter.push_token,
-        title: 'Ta suggestion a été validée 🐾',
+        title: 'Ta suggestion a été validée',
         body: `"${record.nom}" est maintenant visible sur la carte !`,
         data: { type: 'suggestion_validee', lieuId: record.id },
         sound: 'default',
@@ -128,7 +128,7 @@ serve(async (req) => {
       for (const f of followers || []) {
         messages.push({
           to: f.push_token,
-          title: '🐾 Nouveau lieu ajouté',
+          title: 'Nouveau lieu ajouté',
           body: `${submitterPrenom} a ajouté "${record.nom}" sur The Pack !`,
           data: { type: 'friend_lieu', lieuId: record.id },
           sound: 'default',
@@ -182,7 +182,7 @@ serve(async (req) => {
       const distLabel = distKm !== null ? ` à ${distKm} km de toi` : (lieuVille ? ` à ${record.ville}` : '');
       messages.push({
         to: u.push_token,
-        title: '🐶 Nouveau lieu dog-friendly près de toi !',
+        title: 'Nouveau lieu dog-friendly près de toi !',
         body: `"${record.nom}"${distLabel} vient d'être ajouté sur The Pack !`,
         data: { type: 'new_lieu', lieuId: record.id },
         sound: 'default',

@@ -38,7 +38,7 @@ serve(async (_req) => {
       if (!token) continue;
       notifications.push({
         to: token,
-        title: `📅 Rappel — ${event.titre}`,
+        title: `Rappel — ${event.titre}`,
         body: `Demain à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`,
         data: { type: 'event_reminder', eventId: event.id },
         sound: 'default',
@@ -72,7 +72,7 @@ serve(async (_req) => {
       if (!token) continue;
       notifications.push({
         to: token,
-        title: `🐾 C'est aujourd'hui ! ${event.titre}`,
+        title: `C'est aujourd'hui ! ${event.titre}`,
         body: `Rendez-vous à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`,
         data: { type: 'event_reminder_today', eventId: event.id },
         sound: 'default',

@@ -65,7 +65,7 @@ serve(async (req) => {
 
   const messages = targets.map((u: any) => ({
     to: u.push_token,
-    title: '📅 Événement près de chez vous !',
+    title: 'Événement près de chez vous !',
     body: `"${record.titre}" — ${dateStr} à ${heureStr}${record.ville ? ` · ${record.ville}` : ''}`,
     data: { type: 'new_event', eventId: record.id },
     sound: 'default',

@@ -1365,7 +1365,7 @@ export default function CarteScreen() {
           supabase.from('profils').select('prenom').eq('id', userId).single(),
         ]);
         if (owner?.push_token && owner.notif_photo_like !== false) {
-          sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId: `map-${photoId}` });
+          sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId: `map-${photoId}` });
         }
       }
     }

@@ -131,7 +131,7 @@ export default function ProfilPublicScreen() {
         const name = me?.prenom || 'Quelqu\'un';
         await sendPushNotification(
           target.push_token,
-          'Nouvel abonné 🐾',
+          'Nouvel abonné',
           `${name} commence à te suivre sur The Pack !`,
           { type: 'follow', userId: myId },
         );

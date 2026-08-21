@@ -537,7 +537,7 @@ async function notifyFollowersNewPost(userId: string, postId: string) {
   if (!recipients?.length) return;
   const prenom = me?.prenom || 'Quelqu\'un que tu suis';
   for (const r of recipients) {
-    if (r.push_token) sendPushNotification(r.push_token, 'Nouvelle photo 📸', `${prenom} a publié une nouvelle photo`, { type: 'new_post', postId });
+    if (r.push_token) sendPushNotification(r.push_token, 'Nouvelle photo', `${prenom} a publié une nouvelle photo`, { type: 'new_post', postId });
   }
 }
 
@@ -1186,7 +1186,7 @@ export default function FeedScreen() {
       supabase.from('profils').select('prenom').eq('id', myUserId).single(),
     ]);
     if (!owner?.push_token || owner.notif_photo_like === false) return;
-    sendPushNotification(owner.push_token, 'Nouveau like 🐾', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId });
+    sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId });
   }
 
   function toggleLike(postId: string) {
