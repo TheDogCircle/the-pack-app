@@ -2,23 +2,26 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, ScrollView,
-  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking,
+  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking, Dimensions,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import { supabase, uploadToR2 } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 
+const MAX_EVENT_PHOTOS = 3;
+
 type Evenement = {
   id: string; titre: string; description: string | null;
-  date_heure: string; adresse: string | null; ville: string;
+  date_heure: string; date_heure_fin: string | null; adresse: string | null; ville: string;
   lat: number | null; lng: number | null;
   max_participants: number | null; payant: boolean; prix: number | null;
-  image_url: string | null; site_web: string | null;
+  image_url: string | null; images: string[] | null; site_web: string | null;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
   nb_inscrits?: number; je_suis_inscrit?: boolean;
   created_by?: string;
@@ -58,8 +61,13 @@ export default function EvenementsScreen() {
   const [payant, setPayant] = useState(false);
   const [prix, setPrix] = useState('');
   const [eventDate, setEventDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0); return d; });
+  const [eventDateFin, setEventDateFin] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showDateFinPicker, setShowDateFinPicker] = useState(false);
+  const [showTimeFinPicker, setShowTimeFinPicker] = useState(false);
+  const [photoUris, setPhotoUris] = useState<string[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
 
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
@@ -81,47 +89,52 @@ export default function EvenementsScreen() {
 
   async function load() {
     setLoading(true);
-    const now = new Date().toISOString();
-    const endWeek = new Date(Date.now() + 7 * 86400000).toISOString();
-
-    let q = supabase.from('evenements')
-      .select('*, profils(prenom, username, avatar_url)')
-      .eq('valide', true).eq('actif', true)
-      .gte('date_heure', now)
-      .order('date_heure', { ascending: true });
-
-    if (filter === 'semaine') q = q.lte('date_heure', endWeek);
-
-    const { data } = await q;
-    const events = data || [];
-
     try {
-      if (session?.user?.id && events.length > 0) {
-        const ids = events.map((e: any) => e.id);
-        const [{ data: parts }, ...counts] = await Promise.all([
-          supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
-          ...ids.map((id: string) =>
-            supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
-          ),
-        ]);
-        const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
-        const mapped: Evenement[] = events.map((e: any, i: number) => ({
-          ...e,
-          nb_inscrits: (counts[i] as any).count || 0,
-          je_suis_inscrit: inscritIds.has(e.id),
-        }));
-        if (filter === 'inscrits') {
-          setEvenements(mapped.filter(e => e.je_suis_inscrit));
+      const now = new Date().toISOString();
+      const endWeek = new Date(Date.now() + 7 * 86400000).toISOString();
+
+      let q = supabase.from('evenements')
+        .select('*, profils(prenom, username, avatar_url)')
+        .eq('valide', true).eq('actif', true)
+        .gte('date_heure', now)
+        .order('date_heure', { ascending: true });
+
+      if (filter === 'semaine') q = q.lte('date_heure', endWeek);
+
+      const { data } = await q;
+      const events = data || [];
+
+      try {
+        if (session?.user?.id && events.length > 0) {
+          const ids = events.map((e: any) => e.id);
+          const [{ data: parts }, ...counts] = await Promise.all([
+            supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
+            ...ids.map((id: string) =>
+              supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
+            ),
+          ]);
+          const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
+          const mapped: Evenement[] = events.map((e: any, i: number) => ({
+            ...e,
+            nb_inscrits: (counts[i] as any).count || 0,
+            je_suis_inscrit: inscritIds.has(e.id),
+          }));
+          if (filter === 'inscrits') {
+            setEvenements(mapped.filter(e => e.je_suis_inscrit));
+          } else {
+            setEvenements(mapped);
+          }
         } else {
-          setEvenements(mapped);
+          setEvenements(filter === 'inscrits' ? [] : events);
         }
-      } else {
+      } catch {
         setEvenements(filter === 'inscrits' ? [] : events);
       }
     } catch {
-      setEvenements(filter === 'inscrits' ? [] : events);
+      setEvenements([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function toggleInscription(eventId: string, join: boolean) {
@@ -141,14 +154,69 @@ export default function EvenementsScreen() {
 
   function resetForm() {
     setTitre(''); setDescription(''); setVille(''); setAdresse('');
-    setMaxPart(''); setPayant(false); setPrix('');
+    setMaxPart(''); setPayant(false); setPrix(''); setPhotoUris([]);
     const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
     setEventDate(d);
+    setEventDateFin(null);
+  }
+
+  function pickEventPhotos() {
+    Alert.alert('Ajouter des photos', '', [
+      {
+        text: 'Prendre une photo',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès à la caméra requis', 'Autorise The Pack à accéder à ta caméra dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+            if (result.canceled || !result.assets?.length) return;
+            setPhotoUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_EVENT_PHOTOS));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || "Impossible d'ouvrir la caméra.");
+          }
+        },
+      },
+      {
+        text: 'Choisir depuis la galerie',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès aux photos requis', 'Autorise The Pack à accéder à ta galerie dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'], quality: 0.8,
+              allowsMultipleSelection: true, selectionLimit: MAX_EVENT_PHOTOS - photoUris.length,
+              preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+            });
+            if (result.canceled || !result.assets?.length) return;
+            setPhotoUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_EVENT_PHOTOS));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || "Impossible d'ouvrir la galerie.");
+          }
+        },
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
   }
 
   async function submitEvent() {
     if (!titre.trim() || !ville.trim()) {
       Alert.alert('Champs requis', 'Le titre et la ville sont obligatoires.');
+      return;
+    }
+    if (eventDateFin && eventDateFin.getTime() < eventDate.getTime()) {
+      Alert.alert('Date de fin invalide', 'La date/heure de fin doit être après le début.');
       return;
     }
     if (!myUserId) return;
@@ -166,10 +234,22 @@ export default function EvenementsScreen() {
       if (geoData?.[0]) { eventLat = parseFloat(geoData[0].lat); eventLng = parseFloat(geoData[0].lon); }
     } catch {}
 
+    setUploadingPhotos(true);
+    const urls: string[] = [];
+    for (const uri of photoUris) {
+      try {
+        const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+        const r2Key = `lieu-photos/evenements/${myUserId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        urls.push(await uploadToR2(uri, r2Key));
+      } catch {}
+    }
+    setUploadingPhotos(false);
+
     const { error } = await supabase.from('evenements').insert({
       titre: titre.trim(),
       description: description.trim() || null,
       date_heure: eventDate.toISOString(),
+      date_heure_fin: eventDateFin ? eventDateFin.toISOString() : null,
       ville: ville.trim(),
       adresse: adresse.trim() || null,
       max_participants: maxPart ? parseInt(maxPart) : null,
@@ -181,6 +261,8 @@ export default function EvenementsScreen() {
       lng: eventLng,
       created_by: myUserId,
       organisateur_id: myUserId,
+      image_url: urls[0] || null,
+      images: urls.length > 1 ? urls : null,
     });
     setSaving(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -262,13 +344,7 @@ export default function EvenementsScreen() {
             const diffDays = Math.ceil((date.getTime() - Date.now()) / 86400000);
             return (
               <TouchableOpacity style={styles.card} onPress={() => setSelectedEvent(e)} activeOpacity={0.85}>
-                {e.image_url ? (
-                  <Image source={{ uri: e.image_url }} style={styles.cardImg} />
-                ) : (
-                  <View style={styles.cardImgPlaceholder}>
-                    <Ionicons name="calendar-outline" size={30} color={colors.bordeaux + '30'} />
-                  </View>
-                )}
+                {e.image_url ? <Image source={{ uri: e.image_url }} style={styles.cardImg} /> : null}
                 <View style={styles.cardBody}>
                   {/* Badges */}
                   <View style={styles.badgeRow}>
@@ -284,7 +360,7 @@ export default function EvenementsScreen() {
                   <Text style={styles.cardTitle} numberOfLines={2}>{e.titre}</Text>
                   <View style={styles.infoRow}>
                     <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
-                    <Text style={styles.infoText}>{fmtDate(date)} à {fmtHeure(date)}</Text>
+                    <Text style={styles.infoText}>{fmtDate(date)} à {fmtHeure(date)}{e.date_heure_fin ? ` - ${fmtHeure(new Date(e.date_heure_fin))}` : ''}</Text>
                   </View>
                   <View style={styles.infoRow}>
                     <Ionicons name="location-outline" size={12} color={colors.textMuted} />
@@ -320,12 +396,18 @@ export default function EvenementsScreen() {
             </TouchableOpacity>
             {selectedEvent && (() => {
               const date = new Date(selectedEvent.date_heure);
+              const dateFin = selectedEvent.date_heure_fin ? new Date(selectedEvent.date_heure_fin) : null;
               const isFull = !!(selectedEvent.max_participants && (selectedEvent.nb_inscrits || 0) >= selectedEvent.max_participants && !selectedEvent.je_suis_inscrit);
+              const allPhotos = selectedEvent.images?.length ? selectedEvent.images : (selectedEvent.image_url ? [selectedEvent.image_url] : []);
               return (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-                  {selectedEvent.image_url
-                    ? <Image source={{ uri: selectedEvent.image_url }} style={styles.modalImg} />
-                    : <View style={styles.modalImgPlaceholder}><Ionicons name="calendar-outline" size={40} color={colors.bordeaux + '30'} /></View>}
+                  {allPhotos.length > 0 && (
+                    <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+                      {allPhotos.map((url, idx) => (
+                        <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
+                      ))}
+                    </ScrollView>
+                  )}
                   <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>{selectedEvent.titre}</Text>
                     <View style={styles.modalBadges}>
@@ -342,7 +424,13 @@ export default function EvenementsScreen() {
                       <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
                       <View>
                         <Text style={styles.modalInfoMain}>{date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-                        <Text style={styles.modalInfoSub}>à {fmtHeure(date)}</Text>
+                        <Text style={styles.modalInfoSub}>
+                          {dateFin
+                            ? (dateFin.toDateString() === date.toDateString()
+                              ? `de ${fmtHeure(date)} à ${fmtHeure(dateFin)}`
+                              : `à ${fmtHeure(date)} — jusqu'au ${dateFin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} à ${fmtHeure(dateFin)}`)
+                            : `à ${fmtHeure(date)}`}
+                        </Text>
                       </View>
                     </View>
                     <View style={styles.modalInfoRow}>
@@ -435,6 +523,56 @@ export default function EvenementsScreen() {
                   />
                 )}
 
+                <Text style={styles.fieldLabel}>Date et heure de fin (optionnel)</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={[styles.dateBtn, { flex: 1 }]} onPress={() => setShowDateFinPicker(true)}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                    <Text style={styles.dateBtnText}>{eventDateFin ? eventDateFin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : 'Date'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.dateBtn, { flex: 1 }]} onPress={() => setShowTimeFinPicker(true)}>
+                    <Ionicons name="time-outline" size={16} color={colors.bordeaux} />
+                    <Text style={styles.dateBtnText}>{eventDateFin ? fmtHeure(eventDateFin) : 'Heure'}</Text>
+                  </TouchableOpacity>
+                  {eventDateFin && (
+                    <TouchableOpacity style={styles.dateBtn} onPress={() => setEventDateFin(null)}>
+                      <Ionicons name="close" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {showDateFinPicker && (
+                  <DateTimePicker
+                    value={eventDateFin || eventDate} mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    minimumDate={eventDate}
+                    onChange={(_, d) => { setShowDateFinPicker(Platform.OS === 'ios'); if (d) setEventDateFin(prev => { const n = new Date(prev || eventDate); n.setFullYear(d.getFullYear(), d.getMonth(), d.getDate()); return n; }); }}
+                  />
+                )}
+                {showTimeFinPicker && (
+                  <DateTimePicker
+                    value={eventDateFin || eventDate} mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => { setShowTimeFinPicker(Platform.OS === 'ios'); if (d) setEventDateFin(prev => { const n = new Date(prev || eventDate); n.setHours(d.getHours(), d.getMinutes()); return n; }); }}
+                  />
+                )}
+
+                <Text style={styles.fieldLabel}>Photos (max {MAX_EVENT_PHOTOS})</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                  {photoUris.map((uri, idx) => (
+                    <View key={idx} style={styles.photoThumb}>
+                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <TouchableOpacity style={styles.photoRemove} onPress={() => setPhotoUris(p => p.filter((_, i) => i !== idx))}>
+                        <Ionicons name="close-circle" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  {photoUris.length < MAX_EVENT_PHOTOS && (
+                    <TouchableOpacity style={[styles.photoThumb, styles.photoAdd]} onPress={pickEventPhotos}>
+                      <Ionicons name="camera-outline" size={24} color={colors.bordeaux} />
+                      <Text style={styles.photoAddLabel}>Ajouter</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+
                 <Text style={styles.fieldLabel}>Ville *</Text>
                 <TextInput style={styles.input} value={ville} onChangeText={setVille} placeholder="Ex : Paris" placeholderTextColor={colors.textMuted} />
 
@@ -464,7 +602,9 @@ export default function EvenementsScreen() {
                 </View>
 
                 <TouchableOpacity style={styles.submitBtn} onPress={submitEvent} disabled={saving}>
-                  {saving ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Soumettre l'événement</Text>}
+                  {saving
+                    ? <ActivityIndicator color={colors.ivory} />
+                    : <Text style={styles.submitBtnText}>{uploadingPhotos ? 'Envoi des photos…' : "Soumettre l'événement"}</Text>}
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -511,7 +651,6 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
   },
   cardImg: { width: '100%', height: 160, resizeMode: 'cover' },
-  cardImgPlaceholder: { width: '100%', height: 90, backgroundColor: colors.bordeaux + '08', alignItems: 'center', justifyContent: 'center' },
   cardBody: { padding: 14 },
   badgeRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
   cardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux, lineHeight: 22, marginBottom: 8 },
@@ -544,7 +683,6 @@ const styles = StyleSheet.create({
   modalSheet: { backgroundColor: colors.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '90%' },
   modalClose: { position: 'absolute', top: 14, right: 16, zIndex: 10, padding: 4 },
   modalImg: { width: '100%', height: 210, resizeMode: 'cover' },
-  modalImgPlaceholder: { width: '100%', height: 100, backgroundColor: colors.bordeaux + '08', alignItems: 'center', justifyContent: 'center' },
   modalContent: { padding: 20 },
   modalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 21, color: colors.bordeaux, lineHeight: 28, marginBottom: 12 },
   modalBadges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
@@ -576,6 +714,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, backgroundColor: colors.ivoryPale,
   },
   dateBtnText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  photoThumb: { width: 80, height: 80, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.border },
+  photoAdd: {
+    alignItems: 'center', justifyContent: 'center', gap: 4,
+    borderWidth: 1.5, borderColor: colors.bordeaux, borderStyle: 'dashed', backgroundColor: 'transparent',
+  },
+  photoAddLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.bordeaux },
+  photoRemove: { position: 'absolute', top: 3, right: 3, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 10 },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
   submitNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 16, backgroundColor: colors.ivoryLight, padding: 12, borderRadius: 10 },
   submitNoteText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, flex: 1, lineHeight: 17 },
