@@ -22,12 +22,13 @@ type Evenement = {
   lat: number | null; lng: number | null;
   max_participants: number | null; payant: boolean; prix: number | null;
   image_url: string | null; images: string[] | null; site_web: string | null;
+  organisateur_id: string | null; valide?: boolean;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
   nb_inscrits?: number; je_suis_inscrit?: boolean;
   created_by?: string;
 };
 
-type Filter = 'avenir' | 'inscrits' | 'semaine';
+type Filter = 'avenir' | 'mesEvents' | 'semaine';
 
 function fmtDate(d: Date) {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -49,6 +50,7 @@ export default function EvenementsScreen() {
 
   const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
   const [inscriptionLoading, setInscriptionLoading] = useState(false);
+  const [modalPhotoIndex, setModalPhotoIndex] = useState(0);
 
   // Création
   const [createModal, setCreateModal] = useState(false);
@@ -73,6 +75,8 @@ export default function EvenementsScreen() {
     if (session?.user?.id) setMyUserId(session.user.id);
     load();
   }, [session?.user?.id, filter]);
+
+  useEffect(() => { setModalPhotoIndex(0); }, [selectedEvent?.id]);
 
   // Ouvre directement un evenement quand on arrive via une notification
   useEffect(() => {
@@ -119,22 +123,39 @@ export default function EvenementsScreen() {
             nb_inscrits: (counts[i] as any).count || 0,
             je_suis_inscrit: inscritIds.has(e.id),
           }));
-          if (filter === 'inscrits') {
-            setEvenements(mapped.filter(e => e.je_suis_inscrit));
+          if (filter === 'mesEvents') {
+            setEvenements(await buildMesEvents(mapped, session.user.id));
           } else {
             setEvenements(mapped);
           }
+        } else if (filter === 'mesEvents' && session?.user?.id) {
+          setEvenements(await buildMesEvents([], session.user.id));
         } else {
-          setEvenements(filter === 'inscrits' ? [] : events);
+          setEvenements(filter === 'mesEvents' ? [] : events);
         }
       } catch {
-        setEvenements(filter === 'inscrits' ? [] : events);
+        setEvenements(filter === 'mesEvents' ? [] : events);
       }
     } catch {
       setEvenements([]);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function buildMesEvents(baseMapped: Evenement[], userId: string): Promise<Evenement[]> {
+    const mine = baseMapped.filter(e => e.je_suis_inscrit || e.organisateur_id === userId || e.created_by === userId);
+    const byId = new Map<string, Evenement>();
+    mine.forEach(e => byId.set(e.id, e));
+    try {
+      const { data: ownAll } = await supabase.from('evenements')
+        .select('*, profils(prenom, username, avatar_url)')
+        .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`);
+      (ownAll || []).forEach((e: any) => {
+        if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false });
+      });
+    } catch {}
+    return Array.from(byId.values()).sort((a, b) => new Date(a.date_heure).getTime() - new Date(b.date_heure).getTime());
   }
 
   async function toggleInscription(eventId: string, join: boolean) {
@@ -277,7 +298,7 @@ export default function EvenementsScreen() {
   const FILTERS: { key: Filter; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
     { key: 'avenir',  label: 'À venir',       icon: 'calendar-outline' },
     { key: 'semaine', label: 'Cette semaine',  icon: 'today-outline' },
-    { key: 'inscrits',label: 'Mes inscrits',  icon: 'checkmark-circle-outline' },
+    { key: 'mesEvents',label: 'Mes events',  icon: 'checkmark-circle-outline' },
   ];
 
   const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
@@ -332,10 +353,10 @@ export default function EvenementsScreen() {
             <View style={styles.empty}>
               <Ionicons name="calendar-outline" size={44} color={colors.border} />
               <Text style={styles.emptyTitle}>
-                {filter === 'inscrits' ? 'Aucun événement inscrit' : 'Aucun événement à venir'}
+                {filter === 'mesEvents' ? 'Aucun event pour l\'instant' : 'Aucun événement à venir'}
               </Text>
               <Text style={styles.emptyText}>
-                {filter === 'inscrits' ? 'Parcours les événements et inscris-toi !' : 'Sois le premier à en créer un !'}
+                {filter === 'mesEvents' ? 'Crée un événement ou inscris-toi à un event pour le retrouver ici !' : 'Sois le premier à en créer un !'}
               </Text>
             </View>
           }
@@ -344,10 +365,23 @@ export default function EvenementsScreen() {
             const diffDays = Math.ceil((date.getTime() - Date.now()) / 86400000);
             return (
               <TouchableOpacity style={styles.card} onPress={() => setSelectedEvent(e)} activeOpacity={0.85}>
-                {e.image_url ? <Image source={{ uri: e.image_url }} style={styles.cardImg} /> : null}
+                {e.image_url ? (
+                  <View>
+                    <Image source={{ uri: e.image_url }} style={styles.cardImg} />
+                    {e.images && e.images.length > 1 && (
+                      <View style={styles.photoCountBadge}>
+                        <Ionicons name="images-outline" size={11} color="#fff" />
+                        <Text style={styles.photoCountText}>{e.images.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                ) : null}
                 <View style={styles.cardBody}>
                   {/* Badges */}
                   <View style={styles.badgeRow}>
+                    {filter === 'mesEvents' && !e.valide && (
+                      <View style={styles.pendingBadge}><Text style={styles.pendingText}>En attente de validation</Text></View>
+                    )}
                     {diffDays <= 3 && (
                       <View style={styles.urgencyBadge}>
                         <Text style={styles.urgencyText}>{diffDays === 0 ? "Auj." : diffDays === 1 ? 'Demain' : `J-${diffDays}`}</Text>
@@ -402,11 +436,24 @@ export default function EvenementsScreen() {
               return (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
                   {allPhotos.length > 0 && (
-                    <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-                      {allPhotos.map((url, idx) => (
-                        <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
-                      ))}
-                    </ScrollView>
+                    <View>
+                      <ScrollView
+                        horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ flexDirection: 'row' }}
+                        onMomentumScrollEnd={ev => setModalPhotoIndex(Math.round(ev.nativeEvent.contentOffset.x / Dimensions.get('window').width))}
+                      >
+                        {allPhotos.map((url, idx) => (
+                          <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
+                        ))}
+                      </ScrollView>
+                      {allPhotos.length > 1 && (
+                        <View style={styles.photoDotsRow}>
+                          {allPhotos.map((_, idx) => (
+                            <View key={idx} style={[styles.photoDot, idx === modalPhotoIndex && styles.photoDotActive]} />
+                          ))}
+                        </View>
+                      )}
+                    </View>
                   )}
                   <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>{selectedEvent.titre}</Text>
@@ -556,7 +603,7 @@ export default function EvenementsScreen() {
                 )}
 
                 <Text style={styles.fieldLabel}>Photos (max {MAX_EVENT_PHOTOS})</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
                   {photoUris.map((uri, idx) => (
                     <View key={idx} style={styles.photoThumb}>
                       <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
@@ -628,8 +675,8 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
 
-  villeScroll: { marginHorizontal: 16, marginBottom: 8 },
-  villeScrollContent: { gap: 8, paddingRight: 16 },
+  villeScroll: { marginHorizontal: 16, marginBottom: 8, maxHeight: 40 },
+  villeScrollContent: { flexDirection: 'row', gap: 8, paddingRight: 16 },
   villeChip: {
     paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
     backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
@@ -663,6 +710,13 @@ const styles = StyleSheet.create({
 
   urgencyBadge: { backgroundColor: '#fff3e0', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   urgencyText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#e65100' },
+  pendingBadge: { backgroundColor: '#fff3e0', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  pendingText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#e65100' },
+  photoCountBadge: {
+    position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3,
+  },
+  photoCountText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#fff' },
   paidBadge: { backgroundColor: '#fce4ec', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   paidText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#c62828' },
   freeBadge: { backgroundColor: '#e8f5e9', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
@@ -683,6 +737,12 @@ const styles = StyleSheet.create({
   modalSheet: { backgroundColor: colors.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '90%' },
   modalClose: { position: 'absolute', top: 14, right: 16, zIndex: 10, padding: 4 },
   modalImg: { width: '100%', height: 210, resizeMode: 'cover' },
+  photoDotsRow: {
+    position: 'absolute', bottom: 10, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', gap: 6,
+  },
+  photoDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
+  photoDotActive: { backgroundColor: '#fff', width: 16 },
   modalContent: { padding: 20 },
   modalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 21, color: colors.bordeaux, lineHeight: 28, marginBottom: 12 },
   modalBadges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
