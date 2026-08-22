@@ -646,9 +646,11 @@ export default function CarteScreen() {
         setUserLat(loc.coords.latitude);
         setUserLng(loc.coords.longitude);
         const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
-        setRegion(r);
         mapRef.current?.animateToRegion(r, 600);
-        // fetchLieux sera déclenché par onRegionChangeComplete après l'animation
+        // region (et donc les clusters affichés) n'est mis à jour qu'une fois l'animation
+        // reellement terminee, via onRegionChangeComplete — sinon les clusters se recalculent
+        // immediatement sur la nouvelle zone (etroite) alors que les lieux charges correspondent
+        // encore a l'ancienne (large), et les epingles disparaissent le temps de l'animation.
       } else {
         fetchLieux(region, null, true);
       }
