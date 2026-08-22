@@ -639,6 +639,10 @@ export default function CarteScreen() {
   }, []));
 
   useEffect(() => {
+    // Chargement initial sur la region par defaut, independant du GPS : on ne peut pas
+    // compter sur onRegionChangeComplete pour declencher le tout premier fetch (son
+    // declenchement automatique au montage n'est pas garanti selon les versions/plateformes).
+    fetchLieux(region, null, true);
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -651,8 +655,8 @@ export default function CarteScreen() {
         // reellement terminee, via onRegionChangeComplete — sinon les clusters se recalculent
         // immediatement sur la nouvelle zone (etroite) alors que les lieux charges correspondent
         // encore a l'ancienne (large), et les epingles disparaissent le temps de l'animation.
-      } else {
-        fetchLieux(region, null, true);
+        // Si onRegionChangeComplete ne se declenche pas (ref pas encore prete, plateforme...),
+        // le fetch initial ci-dessus garantit que la carte n'est jamais vide pour autant.
       }
     })();
   }, []);
