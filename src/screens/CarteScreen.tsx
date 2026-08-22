@@ -170,6 +170,74 @@ type LieuFull = Lieu & {
   manager_user_id: string | null; google_photo_url: string | null;
   plan: string | null;
 };
+// react-native-maps prend un instantane statique du contenu des marqueurs
+// personnalises (tracksViewChanges) plutot que de les re-rendre en continu, pour la
+// performance. Sur certains appareils/versions Android, cet instantane peut etre
+// pris avant que le rond colore + l'icone aient fini de se dessiner (independamment
+// du chargement des polices, deja precharge par ailleurs), ne laissant que la pointe
+// du repere visible en permanence. Ce hook force donc tracksViewChanges a true
+// pendant une courte fenetre apres le montage, le temps qu'un instantane fiable
+// soit pris, avant de repasser en mode statique.
+function useSettledTracking(forceTrack: boolean): boolean {
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+  return forceTrack || !settled;
+}
+
+function LieuMarker({ lieu, isSelected, forceTrack, onPress }: { lieu: Lieu; isSelected: boolean; forceTrack: boolean; onPress: () => void }) {
+  const tracksViewChanges = useSettledTracking(isSelected || forceTrack);
+  const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
+  const size = isSelected ? 44 : 34;
+  const iconSize = isSelected ? 22 : 16;
+  return (
+    <Marker
+      coordinate={{ latitude: lieu.lat, longitude: lieu.lng }}
+      onPress={onPress}
+      tracksViewChanges={tracksViewChanges}
+      anchor={{ x: 0.5, y: 1 }}
+    >
+      <View style={styles.markerPin}>
+        <View style={[styles.markerBubble, { width: size, height: size, borderRadius: size / 2, backgroundColor: cfg.color }, isSelected && styles.markerBubbleSelected]}>
+          <View style={styles.markerShine} />
+          <CatIcon cat={lieu.cat} name={cfg.markerIcon} size={iconSize} color="#fff" />
+        </View>
+        <View style={[styles.markerTail, { borderTopColor: cfg.color }, isSelected && { borderTopWidth: 9, borderLeftWidth: 6, borderRightWidth: 6 }]} />
+      </View>
+    </Marker>
+  );
+}
+
+function MapEventPin({ latitude, longitude, isSelected, onPress }: { latitude: number; longitude: number; isSelected: boolean; onPress: () => void }) {
+  const tracksViewChanges = useSettledTracking(isSelected);
+  return (
+    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
+      <View style={styles.eventPin}>
+        <View style={[styles.eventBubble, isSelected && styles.eventBubbleSelected]}>
+          <Ionicons name="calendar" size={14} color="#fff" />
+        </View>
+        <View style={styles.eventTail} />
+      </View>
+    </Marker>
+  );
+}
+
+function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: number; longitude: number; isSelected: boolean; onPress: () => void }) {
+  const tracksViewChanges = useSettledTracking(isSelected);
+  return (
+    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
+      <View style={styles.baladePin}>
+        <View style={[styles.baladeBubble, isSelected && styles.baladeBubbleSelected]}>
+          <Ionicons name="walk-outline" size={16} color="#fff" />
+        </View>
+        <View style={[styles.baladeTail, isSelected && { borderTopColor: '#2E7D6B' }]} />
+      </View>
+    </Marker>
+  );
+}
+
 type PhotoFiche = { id: string; url: string; likeCount: number; likedByMe: boolean; authorUsername: string | null; nomChien: string | null; fromCommunity?: boolean };
 type FicheAvisItem = { id: string; note: number; commentaire: string | null; created_at: string; prenom: string; username: string | null; reponse_pro: string | null; ambassadeur?: boolean | null };
 type CityResult = { nom: string; lat: number; lng: number };
@@ -2637,53 +2705,34 @@ export default function CarteScreen() {
           }
 
           const l: Lieu = lieu;
-          const cfg = CAT_CONFIG[l.cat] || CAT_CONFIG.autre;
           const isSelected = selectedLieu?.id === l.id;
-          const size = isSelected ? 44 : 34;
-          const iconSize = isSelected ? 22 : 16;
           return (
-            <Marker key={l.id} coordinate={{ latitude: l.lat, longitude: l.lng }} onPress={() => openFiche(l)} tracksViewChanges={isSelected || prevSelectedId === l.id} anchor={{ x: 0.5, y: 1 }}>
-              <View style={styles.markerPin}>
-                <View style={[styles.markerBubble, { width: size, height: size, borderRadius: size / 2, backgroundColor: cfg.color }, isSelected && styles.markerBubbleSelected]}>
-                  <View style={styles.markerShine} />
-                  <CatIcon cat={l.cat} name={cfg.markerIcon} size={iconSize} color="#fff" />
-                </View>
-                <View style={[styles.markerTail, { borderTopColor: cfg.color }, isSelected && { borderTopWidth: 9, borderLeftWidth: 6, borderRightWidth: 6 }]} />
-              </View>
-            </Marker>
+            <LieuMarker
+              key={l.id}
+              lieu={l}
+              isSelected={isSelected}
+              forceTrack={prevSelectedId === l.id}
+              onPress={() => openFiche(l)}
+            />
           );
         })}
         {showEvents && mapEvents.map(e => (
-          <Marker
+          <MapEventPin
             key={`ev-${e.id}`}
-            coordinate={{ latitude: e.lat, longitude: e.lng }}
-            tracksViewChanges={selectedMapEvent?.id === e.id}
-            anchor={{ x: 0.5, y: 1 }}
+            latitude={e.lat}
+            longitude={e.lng}
+            isSelected={selectedMapEvent?.id === e.id}
             onPress={() => setSelectedMapEvent(e)}
-          >
-            <View style={styles.eventPin}>
-              <View style={[styles.eventBubble, selectedMapEvent?.id === e.id && styles.eventBubbleSelected]}>
-                <Ionicons name="calendar" size={14} color="#fff" />
-              </View>
-              <View style={styles.eventTail} />
-            </View>
-          </Marker>
+          />
         ))}
         {showBalades && !showEvents && balades.map(b => (
-          <Marker
+          <BaladePin
             key={`bal-${b.id}`}
-            coordinate={{ latitude: b.depart_lat, longitude: b.depart_lng }}
-            tracksViewChanges={selectedBalade?.id === b.id}
-            anchor={{ x: 0.5, y: 1 }}
+            latitude={b.depart_lat}
+            longitude={b.depart_lng}
+            isSelected={selectedBalade?.id === b.id}
             onPress={() => { setFabOpen(false); setSelectedBalade(b); }}
-          >
-            <View style={styles.baladePin}>
-              <View style={[styles.baladeBubble, selectedBalade?.id === b.id && styles.baladeBubbleSelected]}>
-                <Ionicons name="walk-outline" size={16} color="#fff" />
-              </View>
-              <View style={[styles.baladeTail, selectedBalade?.id === b.id && { borderTopColor: '#2E7D6B' }]} />
-            </View>
-          </Marker>
+          />
         ))}
         {selectedBalade && (selectedBalade as any).trace?.length > 1 ? (
           <Polyline
