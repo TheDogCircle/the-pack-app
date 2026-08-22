@@ -1647,15 +1647,30 @@ export default function CarteScreen() {
     setProposeGeoLoading(true);
     try {
       const r = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1`,
         { headers: { 'User-Agent': 'ThePackApp/1.0' } }
       );
       const j = await r.json();
       if (j?.[0]) {
-        setProposeLat(parseFloat(j[0].lat));
-        setProposeLng(parseFloat(j[0].lon));
+        const lat = parseFloat(j[0].lat);
+        const lng = parseFloat(j[0].lon);
+        const villeTrouvee: string | undefined = j[0].address?.city || j[0].address?.town || j[0].address?.village || j[0].address?.municipality;
+        const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        if (proposeVille.trim() && villeTrouvee && !norm(villeTrouvee).includes(norm(proposeVille)) && !norm(proposeVille).includes(norm(villeTrouvee))) {
+          Alert.alert(
+            'Adresse trouvée ailleurs',
+            `L'adresse semble être à "${villeTrouvee}" alors que tu as indiqué "${proposeVille}". Utiliser quand même cette position ?`,
+            [
+              { text: 'Annuler', style: 'cancel' },
+              { text: 'Utiliser quand même', onPress: () => { setProposeLat(lat); setProposeLng(lng); } },
+            ]
+          );
+        } else {
+          setProposeLat(lat);
+          setProposeLng(lng);
+        }
       } else {
-        Alert.alert('Adresse introuvable', "Vérifie l'adresse et la ville, puis réessaie.");
+        Alert.alert('Adresse introuvable', "Vérifie l'adresse et la ville, puis réessaie, ou utilise ta position et déplace le repère.");
       }
     } catch (_) {}
     setProposeGeoLoading(false);
@@ -1770,6 +1785,13 @@ export default function CarteScreen() {
     if (!userId) { showLoginPrompt(); return; }
     if (!proposeNom.trim() || !proposeVille.trim()) return;
     if (!proposeCats.length) { Alert.alert('Type de lieu manquant', 'Choisis au moins un type de lieu.'); return; }
+    if (proposeLat == null || proposeLng == null) {
+      Alert.alert(
+        'Position manquante',
+        "Utilise \"Ma position\" ou \"Chercher l'adresse\" pour placer le repère avant d'envoyer — sinon le lieu risque d'apparaître au mauvais endroit sur la carte."
+      );
+      return;
+    }
     setProposeLoading(true);
     const { data: insertedLieu, error } = await supabase.from('lieux').insert({
       nom: proposeNom.trim(), adresse: proposeAdresse.trim() || null, ville: proposeVille.trim(),
@@ -1782,8 +1804,8 @@ export default function CarteScreen() {
         const prefix = extras.length ? `[${extras.join(' | ')}]\n` : '';
         return (prefix + proposeDesc.trim()) || null;
       })(),
-      lat: proposeLat ?? region.latitude,
-      lng: proposeLng ?? region.longitude,
+      lat: proposeLat,
+      lng: proposeLng,
       actif: true,
       submitted_by: userId,
       ...proposeAmenities,
@@ -3422,7 +3444,7 @@ export default function CarteScreen() {
               </View>
               )}
 
-              <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLoading}>
+              <TouchableOpacity style={[styles.avisSubmit, (!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLat == null || proposeLng == null || proposeLoading) && styles.avisSubmitDisabled]} onPress={submitPropose} disabled={!proposeNom.trim() || !proposeVille.trim() || !proposeCats.length || proposeLat == null || proposeLng == null || proposeLoading}>
                 {proposeLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Soumettre le lieu</Text>}
               </TouchableOpacity>
             </ScrollView>
