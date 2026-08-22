@@ -1178,6 +1178,11 @@ export default function CarteScreen() {
     Animated.spring(sheetAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
     skipNextFetchRef.current = true;
     mapRef.current?.animateToRegion({ latitude: lieu.lat, longitude: lieu.lng, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
+    // Filet de securite : sur certains appareils Android, onRegionChangeComplete ne se
+    // declenche pas toujours pour un changement de region minime (ou si la ref de la carte
+    // n'est pas prete), ce qui laisserait skipNextFetchRef bloque a true indefiniment et
+    // empecherait tout futur chargement de lieux au pan/zoom suivant.
+    setTimeout(() => { skipNextFetchRef.current = false; }, 1200);
 
     let lieuData: any = null, favData: any = null, myAvisData: any = null, photosRaw: any[] = [], avisRaw: any[] = [], communityPostsRaw: any[] = [];
     try {
