@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { AppState, AppStateStatus, View } from 'react-native';
 import { useFonts } from 'expo-font';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   PlayfairDisplay_400Regular,
   PlayfairDisplay_400Regular_Italic,
@@ -63,6 +64,8 @@ export default function App() {
     DMSans_300Light,
     DMSans_400Regular,
     DMSans_500Medium,
+    ...Ionicons.font,
+    ...MaterialCommunityIcons.font,
   });
 
   if (!fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#3D1A1A' }} />;
