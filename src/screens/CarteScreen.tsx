@@ -181,7 +181,7 @@ type LieuFull = Lieu & {
 function useSettledTracking(forceTrack: boolean): boolean {
   const [settled, setSettled] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setSettled(true), 400);
+    const t = setTimeout(() => setSettled(true), 700);
     return () => clearTimeout(t);
   }, []);
   return forceTrack || !settled;
@@ -233,6 +233,19 @@ function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: num
           <Ionicons name="walk-outline" size={16} color="#fff" />
         </View>
         <View style={[styles.baladeTail, isSelected && { borderTopColor: '#2E7D6B' }]} />
+      </View>
+    </Marker>
+  );
+}
+
+function ClusterMarker({ latitude, longitude, pointCount, onPress }: { latitude: number; longitude: number; pointCount: number; onPress: () => void }) {
+  const tracksViewChanges = useSettledTracking(false);
+  const size = pointCount >= 10 ? 48 : 40;
+  return (
+    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 0.5 }} onPress={onPress}>
+      <View style={[styles.clusterBubble, { width: size, height: size, borderRadius: size / 2 }]}>
+        <View style={styles.markerShine} />
+        <Text style={styles.clusterText}>{pointCount}</Text>
       </View>
     </Marker>
   );
@@ -2672,13 +2685,12 @@ export default function CarteScreen() {
           const { cluster: isCluster, cluster_id, point_count, lieu } = cluster.properties;
 
           if (isCluster) {
-            const size = point_count >= 10 ? 48 : 40;
             return (
-              <Marker
+              <ClusterMarker
                 key={`c-${cluster_id}`}
-                coordinate={{ latitude: lat, longitude: lng }}
-                tracksViewChanges={false}
-                anchor={{ x: 0.5, y: 0.5 }}
+                latitude={lat}
+                longitude={lng}
+                pointCount={point_count}
                 onPress={() => {
                   const leaves = clusterIndex.getLeaves(cluster_id, Infinity);
                   const lats = leaves.map((f: any) => f.geometry.coordinates[1]).filter((v: number) => v && !isNaN(v));
@@ -2695,12 +2707,7 @@ export default function CarteScreen() {
                     longitudeDelta: (maxLng - minLng) * 1.5 + 0.01,
                   }, 400);
                 }}
-              >
-                <View style={[styles.clusterBubble, { width: size, height: size, borderRadius: size / 2 }]}>
-                  <View style={styles.markerShine} />
-                  <Text style={styles.clusterText}>{point_count}</Text>
-                </View>
-              </Marker>
+              />
             );
           }
 
