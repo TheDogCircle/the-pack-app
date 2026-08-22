@@ -24,7 +24,7 @@ type Evenement = {
   image_url: string | null; images: string[] | null; site_web: string | null;
   organisateur_id: string | null; valide?: boolean;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
-  nb_inscrits?: number; je_suis_inscrit?: boolean;
+  nb_inscrits?: number; je_suis_inscrit?: boolean; est_enregistre?: boolean;
   created_by?: string;
 };
 
@@ -111,17 +111,20 @@ export default function EvenementsScreen() {
       try {
         if (session?.user?.id && events.length > 0) {
           const ids = events.map((e: any) => e.id);
-          const [{ data: parts }, ...counts] = await Promise.all([
+          const [{ data: parts }, { data: favs }, ...counts] = await Promise.all([
             supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
+            supabase.from('evenements_favoris').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
             ...ids.map((id: string) =>
               supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
             ),
           ]);
           const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
+          const favIds = new Set((favs || []).map((f: any) => f.event_id));
           const mapped: Evenement[] = events.map((e: any, i: number) => ({
             ...e,
             nb_inscrits: (counts[i] as any).count || 0,
             je_suis_inscrit: inscritIds.has(e.id),
+            est_enregistre: favIds.has(e.id),
           }));
           if (filter === 'mesEvents') {
             setEvenements(await buildMesEvents(mapped, session.user.id));
@@ -144,7 +147,7 @@ export default function EvenementsScreen() {
   }
 
   async function buildMesEvents(baseMapped: Evenement[], userId: string): Promise<Evenement[]> {
-    const mine = baseMapped.filter(e => e.je_suis_inscrit || e.organisateur_id === userId || e.created_by === userId);
+    const mine = baseMapped.filter(e => e.je_suis_inscrit || e.est_enregistre || e.organisateur_id === userId || e.created_by === userId);
     const byId = new Map<string, Evenement>();
     mine.forEach(e => byId.set(e.id, e));
     try {
@@ -152,7 +155,19 @@ export default function EvenementsScreen() {
         .select('*, profils(prenom, username, avatar_url)')
         .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`);
       (ownAll || []).forEach((e: any) => {
-        if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false });
+        if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false, est_enregistre: false });
+      });
+    } catch {}
+    try {
+      const { data: favRows } = await supabase.from('evenements_favoris')
+        .select('event_id, evenements(*, profils(prenom, username, avatar_url))')
+        .eq('user_id', userId);
+      (favRows || []).forEach((f: any) => {
+        if (f.evenements && !byId.has(f.event_id)) {
+          byId.set(f.event_id, { ...f.evenements, je_suis_inscrit: false, est_enregistre: true });
+        } else if (byId.has(f.event_id)) {
+          byId.set(f.event_id, { ...byId.get(f.event_id)!, est_enregistre: true });
+        }
       });
     } catch {}
     return Array.from(byId.values()).sort((a, b) => new Date(a.date_heure).getTime() - new Date(b.date_heure).getTime());
@@ -171,6 +186,24 @@ export default function EvenementsScreen() {
     };
     setEvenements(prev => prev.map(update));
     if (selectedEvent?.id === eventId) setSelectedEvent(prev => prev ? update(prev) : prev);
+  }
+
+  async function toggleFavori(eventId: string, save: boolean) {
+    if (!myUserId) return;
+    const update = (e: Evenement) => e.id !== eventId ? e : { ...e, est_enregistre: save };
+    setEvenements(prev => prev.map(update));
+    if (selectedEvent?.id === eventId) setSelectedEvent(prev => prev ? update(prev) : prev);
+    const { error } = save
+      ? await supabase.from('evenements_favoris').insert({ event_id: eventId, user_id: myUserId })
+      : await supabase.from('evenements_favoris').delete().eq('event_id', eventId).eq('user_id', myUserId);
+    if (error) {
+      const revert = (e: Evenement) => e.id !== eventId ? e : { ...e, est_enregistre: !save };
+      setEvenements(prev => prev.map(revert));
+      if (selectedEvent?.id === eventId) setSelectedEvent(prev => prev ? revert(prev) : prev);
+      Alert.alert('Erreur', error.message);
+    } else if (filter === 'mesEvents' && !save) {
+      setEvenements(prev => prev.filter(e => e.id !== eventId || e.je_suis_inscrit || e.organisateur_id === myUserId || e.created_by === myUserId));
+    }
   }
 
   function resetForm() {
@@ -356,7 +389,7 @@ export default function EvenementsScreen() {
                 {filter === 'mesEvents' ? 'Aucun event pour l\'instant' : 'Aucun événement à venir'}
               </Text>
               <Text style={styles.emptyText}>
-                {filter === 'mesEvents' ? 'Crée un événement ou inscris-toi à un event pour le retrouver ici !' : 'Sois le premier à en créer un !'}
+                {filter === 'mesEvents' ? 'Crée, enregistre ou inscris-toi à un event pour le retrouver ici !' : 'Sois le premier à en créer un !'}
               </Text>
             </View>
           }
@@ -376,6 +409,13 @@ export default function EvenementsScreen() {
                     )}
                   </View>
                 ) : null}
+                <TouchableOpacity
+                  style={[styles.saveBtn, !e.image_url && styles.saveBtnNoImg]}
+                  onPress={() => toggleFavori(e.id, !e.est_enregistre)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name={e.est_enregistre ? 'bookmark' : 'bookmark-outline'} size={16} color={e.image_url ? '#fff' : colors.bordeaux} />
+                </TouchableOpacity>
                 <View style={styles.cardBody}>
                   {/* Badges */}
                   <View style={styles.badgeRow}>
@@ -516,6 +556,10 @@ export default function EvenementsScreen() {
                         </Text>
                       </TouchableOpacity>
                     )}
+                    <TouchableOpacity style={styles.saveBtnFull} onPress={() => toggleFavori(selectedEvent.id, !selectedEvent.est_enregistre)}>
+                      <Ionicons name={selectedEvent.est_enregistre ? 'bookmark' : 'bookmark-outline'} size={16} color={colors.bordeaux} />
+                      <Text style={styles.saveBtnFullText}>{selectedEvent.est_enregistre ? 'Enregistré' : 'Enregistrer pour plus tard'}</Text>
+                    </TouchableOpacity>
                   </View>
                 </ScrollView>
               );
@@ -717,6 +761,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3,
   },
   photoCountText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#fff' },
+  saveBtn: {
+    position: 'absolute', top: 10, right: 10, width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center',
+  },
+  saveBtnNoImg: { backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border },
   paidBadge: { backgroundColor: '#fce4ec', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   paidText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#c62828' },
   freeBadge: { backgroundColor: '#e8f5e9', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
@@ -757,6 +806,11 @@ const styles = StyleSheet.create({
   cancelBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: '#e65100' },
   fullBadge: { backgroundColor: colors.ivoryPale, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8 },
   fullText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  saveBtnFull: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 13, marginTop: 10,
+  },
+  saveBtnFullText: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.bordeaux },
 
   // Create form
   createHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
