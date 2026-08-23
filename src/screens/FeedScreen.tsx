@@ -39,7 +39,7 @@ type CommunityPost = {
   created_at: string;
   balade_id?: string | null;
   balades?: { distance_km: number | null; duree_secondes: number | null } | null;
-  profils: { prenom: string; avatar_url: string | null } | null;
+  profils: { prenom: string; avatar_url: string | null; ambassadeur?: boolean | null } | null;
   lieux: { id: string; nom: string; cat: string; ville: string } | null;
   community_post_likes: { user_id: string }[];
   community_post_comments: { id: string }[];
@@ -136,7 +136,10 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
       <View style={styles.postHeader}>
         <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.postAuthor}>{author}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={styles.postAuthor}>{author}</Text>
+            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+          </View>
           <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
         </View>
         {isCarousel && (
@@ -238,7 +241,10 @@ function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPre
       <View style={styles.postHeader}>
         <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.postAuthor}>{author}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={styles.postAuthor}>{author}</Text>
+            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+          </View>
           <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
         </View>
       </View>
@@ -293,7 +299,10 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onD
       <View style={styles.postHeader}>
         <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.postAuthor}>{author}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={styles.postAuthor}>{author}</Text>
+            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+          </View>
           <Text style={styles.postTime}>a partagé une balade · {timeAgo(post.created_at)}</Text>
         </View>
         {isCarousel && (
@@ -1105,7 +1114,7 @@ export default function FeedScreen() {
 
     const [profilesRes, lieuxRes] = await Promise.all([
       allUserIds.length > 0
-        ? supabase.from('profils').select('id, prenom, avatar_url').in('id', allUserIds)
+        ? supabase.from('profils').select('id, prenom, avatar_url, ambassadeur').in('id', allUserIds)
         : Promise.resolve({ data: [] as any[] }),
       allLieuIds.length > 0
         ? supabase.from('lieux').select('id, nom, cat, ville').in('id', allLieuIds)
