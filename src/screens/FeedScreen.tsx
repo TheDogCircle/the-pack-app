@@ -821,6 +821,66 @@ export default function FeedScreen() {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [pendingConvId, setPendingConvId] = useState<string | null>(null);
 
+  // Pastilles "nouveau contenu" sur les onglets Feed / Chat / Membres
+  const [feedBadge, setFeedBadge] = useState(false);
+  const [chatBadge, setChatBadge] = useState(false);
+  const [membresBadge, setMembresBadge] = useState(false);
+
+  function tabLastSeenKey(tabKey: 'feed' | 'messages' | 'membres', userId: string) {
+    return `tab_last_seen_${tabKey}_${userId}`;
+  }
+
+  function selectTab(key: 'feed' | 'messages' | 'membres') {
+    setTab(key);
+    if (key === 'feed') setFeedBadge(false);
+    else if (key === 'messages') setChatBadge(false);
+    else setMembresBadge(false);
+    // Session lue a la volee (pas via l'etat myUserId) : cette fonction est aussi
+    // appelee depuis un useFocusEffect fige au premier rendu, ou myUserId vaudrait
+    // toujours null par effet de closure.
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (s?.user?.id) AsyncStorage.setItem(tabLastSeenKey(key, s.user.id), new Date().toISOString()).catch(() => {});
+    });
+  }
+
+  // Verifie s'il y a du contenu plus recent que la derniere visite de chaque onglet
+  const checkTabBadges = useCallback(async (userId: string) => {
+    const defaultSince = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const [feedSince, chatSince, membresSince] = await Promise.all([
+      AsyncStorage.getItem(tabLastSeenKey('feed', userId)),
+      AsyncStorage.getItem(tabLastSeenKey('messages', userId)),
+      AsyncStorage.getItem(tabLastSeenKey('membres', userId)),
+    ]);
+
+    // Feed : nouveaux posts ou nouvelles photos d'autres membres
+    const [{ count: newPosts }, { count: newPhotos }] = await Promise.all([
+      supabase.from('community_posts').select('id', { count: 'exact', head: true })
+        .eq('hidden', false).neq('user_id', userId).gt('created_at', feedSince || defaultSince),
+      supabase.from('photos').select('id', { count: 'exact', head: true })
+        .eq('validee', true).neq('user_id', userId).gt('created_at', feedSince || defaultSince),
+    ]);
+    setFeedBadge(((newPosts ?? 0) + (newPhotos ?? 0)) > 0);
+
+    // Chat : messages non lus dans mes conversations
+    const { data: myConvs } = await supabase
+      .from('conversation_members').select('conversation_id').eq('user_id', userId);
+    if (myConvs?.length) {
+      const convIds = myConvs.map((r: any) => r.conversation_id);
+      const { count: newMessages } = await supabase.from('messages').select('id', { count: 'exact', head: true })
+        .in('conversation_id', convIds).neq('user_id', userId).gt('created_at', chatSince || defaultSince);
+      setChatBadge((newMessages ?? 0) > 0);
+    }
+
+    // Membres : nouveaux profils crees recemment
+    const { count: newMembres } = await supabase.from('profils').select('id', { count: 'exact', head: true })
+      .neq('id', userId).gt('created_at', membresSince || defaultSince);
+    setMembresBadge((newMembres ?? 0) > 0);
+  }, []);
+
+  useEffect(() => {
+    if (session?.user?.id) checkTabBadges(session.user.id);
+  }, [session?.user?.id, checkTabBadges]);
+
   const [pendingPostId, setPendingPostId] = useState<string | null>(null);
 
   // Notification "message" tapee : bascule sur l'onglet Chat et ouvre la conversation
@@ -831,9 +891,9 @@ export default function FeedScreen() {
       to_token: 'FEED_FOCUS', title: 'FeedScreen useFocusEffect',
       detail: JSON.stringify({ consumedConversationId: cid }),
     }).then(() => {}, () => {});
-    if (cid) { setTab('messages'); setPendingConvId(cid); }
+    if (cid) { selectTab('messages'); setPendingConvId(cid); }
     const pid = mapNavigation.consumePost();
-    if (pid) { setTab('feed'); setPendingPostId(pid); }
+    if (pid) { selectTab('feed'); setPendingPostId(pid); }
   }, []));
 
   // Feed
@@ -1394,15 +1454,16 @@ export default function FeedScreen() {
       {/* Tab bar */}
       <View style={styles.tabsWrap}>
         {([
-          { key: 'feed',     label: 'Feed' },
-          { key: 'messages', label: 'Chat' },
-          { key: 'membres',  label: 'Membres' },
+          { key: 'feed',     label: 'Feed',     badge: feedBadge },
+          { key: 'messages', label: 'Chat',     badge: chatBadge },
+          { key: 'membres',  label: 'Membres',  badge: membresBadge },
         ] as const).map(t => (
           <TouchableOpacity
             key={t.key}
             style={[styles.tab, tab === t.key && styles.tabActive]}
-            onPress={() => setTab(t.key)}
+            onPress={() => selectTab(t.key)}
           >
+            {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
@@ -1793,10 +1854,16 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
     marginHorizontal: 16, marginVertical: 12,
   },
-  tab:          { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
+  tab:          { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center', position: 'relative' },
   tabActive:    { backgroundColor: colors.bordeaux },
   tabText:      { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive:{ color: colors.ivory },
+  tabDot: {
+    position: 'absolute', top: 4, right: '28%',
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: colors.terra,
+    borderWidth: 1.5, borderColor: colors.white,
+  },
 
   // Feed
   feedList: { paddingBottom: 90 },

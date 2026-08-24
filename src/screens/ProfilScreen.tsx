@@ -437,8 +437,8 @@ export default function ProfilScreen() {
     setPendingRequests(prev => prev.filter(r => r.id !== followId));
     setFollowersCount(c => c + 1);
     const { data: req } = await supabase.from('profils').select('push_token,notif_follow').eq('id', followerId).single();
-    if (req?.push_token && req?.notif_follow !== false) {
-      sendPushNotification(req.push_token, 'Demande acceptée', `${profil?.prenom || 'Quelqu\'un'} a accepté ta demande de suivi !`, { type: 'follow_accepted' });
+    if (req?.push_token && req?.notif_follow !== false && session?.user?.id) {
+      sendPushNotification(req.push_token, 'Demande acceptée', `${profil?.prenom || 'Quelqu\'un'} a accepté ta demande de suivi !`, { type: 'follow_accepted', userId: session.user.id });
     }
   }
 

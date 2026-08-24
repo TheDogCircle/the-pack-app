@@ -181,12 +181,19 @@ export default function Navigation() {
     } else if (data.type === 'photo_like' || data.type === 'new_post') {
       if (data.postId) mapNavigation.setPendingPost(data.postId);
       navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
-    } else if (data.type === 'new_event') {
+    } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today') {
+      if (data.eventId) mapNavigation.setPendingEvent(data.eventId);
       navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
-    } else if (data.type === 'follow') {
+    } else if (data.type === 'follow' || data.type === 'follow_accepted') {
       if (data.userId) {
         navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
       }
+    } else if (data.type === 'reservation') {
+      navigationRef.navigate('MesReservations' as any);
+    } else if (data.type === 'new_reservation') {
+      // Pas d'ecran de gestion des reservations cote pro dans l'app mobile :
+      // la gestion se fait sur l'espace pro web.
+      Linking.openURL('https://thepackclub.fr/espace-pro.html');
     } else if (data.type === 'message' || (!data.type && data.conversationId)) {
       // Le "|| (!data.type && data.conversationId)" gere les anciennes notifications
       // envoyees avant l'ajout du champ type, qui ne portaient que conversationId.
