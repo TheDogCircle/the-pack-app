@@ -430,6 +430,44 @@ function BrandCard({
   );
 }
 
+// ── Actualité card (horizontal scroll) ──────────────────────────────────────
+
+function ActuCard({
+  post, partenaire, onPress,
+}: {
+  post: Post; partenaire: Partenaire; onPress: () => void;
+}) {
+  const periode = buildPeriode(post);
+  return (
+    <TouchableOpacity style={s.actuCard} onPress={onPress} activeOpacity={0.88}>
+      <View style={s.actuCardImg}>
+        {post.image_url
+          ? <Image source={{ uri: post.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          : <View style={[StyleSheet.absoluteFillObject, s.actuCardImgFallback]} />}
+        <LinearGradient
+          colors={['transparent', 'rgba(61,26,26,0.75)']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={s.actuCardTypeBadge}>
+          <Text style={s.actuCardTypeBadgeText}>{TYPE_LABEL[post.type] || post.type}</Text>
+        </View>
+        <View style={s.actuCardBrandRow}>
+          <View style={s.actuCardBrandLogo}>
+            {partenaire.logo_url
+              ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+              : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
+          </View>
+          <Text style={s.actuCardBrandName} numberOfLines={1}>{partenaire.nom}</Text>
+        </View>
+      </View>
+      <View style={s.actuCardBody}>
+        <Text style={s.actuCardTitle} numberOfLines={2}>{post.titre}</Text>
+        {periode ? <Text style={s.actuCardMeta} numberOfLines={1}>{periode}</Text> : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function PartenairesScreen() {
@@ -513,6 +551,30 @@ export default function PartenairesScreen() {
           <Text style={s.headerTitle}>Nos partenaires</Text>
           <Text style={s.headerSub}>Des marques dog-friendly sélectionnées pour la meute</Text>
         </View>
+
+        {allPosts.length > 0 ? (
+          <View style={s.actuSection}>
+            <Text style={s.actuSectionTitle}>Actualités du moment</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.actuList}
+            >
+              {allPosts.map(post => {
+                const partenaire = partenaires.find(p => p.id === post.partenaire_id);
+                if (!partenaire) return null;
+                return (
+                  <ActuCard
+                    key={post.id}
+                    post={post}
+                    partenaire={partenaire}
+                    onPress={() => setSelectedBrand(partenaire)}
+                  />
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
 
         <View style={s.grid}>
           {rows.map((row, ri) => (
@@ -601,6 +663,41 @@ const s = StyleSheet.create({
   cardDesc: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, lineHeight: 15 },
   cardArrow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
   cardArrowText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+
+  // Actualités du moment (horizontal scroll)
+  actuSection: { marginBottom: 22 },
+  actuSectionTitle: {
+    fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux,
+    paddingHorizontal: 28, marginBottom: 12,
+  },
+  actuList: { paddingHorizontal: 28, gap: 12 },
+  actuCard: {
+    width: 172, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.white,
+    borderWidth: 1, borderColor: colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2,
+  },
+  actuCardImg: { width: '100%', height: 104, backgroundColor: colors.bordeaux, position: 'relative' },
+  actuCardImgFallback: { backgroundColor: colors.bordeaux },
+  actuCardTypeBadge: {
+    position: 'absolute', top: 8, left: 8,
+    backgroundColor: 'rgba(245,239,224,0.92)', borderRadius: 20,
+    paddingHorizontal: 7, paddingVertical: 3,
+  },
+  actuCardTypeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 8, color: colors.terra, letterSpacing: 0.4, textTransform: 'uppercase' },
+  actuCardBrandRow: {
+    position: 'absolute', bottom: 8, left: 8, right: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+  },
+  actuCardBrandLogo: {
+    width: 22, height: 22, borderRadius: 6, backgroundColor: colors.white, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.white,
+  },
+  actuCardBrandLogoImg: { width: '100%', height: '100%', padding: 2 },
+  actuCardBrandLogoFallback: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 11, color: colors.bordeaux },
+  actuCardBrandName: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff', flex: 1 },
+  actuCardBody: { padding: 11, gap: 3, minHeight: 66 },
+  actuCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 13, color: colors.bordeaux, lineHeight: 17 },
+  actuCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginTop: 2 },
 
   // Modal
   modalContainer: { flex: 1, backgroundColor: colors.ivoryPale },
