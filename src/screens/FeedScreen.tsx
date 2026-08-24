@@ -120,9 +120,10 @@ type PostCardProps = {
   onCommentPress: (post: CommunityPost) => void;
   onLieuPress: (lieuId: string) => void;
   onDeletePress: (post: CommunityPost) => void;
+  onAuthorPress: (post: CommunityPost) => void;
 };
 
-function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress }: PostCardProps) {
+function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress, onAuthorPress }: PostCardProps) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
   const commentCount = post.community_post_comments.length;
@@ -134,14 +135,16 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
   return (
     <View style={styles.postCard}>
       <View style={styles.postHeader}>
-        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Text style={styles.postAuthor}>{author}</Text>
-            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+        <TouchableOpacity style={styles.postHeaderAuthor} activeOpacity={0.7} onPress={() => onAuthorPress(post)}>
+          <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.postAuthor}>{author}</Text>
+              {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+            </View>
+            <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
           </View>
-          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
-        </View>
+        </TouchableOpacity>
         {isCarousel && (
           <View style={styles.carouselCounter}>
             <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
@@ -232,21 +235,23 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
 
 // ─── NouveauLieuCard ──────────────────────────────────────────────────────────
 
-function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPress: (id: string) => void }) {
+function NouveauLieuCard({ post, onLieuPress, onAuthorPress }: { post: CommunityPost; onLieuPress: (id: string) => void; onAuthorPress: (post: CommunityPost) => void }) {
   const author = post.profils?.prenom || 'Un membre';
   const lieu = post.lieux;
 
   return (
     <View style={[styles.postCard, styles.lieuCard]}>
       <View style={styles.postHeader}>
-        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Text style={styles.postAuthor}>{author}</Text>
-            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+        <TouchableOpacity style={styles.postHeaderAuthor} activeOpacity={0.7} onPress={() => onAuthorPress(post)}>
+          <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.postAuthor}>{author}</Text>
+              {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+            </View>
+            <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
           </View>
-          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <TouchableOpacity
@@ -274,13 +279,14 @@ function NouveauLieuCard({ post, onLieuPress }: { post: CommunityPost; onLieuPre
 
 // ─── BaladeCard ───────────────────────────────────────────────────────────────
 
-function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress }: {
+function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress, onAuthorPress }: {
   post: CommunityPost;
   myUserId: string;
   onLike: (postId: string) => void;
   onCommentPress: (post: CommunityPost) => void;
   onBaladePress: (post: CommunityPost) => void;
   onDeletePress: (post: CommunityPost) => void;
+  onAuthorPress: (post: CommunityPost) => void;
 }) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
@@ -297,14 +303,16 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onD
   return (
     <View style={[styles.postCard, styles.baladeCard]}>
       <View style={styles.postHeader}>
-        <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Text style={styles.postAuthor}>{author}</Text>
-            {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+        <TouchableOpacity style={styles.postHeaderAuthor} activeOpacity={0.7} onPress={() => onAuthorPress(post)}>
+          <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.postAuthor}>{author}</Text>
+              {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+            </View>
+            <Text style={styles.postTime}>a partagé une balade · {timeAgo(post.created_at)}</Text>
           </View>
-          <Text style={styles.postTime}>a partagé une balade · {timeAgo(post.created_at)}</Text>
-        </View>
+        </TouchableOpacity>
         {isCarousel && (
           <View style={styles.carouselCounter}>
             <Text style={styles.carouselCounterText}>{imgIndex + 1}/{images.length}</Text>
@@ -1266,6 +1274,15 @@ export default function FeedScreen() {
     navigation.navigate('Carte' as any);
   }
 
+  function openAuthor(post: CommunityPost) {
+    if (!post.user_id) return;
+    navigation.navigate('ProfilPublic', {
+      userId: post.user_id,
+      prenom: post.profils?.prenom || '',
+      avatarUrl: post.profils?.avatar_url ?? undefined,
+    });
+  }
+
   async function openBalade(post: CommunityPost) {
     if (post.balade_id) {
       mapNavigation.setPendingBalade(post.balade_id);
@@ -1472,7 +1489,7 @@ export default function FeedScreen() {
               }
               renderItem={({ item }) =>
                 item.type === 'nouveau_lieu' ? (
-                  <NouveauLieuCard post={item} onLieuPress={openLieu} />
+                  <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} />
                 ) : item.type === 'balade' ? (
                   <BaladeCard
                     post={item}
@@ -1481,6 +1498,7 @@ export default function FeedScreen() {
                     onCommentPress={setCommentPost}
                     onBaladePress={openBalade}
                     onDeletePress={deletePost}
+                    onAuthorPress={openAuthor}
                   />
                 ) : (
                   <PostCard
@@ -1490,6 +1508,7 @@ export default function FeedScreen() {
                     onCommentPress={setCommentPost}
                     onLieuPress={openLieu}
                     onDeletePress={deletePost}
+                    onAuthorPress={openAuthor}
                   />
                 )
               }
@@ -1815,6 +1834,7 @@ const styles = StyleSheet.create({
   inviteBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
   postCard: { backgroundColor: colors.white, marginBottom: 8 },
   postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
+  postHeaderAuthor: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   postAvatarImg:     { width: 36, height: 36, borderRadius: 18 },
   postAvatarFallback:{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   postAvatarLetter:  { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.ivory },
