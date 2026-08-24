@@ -576,6 +576,7 @@ export default function PartenairesScreen() {
           </View>
         ) : null}
 
+        <Text style={s.gridSectionTitle}>Toutes les marques</Text>
         <View style={s.grid}>
           {rows.map((row, ri) => (
             <View key={ri} style={[s.row, { gap: cardGap }]}>
@@ -671,6 +672,10 @@ const s = StyleSheet.create({
     paddingHorizontal: 28, marginBottom: 12,
   },
   actuList: { paddingHorizontal: 28, gap: 12 },
+  gridSectionTitle: {
+    fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux,
+    paddingHorizontal: 28, marginBottom: 12, marginTop: 4,
+  },
   actuCard: {
     width: 172, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.white,
     borderWidth: 1, borderColor: colors.border,
