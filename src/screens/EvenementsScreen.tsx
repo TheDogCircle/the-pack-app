@@ -147,13 +147,20 @@ export default function EvenementsScreen() {
   }
 
   async function buildMesEvents(baseMapped: Evenement[], userId: string): Promise<Evenement[]> {
+    // baseMapped vient d'une requete deja filtree sur date_heure >= now (voir load()),
+    // donc les events passes auxquels on est inscrit en sont deja absents. Mais les
+    // events qu'on a organises ou enregistres sont recuperes ici via des requetes a
+    // part qui n'ont pas ce filtre par defaut - on l'applique explicitement pour ne
+    // pas laisser trainer indefiniment des events passes dans "Mes events".
+    const now = new Date().toISOString();
     const mine = baseMapped.filter(e => e.je_suis_inscrit || e.est_enregistre || e.organisateur_id === userId || e.created_by === userId);
     const byId = new Map<string, Evenement>();
     mine.forEach(e => byId.set(e.id, e));
     try {
       const { data: ownAll } = await supabase.from('evenements')
         .select('*, profils(prenom, username, avatar_url)')
-        .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`);
+        .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`)
+        .gte('date_heure', now);
       (ownAll || []).forEach((e: any) => {
         if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false, est_enregistre: false });
       });
@@ -163,9 +170,10 @@ export default function EvenementsScreen() {
         .select('event_id, evenements(*, profils(prenom, username, avatar_url))')
         .eq('user_id', userId);
       (favRows || []).forEach((f: any) => {
-        if (f.evenements && !byId.has(f.event_id)) {
+        if (!f.evenements || f.evenements.date_heure < now) return;
+        if (!byId.has(f.event_id)) {
           byId.set(f.event_id, { ...f.evenements, je_suis_inscrit: false, est_enregistre: true });
-        } else if (byId.has(f.event_id)) {
+        } else {
           byId.set(f.event_id, { ...byId.get(f.event_id)!, est_enregistre: true });
         }
       });
