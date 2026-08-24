@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, AppStateStatus, View } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -19,6 +19,7 @@ import { StripeProvider } from '@stripe/stripe-react-native';
 import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
 import { STRIPE_PUBLISHABLE_KEY } from './src/lib/stripeConfig';
+import SplashLoader from './src/components/SplashLoader';
 
 async function checkForOTAUpdate() {
   try {
@@ -68,7 +69,7 @@ export default function App() {
     ...MaterialCommunityIcons.font,
   });
 
-  if (!fontsLoaded) return <View style={{ flex: 1, backgroundColor: '#3D1A1A' }} />;
+  if (!fontsLoaded) return <SplashLoader />;
 
   return (
     <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>

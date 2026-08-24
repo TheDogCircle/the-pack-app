@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, View, Image, Linking, AppState } from 'react-native';
+import { Image, Linking, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { savePushToken, clearBadge } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
+import SplashLoader from '../components/SplashLoader';
 
 import { useSession } from '../hooks/useSession';
 import AuthScreen from '../screens/AuthScreen';
@@ -330,11 +331,7 @@ export default function Navigation() {
   }, [session?.user.id]);
 
   if (loading || (session && !onboardingChecked)) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.terraPale} size="large" />
-      </View>
-    );
+    return <SplashLoader />;
   }
 
   return (
