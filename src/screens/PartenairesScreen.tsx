@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   Image, Linking, ActivityIndicator, RefreshControl,
@@ -16,7 +16,6 @@ import AuthGate from '../components/AuthGate';
 const TYPE_LABEL: Record<string, string> = {
   offre: 'Offre exclusive',
   news: 'Actualité',
-  nouveaute: 'Nouveauté',
 };
 
 function fmtDate(d: string) {
@@ -31,7 +30,7 @@ function buildPeriode(post: Post) {
 
 type Post = {
   id: string; partenaire_id: string; titre: string; contenu: string | null; type: string;
-  image_url: string | null; lien: string | null; code_promo: string | null;
+  image_url: string | null; images: string[] | null; lien: string | null; code_promo: string | null;
   disponibilite: string | null;
   date_debut: string | null; date_expiration: string | null;
 };
@@ -196,9 +195,10 @@ function BrandModal({
 
   if (!partenaire) return null;
 
+  const postImgs = (p: Post) => [p.image_url, ...(p.images || [])].filter(Boolean) as string[];
   const galleryImgs = [
-    ...posts.filter(p => p.image_url && p.type !== 'offre').map(p => p.image_url!),
-    ...posts.filter(p => p.image_url && p.type === 'offre').map(p => p.image_url!),
+    ...posts.filter(p => p.type !== 'offre').flatMap(postImgs),
+    ...posts.filter(p => p.type === 'offre').flatMap(postImgs),
   ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 3);
 
   const otherPosts = posts.filter(p => p.type !== 'offre');
@@ -307,6 +307,13 @@ function BrandModal({
                     <View style={s.postItemBody}>
                       <Text style={s.postItemTitle}>{post.titre}</Text>
                       {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
+                      {(post.images?.length || 0) > 1 ? (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.photoStrip}>
+                          {post.images!.slice(1).map((img, i) => (
+                            <Image key={i} source={{ uri: img }} style={s.photoStripThumb} resizeMode="cover" />
+                          ))}
+                        </ScrollView>
+                      ) : null}
 
                       <View style={s.postItemFooter}>
                         {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
@@ -341,6 +348,13 @@ function BrandModal({
                     <View style={s.offerCardBody}>
                       <Text style={s.offerCardTitle}>{post.titre}</Text>
                       {post.contenu ? <Text style={s.postItemDesc}>{post.contenu}</Text> : null}
+                      {(post.images?.length || 0) > 1 ? (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.photoStrip}>
+                          {post.images!.slice(1).map((img, i) => (
+                            <Image key={i} source={{ uri: img }} style={s.photoStripThumb} resizeMode="cover" />
+                          ))}
+                        </ScrollView>
+                      ) : null}
 
                       {post.code_promo ? (
                         revealed[post.id] ? (
@@ -509,6 +523,17 @@ export default function PartenairesScreen() {
 
   const postsFor = useCallback((id: string) => allPosts.filter(p => p.partenaire_id === id), [allPosts]);
 
+  // allPosts is already sorted created_at desc (see load()), so keeping only the
+  // first occurrence per brand gives its most recent post — max 1 card/brand in the carousel.
+  const latestPostByBrand = useMemo(() => {
+    const seen = new Set<string>();
+    return allPosts.filter(p => {
+      if (seen.has(p.partenaire_id)) return false;
+      seen.add(p.partenaire_id);
+      return true;
+    });
+  }, [allPosts]);
+
   if (sessionLoading || loading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder aux offres et actualités de nos partenaires dog-friendly." />;
 
@@ -552,7 +577,7 @@ export default function PartenairesScreen() {
           <Text style={s.headerSub}>Des marques dog-friendly sélectionnées pour la meute</Text>
         </View>
 
-        {allPosts.length > 0 ? (
+        {latestPostByBrand.length > 0 ? (
           <View style={s.actuSection}>
             <Text style={s.actuSectionTitle}>Actualités du moment</Text>
             <ScrollView
@@ -560,7 +585,7 @@ export default function PartenairesScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={s.actuList}
             >
-              {allPosts.map(post => {
+              {latestPostByBrand.map(post => {
                 const partenaire = partenaires.find(p => p.id === post.partenaire_id);
                 if (!partenaire) return null;
                 return (
@@ -781,6 +806,8 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, marginBottom: 12,
   },
   postItemImg: { width: '100%', height: 140 },
+  photoStrip: { marginTop: 6 },
+  photoStripThumb: { width: 56, height: 56, borderRadius: 8, marginRight: 6 },
   postItemBody: { padding: 14, gap: 5 },
   postItemType: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra, letterSpacing: 0.8, textTransform: 'uppercase' },
   postItemTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux, lineHeight: 22 },
