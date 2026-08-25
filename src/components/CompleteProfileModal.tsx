@@ -59,7 +59,7 @@ export default function CompleteProfileModal({
           <View style={styles.card}>
             <Text style={styles.paw}>🐾</Text>
             <Text style={styles.title}>Complète ton profil</Text>
-            <Text style={styles.sub}>Ces infos sont obligatoires pour continuer à utiliser The Pack Club.</Text>
+            <Text style={styles.sub}>Ces infos sont obligatoires pour continuer à utiliser The Pack La Meute.</Text>
 
             {missing.nom && (
               <View style={styles.field}>

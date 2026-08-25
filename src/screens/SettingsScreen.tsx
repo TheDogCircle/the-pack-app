@@ -700,7 +700,7 @@ export default function SettingsScreen() {
         <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
           <View style={styles.toggleInfo}>
             <Text style={styles.toggleLabel}>Actualités & annonces</Text>
-            <Text style={styles.toggleSub}>Annonces générales de l'équipe The Pack Club</Text>
+            <Text style={styles.toggleSub}>Annonces générales de l'équipe The Pack La Meute</Text>
           </View>
           <Switch value={notifBroadcast} onValueChange={v => toggleNotif('notif_broadcast', v)}
             trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
@@ -741,7 +741,7 @@ export default function SettingsScreen() {
         </View>
         <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
           <Text style={styles.infoLabel}>Développé par</Text>
-          <Text style={styles.infoValue}>The Pack Club</Text>
+          <Text style={styles.infoValue}>The Pack La Meute</Text>
         </View>
       </View>
 

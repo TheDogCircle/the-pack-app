@@ -109,7 +109,7 @@ function CandidatureMarqueModal({ visible, onClose }: { visible: boolean; onClos
           ) : (
             <>
               <Text style={s.candidIntro}>
-                Tu es une marque dog-friendly et tu souhaites partager tes offres avec la communauté The Pack Club ? Remplis ce formulaire et on reviendra vers toi rapidement.
+                Tu es une marque dog-friendly et tu souhaites partager tes offres avec la communauté The Pack La Meute ? Remplis ce formulaire et on reviendra vers toi rapidement.
               </Text>
 
               <Text style={s.candidLabel}>Nom de la marque *</Text>

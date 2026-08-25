@@ -314,7 +314,7 @@ export default function OnboardingScreen() {
         {step === 1 && (
           <>
             <Text style={styles.paw}>🐾</Text>
-            <Text style={styles.title}>Bienvenue dans{'\n'}The Pack Club !</Text>
+            <Text style={styles.title}>Bienvenue dans{'\n'}The Pack La Meute !</Text>
             <Text style={styles.sub}>Quelques infos pour personnaliser ton expérience.</Text>
 
             <View style={styles.card}>

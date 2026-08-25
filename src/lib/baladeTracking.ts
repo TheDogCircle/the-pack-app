@@ -77,7 +77,7 @@ async function registerLocationUpdates() {
     pausesUpdatesAutomatically: false,
     foregroundService: {
       notificationTitle: 'Balade en cours 🐾',
-      notificationBody: 'The Pack Club enregistre ton trajet.',
+      notificationBody: 'The Pack La Meute enregistre ton trajet.',
       notificationColor: '#3D1A1A',
     },
   });

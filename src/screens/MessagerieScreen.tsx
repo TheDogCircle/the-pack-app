@@ -661,7 +661,7 @@ export default function MessagerieScreen({
 
   function shareWhatsApp(groupe: Groupe) {
     const link = `https://thepackclub.fr/groupe/${groupe.id}`;
-    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack Club !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 ${link}`;
+    const text = `🐾 Rejoins le groupe "${groupe.nom}" sur The Pack La Meute !${groupe.description ? `\n${groupe.description}` : ''}${groupe.ville ? `\n📍 ${groupe.ville}` : ''}\n\n👉 ${link}`;
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(text)}`).catch(() => {
       Share.share({ message: text });
     });
@@ -1072,7 +1072,7 @@ export default function MessagerieScreen({
           <View style={sc.overlay} />
           <View style={sc.topBrand}>
             <Ionicons name="paw" size={22} color={colors.terra} />
-            <Text style={sc.brandName}>The Pack Club</Text>
+            <Text style={sc.brandName}>The Pack La Meute</Text>
           </View>
           <View style={sc.content}>
             {storyGroupe.ville ? (

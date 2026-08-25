@@ -101,7 +101,7 @@ export default function BookingScreen() {
       if (data?.error) throw new Error(data.error);
 
       const { error: initError } = await initPaymentSheet({
-        merchantDisplayName: 'The Pack Club',
+        merchantDisplayName: 'The Pack La Meute',
         paymentIntentClientSecret: data.client_secret,
         defaultBillingDetails: { name: prenom.trim() },
       });
