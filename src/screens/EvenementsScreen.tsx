@@ -13,6 +13,7 @@ import { supabase, uploadToR2 } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import { RACES } from '../constants/races';
 
 const MAX_EVENT_PHOTOS = 3;
 
@@ -22,6 +23,7 @@ type Evenement = {
   lat: number | null; lng: number | null;
   max_participants: number | null; payant: boolean; prix: number | null;
   image_url: string | null; images: string[] | null; site_web: string | null;
+  races: string[] | null;
   organisateur_id: string | null; valide?: boolean;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
   nb_inscrits?: number; je_suis_inscrit?: boolean; est_enregistre?: boolean;
@@ -46,6 +48,9 @@ export default function EvenementsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('avenir');
   const [villeFilter, setVilleFilter] = useState<string>('');
+  const [raceFilter, setRaceFilter] = useState<string>('');
+  const [villeModalOpen, setVilleModalOpen] = useState(false);
+  const [raceModalOpen, setRaceModalOpen] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
@@ -70,6 +75,9 @@ export default function EvenementsScreen() {
   const [showTimeFinPicker, setShowTimeFinPicker] = useState(false);
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [selectedRaces, setSelectedRaces] = useState<string[]>([]);
+  const [raceCreateModalOpen, setRaceCreateModalOpen] = useState(false);
+  const [raceCreateSearch, setRaceCreateSearch] = useState('');
 
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
@@ -217,9 +225,14 @@ export default function EvenementsScreen() {
   function resetForm() {
     setTitre(''); setDescription(''); setVille(''); setAdresse('');
     setMaxPart(''); setPayant(false); setPrix(''); setPhotoUris([]);
+    setSelectedRaces([]);
     const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
     setEventDate(d);
     setEventDateFin(null);
+  }
+
+  function toggleSelectedRace(r: string) {
+    setSelectedRaces(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
   }
 
   function pickEventPhotos() {
@@ -325,6 +338,7 @@ export default function EvenementsScreen() {
       organisateur_id: myUserId,
       image_url: urls[0] || null,
       images: urls.length > 1 ? urls : null,
+      races: selectedRaces.length ? selectedRaces : null,
     });
     setSaving(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
@@ -343,7 +357,11 @@ export default function EvenementsScreen() {
   ];
 
   const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
-  const evenementsAffiches = villeFilter ? evenements.filter(e => e.ville === villeFilter) : evenements;
+  const racesDisponibles = [...new Set(evenements.flatMap(e => e.races || []))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const evenementsAffiches = evenements.filter(e =>
+    (!villeFilter || e.ville === villeFilter) &&
+    (!raceFilter || !e.races?.length || e.races.includes(raceFilter))
+  );
 
   return (
     <View style={styles.container}>
@@ -360,26 +378,91 @@ export default function EvenementsScreen() {
         ))}
       </View>
 
-      {/* Filtre ville */}
-      {villesDisponibles.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.villeScroll} contentContainerStyle={styles.villeScrollContent}>
-          <TouchableOpacity
-            style={[styles.villeChip, !villeFilter && styles.villeChipActive]}
-            onPress={() => setVilleFilter('')}
-          >
-            <Text style={[styles.villeChipText, !villeFilter && styles.villeChipTextActive]}>Toutes les villes</Text>
-          </TouchableOpacity>
-          {villesDisponibles.map(v => (
-            <TouchableOpacity
-              key={v}
-              style={[styles.villeChip, villeFilter === v && styles.villeChipActive]}
-              onPress={() => setVilleFilter(v)}
-            >
-              <Text style={[styles.villeChipText, villeFilter === v && styles.villeChipTextActive]}>{v}</Text>
+      {/* Filtres ville / race */}
+      {(villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
+        <View style={styles.dropdownFiltersRow}>
+          {villesDisponibles.length > 0 && (
+            <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setVilleModalOpen(true)}>
+              <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{villeFilter || 'Toutes les villes'}</Text>
+              <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+          {racesDisponibles.length > 0 && (
+            <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setRaceModalOpen(true)}>
+              <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{raceFilter || 'Toutes les races'}</Text>
+              <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
+            </TouchableOpacity>
+          )}
+        </View>
       )}
+
+      <Modal visible={villeModalOpen} animationType="slide" transparent onRequestClose={() => setVilleModalOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setVilleModalOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>Filtrer par ville</Text>
+            <FlatList
+              data={['', ...villesDisponibles]}
+              keyExtractor={v => v || '_all'}
+              renderItem={({ item: v }) => (
+                <TouchableOpacity style={styles.pickerRow} onPress={() => { setVilleFilter(v); setVilleModalOpen(false); }}>
+                  <Text style={[styles.pickerRowText, villeFilter === v && styles.pickerRowTextActive]}>{v || 'Toutes les villes'}</Text>
+                  {villeFilter === v && <Ionicons name="checkmark" size={16} color={colors.bordeaux} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={raceModalOpen} animationType="slide" transparent onRequestClose={() => setRaceModalOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setRaceModalOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>Filtrer par race</Text>
+            <FlatList
+              data={['', ...racesDisponibles]}
+              keyExtractor={r => r || '_all'}
+              renderItem={({ item: r }) => (
+                <TouchableOpacity style={styles.pickerRow} onPress={() => { setRaceFilter(r); setRaceModalOpen(false); }}>
+                  <Text style={[styles.pickerRowText, raceFilter === r && styles.pickerRowTextActive]}>{r || 'Toutes les races'}</Text>
+                  {raceFilter === r && <Ionicons name="checkmark" size={16} color={colors.bordeaux} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={raceCreateModalOpen} animationType="slide" transparent onRequestClose={() => setRaceCreateModalOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setRaceCreateModalOpen(false)}>
+          <View style={styles.pickerSheet} onStartShouldSetResponder={() => true}>
+            <Text style={styles.pickerTitle}>Race(s) concernée(s)</Text>
+            <TextInput
+              style={styles.input}
+              value={raceCreateSearch}
+              onChangeText={setRaceCreateSearch}
+              placeholder="Rechercher une race…"
+              placeholderTextColor={colors.textMuted}
+            />
+            <FlatList
+              style={{ marginTop: 8 }}
+              data={raceCreateSearch ? RACES.filter(r => r.toLowerCase().includes(raceCreateSearch.toLowerCase())) : RACES}
+              keyExtractor={r => r}
+              renderItem={({ item: r }) => {
+                const checked = selectedRaces.includes(r);
+                return (
+                  <TouchableOpacity style={styles.pickerRow} onPress={() => toggleSelectedRace(r)}>
+                    <Text style={[styles.pickerRowText, checked && styles.pickerRowTextActive]}>{r}</Text>
+                    {checked && <Ionicons name="checkmark" size={16} color={colors.bordeaux} />}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+            <TouchableOpacity style={[styles.dateBtn, { marginTop: 12 }]} onPress={() => setRaceCreateModalOpen(false)}>
+              <Text style={styles.dateBtnText}>Valider{selectedRaces.length ? ` (${selectedRaces.length})` : ''}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Liste */}
       {loading ? (
@@ -438,6 +521,11 @@ export default function EvenementsScreen() {
                     {e.payant
                       ? <View style={styles.paidBadge}><Text style={styles.paidText}>{e.prix ? `${e.prix} €` : 'Payant'}</Text></View>
                       : <View style={styles.freeBadge}><Text style={styles.freeText}>Gratuit</Text></View>}
+                    {e.races && e.races.length > 0 && (
+                      <View style={styles.raceBadge}>
+                        <Text style={styles.raceText}>{e.races.length === 1 ? e.races[0] : 'Plusieurs races'}</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.cardTitle} numberOfLines={2}>{e.titre}</Text>
                   <View style={styles.infoRow}>
@@ -509,6 +597,9 @@ export default function EvenementsScreen() {
                       {selectedEvent.payant
                         ? <View style={styles.paidBadge}><Text style={styles.paidText}>{selectedEvent.prix ? `${selectedEvent.prix} €` : 'Payant'}</Text></View>
                         : <View style={styles.freeBadge}><Text style={styles.freeText}>✓ Gratuit</Text></View>}
+                      {selectedEvent.races && selectedEvent.races.length > 0 && (
+                        <View style={styles.raceBadge}><Text style={styles.raceText}>{selectedEvent.races.join(', ')}</Text></View>
+                      )}
                       {!selectedEvent.site_web && selectedEvent.nb_inscrits !== undefined && (
                         <View style={styles.countBadge}>
                           <Text style={styles.countText}>{selectedEvent.nb_inscrits}{selectedEvent.max_participants ? `/${selectedEvent.max_participants}` : ''} inscrits</Text>
@@ -678,6 +769,24 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Adresse (optionnel)</Text>
                 <TextInput style={styles.input} value={adresse} onChangeText={setAdresse} placeholder="Ex : Bois de Vincennes, entrée Nord" placeholderTextColor={colors.textMuted} />
 
+                <Text style={styles.fieldLabel}>Race(s) concernée(s) (optionnel)</Text>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => { setRaceCreateSearch(''); setRaceCreateModalOpen(true); }}>
+                  <Ionicons name="paw-outline" size={16} color={colors.bordeaux} />
+                  <Text style={styles.dateBtnText}>{selectedRaces.length ? `${selectedRaces.length} race(s) sélectionnée(s)` : 'Choisir une ou plusieurs races'}</Text>
+                </TouchableOpacity>
+                {selectedRaces.length > 0 && (
+                  <View style={styles.raceChipsWrap}>
+                    {selectedRaces.map(r => (
+                      <View key={r} style={styles.raceChipMulti}>
+                        <Text style={styles.raceChipMultiText}>{r}</Text>
+                        <TouchableOpacity onPress={() => toggleSelectedRace(r)}>
+                          <Ionicons name="close" size={13} color={colors.bordeaux} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <Text style={styles.fieldLabel}>Nombre max de participants (optionnel)</Text>
                 <TextInput style={styles.input} value={maxPart} onChangeText={setMaxPart} placeholder="Ex : 20" placeholderTextColor={colors.textMuted} keyboardType="numeric" />
 
@@ -727,15 +836,24 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
 
-  villeScroll: { marginHorizontal: 16, marginBottom: 8, maxHeight: 40 },
-  villeScrollContent: { flexDirection: 'row', gap: 8, paddingRight: 16 },
-  villeChip: {
-    paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
-    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
+  dropdownFiltersRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 8, flexWrap: 'wrap' },
+  dropdownFilterBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
+    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, maxWidth: 220,
   },
-  villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
-  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
-  villeChipTextActive: { color: colors.ivory },
+  dropdownFilterBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  pickerSheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '70%', padding: 20 },
+  pickerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 12 },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickerRowText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  pickerRowTextActive: { fontFamily: 'DMSans_500Medium' },
+  raceChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  raceChipMulti: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.ivoryLight,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingVertical: 5, paddingLeft: 12, paddingRight: 8,
+  },
+  raceChipMultiText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
 
   list: { padding: 14, gap: 14, paddingBottom: 100 },
 
@@ -778,6 +896,8 @@ const styles = StyleSheet.create({
   paidText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#c62828' },
   freeBadge: { backgroundColor: '#e8f5e9', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   freeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#2e7d32' },
+  raceBadge: { backgroundColor: 'rgba(196,105,58,0.12)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  raceText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra },
   countBadge: { backgroundColor: colors.ivoryPale, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   countText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 
