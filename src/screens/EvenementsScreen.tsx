@@ -24,6 +24,7 @@ type Evenement = {
   max_participants: number | null; payant: boolean; prix: number | null;
   image_url: string | null; images: string[] | null; site_web: string | null;
   races: string[] | null;
+  partenaires_mentions: { type: 'partenaire' | 'instagram'; nom: string; id?: string; logo_url?: string | null; url?: string }[] | null;
   organisateur_id: string | null; valide?: boolean;
   profils: { prenom: string | null; username: string | null; avatar_url: string | null } | null;
   nb_inscrits?: number; je_suis_inscrit?: boolean; est_enregistre?: boolean;
@@ -634,6 +635,27 @@ export default function EvenementsScreen() {
                     </View>
                     {selectedEvent.description ? <Text style={styles.modalDesc}>{selectedEvent.description}</Text> : null}
 
+                    {selectedEvent.partenaires_mentions && selectedEvent.partenaires_mentions.length > 0 ? (
+                      <View style={{ marginBottom: 16 }}>
+                        <Text style={styles.mentionsLabel}>Avec la participation de</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {selectedEvent.partenaires_mentions.map((m, i) => (
+                            <TouchableOpacity
+                              key={i}
+                              style={styles.mentionChip}
+                              onPress={() => {
+                                if (m.type === 'instagram' && m.url) Linking.openURL(m.url);
+                                else navigation.navigate('Services');
+                              }}
+                            >
+                              {m.logo_url ? <Image source={{ uri: m.logo_url }} style={styles.mentionLogo} /> : null}
+                              <Text style={styles.mentionChipText}>{m.type === 'instagram' ? `📷 ${m.nom}` : m.nom}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
+
                     {selectedEvent.site_web ? (
                       <>
                         <TouchableOpacity style={styles.joinBtn} onPress={() => Linking.openURL(selectedEvent.site_web!)}>
@@ -898,6 +920,13 @@ const styles = StyleSheet.create({
   freeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#2e7d32' },
   raceBadge: { backgroundColor: 'rgba(196,105,58,0.12)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   raceText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra },
+  mentionsLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  mentionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.ivoryPale,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12,
+  },
+  mentionChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  mentionLogo: { width: 20, height: 20, borderRadius: 6 },
   countBadge: { backgroundColor: colors.ivoryPale, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   countText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
 
