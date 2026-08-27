@@ -145,7 +145,7 @@ export default function OnboardingScreen() {
   // Username availability check (debounced 500ms)
   useEffect(() => {
     if (!username) { setUsernameStatus('idle'); return; }
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) { setUsernameStatus('invalid'); return; }
+    if (!/^[a-z0-9._-]{3,20}$/.test(username)) { setUsernameStatus('invalid'); return; }
     setUsernameStatus('checking');
     const t = setTimeout(async () => {
       const { data } = await supabase.from('profils').select('id').eq('username', username).maybeSingle();
@@ -272,7 +272,7 @@ export default function OnboardingScreen() {
       </View>
     );
     if (usernameStatus === 'invalid') return (
-      <Text style={styles.errorText}>3 à 20 caractères, lettres minuscules, chiffres et _ uniquement</Text>
+      <Text style={styles.errorText}>3 à 20 caractères, lettres minuscules, chiffres, . _ - uniquement</Text>
     );
     if (usernameStatus === 'taken') return (
       <Text style={styles.errorText}>Ce nom d'utilisateur est déjà pris</Text>
@@ -366,7 +366,7 @@ export default function OnboardingScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={username}
                   onChangeText={t => {
-                    setUsername(t.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+                    setUsername(t.toLowerCase().replace(/[^a-z0-9._-]/g, ''));
                     setUsernameError(false);
                   }}
                   autoCapitalize="none"

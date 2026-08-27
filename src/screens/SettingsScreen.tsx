@@ -245,7 +245,7 @@ export default function SettingsScreen() {
 
   async function saveUsername() {
     if (!userId || !username.trim()) return;
-    const clean = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const clean = username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
     if (clean.length < 3) { Alert.alert('Trop court', 'Le nom d\'utilisateur doit faire au moins 3 caractères.'); return; }
     setSavingUsername(true);
     const { error } = await supabase.from('profils').update({ username: clean }).eq('id', userId);
@@ -580,7 +580,7 @@ export default function SettingsScreen() {
             autoCorrect={false}
           />
         </View>
-        <Text style={styles.usernameHint}>Lettres minuscules, chiffres et _ uniquement. Min. 3 caractères.</Text>
+        <Text style={styles.usernameHint}>Lettres minuscules, chiffres, . _ - uniquement. Min. 3 caractères.</Text>
         {username !== currentUsername && (
           <TouchableOpacity style={styles.saveBtn} onPress={saveUsername} disabled={savingUsername}>
             {savingUsername
