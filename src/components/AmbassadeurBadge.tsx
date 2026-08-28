@@ -13,7 +13,7 @@ export function ExplorateurBadge() {
 export function BirthdayBadge() {
   return (
     <View style={styles.dotBirthday}>
-      <Text style={styles.dotBirthdayEmoji}>🕯️</Text>
+      <Ionicons name="sparkles" size={8} color="#fff" />
     </View>
   );
 }
@@ -49,11 +49,9 @@ const styles = StyleSheet.create({
   },
   dotBirthday: {
     width: 15, height: 15, borderRadius: 8,
+    backgroundColor: '#C4693A',
     alignItems: 'center', justifyContent: 'center',
     marginLeft: 4,
-  },
-  dotBirthdayEmoji: {
-    fontSize: 12, lineHeight: 14,
   },
   pillMd: {
     flexDirection: 'row', alignItems: 'center', gap: 4,

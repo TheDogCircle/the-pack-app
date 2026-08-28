@@ -61,7 +61,7 @@ function activityLabel(item: ActivityItem): string {
         ? `${item.actorPrenom} souhaite te suivre`
         : `${item.actorPrenom} a commencé à te suivre`;
     case 'birthday':
-      return `C'est l'anniversaire de ${item.chienNom} (chez ${item.actorPrenom}) 🎂`;
+      return `C'est l'anniversaire de ${item.chienNom} (chez ${item.actorPrenom})`;
   }
 }
 
@@ -217,7 +217,9 @@ export default function ActiviteScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.terra} />}
     >
       <TouchableOpacity style={styles.birthdaysLink} onPress={() => navigation.navigate('Anniversaires')} activeOpacity={0.8}>
-        <Text style={styles.birthdaysLinkEmoji}>🎂</Text>
+        <View style={[styles.birthdaysLinkIcon, { backgroundColor: TYPE_ICON.birthday.color }]}>
+          <Ionicons name={TYPE_ICON.birthday.name} size={12} color="#fff" />
+        </View>
         <Text style={styles.birthdaysLinkText}>Voir tous les anniversaires à venir</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </TouchableOpacity>
@@ -264,7 +266,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     padding: 12, marginBottom: 12,
   },
-  birthdaysLinkEmoji: { fontSize: 16 },
+  birthdaysLinkIcon: {
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
+  },
   birthdaysLinkText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   emptyBox: { alignItems: 'center', gap: 10, padding: 40 },
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },

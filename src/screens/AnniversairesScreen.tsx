@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
@@ -23,7 +24,7 @@ function nextOccurrence(dateNaissanceParsed: string): Date {
 }
 
 function daysUntilLabel(daysUntil: number): string {
-  if (daysUntil === 0) return "Aujourd'hui 🎂";
+  if (daysUntil === 0) return "Aujourd'hui";
   if (daysUntil === 1) return 'Demain';
   return `Dans ${daysUntil} jours`;
 }
@@ -107,7 +108,7 @@ export default function AnniversairesScreen() {
     >
       {!rows.length ? (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyEmoji}>🎂</Text>
+          <Ionicons name="sparkles-outline" size={28} color={colors.textMuted} />
           <Text style={styles.emptyText}>
             Aucun anniversaire à venir parmi les copains que tu suis.
           </Text>
@@ -145,8 +146,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryLight },
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ivoryLight },
-  emptyBox: { alignItems: 'center', gap: 8, padding: 40 },
-  emptyEmoji: { fontSize: 32 },
+  emptyBox: { alignItems: 'center', gap: 10, padding: 40 },
   emptyText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.textMid, textAlign: 'center' },
   emptySubText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, textAlign: 'center' },
   card: {
