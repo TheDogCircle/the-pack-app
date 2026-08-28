@@ -1482,30 +1482,21 @@ export default function FeedScreen() {
   return (
     <View style={styles.container}>
       {/* Tab bar */}
-      <View style={styles.tabsRow}>
-        <View style={styles.tabsWrap}>
-          {([
-            { key: 'feed',     label: 'Feed',     badge: feedBadge },
-            { key: 'messages', label: 'Chat',     badge: chatBadge },
-            { key: 'membres',  label: 'Membres',  badge: membresBadge },
-          ] as const).map(t => (
-            <TouchableOpacity
-              key={t.key}
-              style={[styles.tab, tab === t.key && styles.tabActive]}
-              onPress={() => selectTab(t.key)}
-            >
-              {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
-              <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <TouchableOpacity
-          style={styles.birthdayTabBtn}
-          onPress={() => navigation.navigate('Anniversaires')}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.birthdayTabBtnEmoji}>🎂</Text>
-        </TouchableOpacity>
+      <View style={styles.tabsWrap}>
+        {([
+          { key: 'feed',     label: 'Feed',     badge: feedBadge },
+          { key: 'messages', label: 'Chat',     badge: chatBadge },
+          { key: 'membres',  label: 'Membres',  badge: membresBadge },
+        ] as const).map(t => (
+          <TouchableOpacity
+            key={t.key}
+            style={[styles.tab, tab === t.key && styles.tabActive]}
+            onPress={() => selectTab(t.key)}
+          >
+            {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Chat */}
@@ -1890,20 +1881,11 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: colors.ivoryPale },
-  tabsRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+  tabsWrap: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
     marginHorizontal: 16, marginVertical: 12,
   },
-  tabsWrap: {
-    flex: 1, flexDirection: 'row', backgroundColor: colors.white,
-    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
-  },
-  birthdayTabBtn: {
-    width: 40, height: 40, borderRadius: 12,
-    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  birthdayTabBtnEmoji: { fontSize: 18 },
   tab:          { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center', position: 'relative' },
   tabActive:    { backgroundColor: colors.bordeaux },
   tabText:      { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },

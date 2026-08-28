@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Image, Linking, AppState } from 'react-native';
+import { Image, Linking, AppState, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { savePushToken, clearBadge } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -23,6 +24,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import BookingScreen from '../screens/BookingScreen';
 import MesReservationsScreen from '../screens/MesReservationsScreen';
 import AnniversairesScreen from '../screens/AnniversairesScreen';
+import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import { colors } from '../lib/theme';
@@ -36,6 +38,7 @@ export type RootStackParamList = {
   Booking: { lieuId: string; lieuNom: string };
   MesReservations: undefined;
   Anniversaires: undefined;
+  Activite: undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -58,6 +61,7 @@ function MainTabs() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [meuteBadge, setMeuteBadge] = useState(false);
   const [partBadge, setPartBadge] = useState(false);
+  const [activityBadge, setActivityBadge] = useState(false);
 
   useEffect(() => {
     if (!session) { setAvatarUrl(null); return; }
@@ -105,6 +109,51 @@ function MainTabs() {
     }
 
     setMeuteBadge(meuteHasActivity);
+
+    // Activité (cœur) : likes/commentaires reçus + nouveaux abonnés + anniversaire du jour
+    const lastSeenActivity = await AsyncStorage.getItem(activityLastSeenKey(userId));
+    const sinceActivity = lastSeenActivity || since48h;
+
+    const [{ data: myPosts }, { data: myPhotos }] = await Promise.all([
+      supabase.from('community_posts').select('id').eq('user_id', userId),
+      supabase.from('photos').select('id').eq('user_id', userId),
+    ]);
+    const myPostIds = (myPosts || []).map((p: any) => p.id);
+    const myPhotoIds = (myPhotos || []).map((p: any) => p.id);
+
+    let activityCount = 0;
+    if (myPostIds.length) {
+      const [{ count: lp }, { count: cp }] = await Promise.all([
+        supabase.from('community_post_likes').select('id', { count: 'exact', head: true }).in('post_id', myPostIds).neq('user_id', userId).gt('created_at', sinceActivity),
+        supabase.from('community_post_comments').select('id', { count: 'exact', head: true }).in('post_id', myPostIds).neq('user_id', userId).gt('created_at', sinceActivity),
+      ]);
+      activityCount += (lp ?? 0) + (cp ?? 0);
+    }
+    if (myPhotoIds.length) {
+      const [{ count: lph }, { count: cph }] = await Promise.all([
+        supabase.from('photo_likes').select('id', { count: 'exact', head: true }).in('photo_id', myPhotoIds).neq('user_id', userId).gt('created_at', sinceActivity),
+        supabase.from('photo_comments').select('id', { count: 'exact', head: true }).in('photo_id', myPhotoIds).neq('user_id', userId).gt('created_at', sinceActivity),
+      ]);
+      activityCount += (lph ?? 0) + (cph ?? 0);
+    }
+    const { count: newFollows } = await supabase
+      .from('follows').select('id', { count: 'exact', head: true })
+      .eq('following_id', userId).gt('created_at', sinceActivity);
+    activityCount += newFollows ?? 0;
+
+    let hasBirthdayToday = false;
+    if (follows?.length) {
+      const ids = follows.map((f: any) => f.following_id);
+      const { data: dogs } = await supabase
+        .from('chiens').select('user_id, date_naissance_parsed')
+        .in('user_id', ids).not('date_naissance_parsed', 'is', null);
+      const now = new Date();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      hasBirthdayToday = (dogs || []).some((d: any) => d.date_naissance_parsed?.slice(5, 7) === mm && d.date_naissance_parsed?.slice(8, 10) === dd);
+    }
+
+    setActivityBadge(activityCount > 0 || hasBirthdayToday);
   }
 
   return (
@@ -144,7 +193,20 @@ function MainTabs() {
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
       <Tab.Screen
         name="Meute" component={FeedScreen}
-        options={{ title: 'Meute', tabBarBadge: meuteBadge ? ' ' : undefined }}
+        options={({ navigation }) => ({
+          title: 'Meute',
+          tabBarBadge: meuteBadge ? ' ' : undefined,
+          headerRight: () => (
+            <TouchableOpacity
+              style={headerStyles.heartBtn}
+              onPress={() => { setActivityBadge(false); navigation.navigate('Activite' as any); }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="heart-outline" size={22} color={colors.ivory} />
+              {activityBadge ? <View style={headerStyles.heartDot} /> : null}
+            </TouchableOpacity>
+          ),
+        })}
         listeners={{ focus: () => setMeuteBadge(false) }}
       />
       <Tab.Screen name="Events" component={EvenementsScreen} options={{ title: 'Events' }} />
@@ -157,6 +219,15 @@ function MainTabs() {
     </Tab.Navigator>
   );
 }
+
+const headerStyles = StyleSheet.create({
+  heartBtn: { marginRight: 12, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  heartDot: {
+    position: 'absolute', top: 2, right: 2,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: colors.terra, borderWidth: 1.5, borderColor: colors.bordeaux,
+  },
+});
 
 function parseProfilLink(url: string): string | null {
   const m = url.match(/thepack:\/\/profil\?id=([^&]+)/);
@@ -415,6 +486,18 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: 'Anniversaires',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Activite"
+          component={ActiviteScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Activité',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}
