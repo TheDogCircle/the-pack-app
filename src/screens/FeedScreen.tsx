@@ -20,7 +20,7 @@ import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
-import { AmbassadeurBadge, ExplorateurBadge } from '../components/AmbassadeurBadge';
+import { AmbassadeurBadge, ExplorateurBadge, BirthdayBadge } from '../components/AmbassadeurBadge';
 import MessagerieScreen from './MessagerieScreen';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -121,9 +121,10 @@ type PostCardProps = {
   onLieuPress: (lieuId: string) => void;
   onDeletePress: (post: CommunityPost) => void;
   onAuthorPress: (post: CommunityPost) => void;
+  birthdayUserIds?: Set<string>;
 };
 
-function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress, onAuthorPress }: PostCardProps) {
+function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress, onAuthorPress, birthdayUserIds }: PostCardProps) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
   const commentCount = post.community_post_comments.length;
@@ -141,6 +142,7 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={styles.postAuthor}>{author}</Text>
               {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+              {birthdayUserIds?.has(post.user_id) ? <BirthdayBadge /> : null}
             </View>
             <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
           </View>
@@ -235,7 +237,7 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
 
 // ─── NouveauLieuCard ──────────────────────────────────────────────────────────
 
-function NouveauLieuCard({ post, onLieuPress, onAuthorPress }: { post: CommunityPost; onLieuPress: (id: string) => void; onAuthorPress: (post: CommunityPost) => void }) {
+function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds }: { post: CommunityPost; onLieuPress: (id: string) => void; onAuthorPress: (post: CommunityPost) => void; birthdayUserIds?: Set<string> }) {
   const author = post.profils?.prenom || 'Un membre';
   const lieu = post.lieux;
 
@@ -248,6 +250,7 @@ function NouveauLieuCard({ post, onLieuPress, onAuthorPress }: { post: Community
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={styles.postAuthor}>{author}</Text>
               {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+              {birthdayUserIds?.has(post.user_id) ? <BirthdayBadge /> : null}
             </View>
             <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
           </View>
@@ -279,7 +282,7 @@ function NouveauLieuCard({ post, onLieuPress, onAuthorPress }: { post: Community
 
 // ─── BaladeCard ───────────────────────────────────────────────────────────────
 
-function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress, onAuthorPress }: {
+function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress, onAuthorPress, birthdayUserIds }: {
   post: CommunityPost;
   myUserId: string;
   onLike: (postId: string) => void;
@@ -287,6 +290,7 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onD
   onBaladePress: (post: CommunityPost) => void;
   onDeletePress: (post: CommunityPost) => void;
   onAuthorPress: (post: CommunityPost) => void;
+  birthdayUserIds?: Set<string>;
 }) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
@@ -309,6 +313,7 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onD
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={styles.postAuthor}>{author}</Text>
               {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
+              {birthdayUserIds?.has(post.user_id) ? <BirthdayBadge /> : null}
             </View>
             <Text style={styles.postTime}>a partagé une balade · {timeAgo(post.created_at)}</Text>
           </View>
@@ -950,6 +955,31 @@ export default function FeedScreen() {
     if (session?.user?.id) setMyUserId(session.user.id);
   }, [session?.user?.id]);
 
+  // Bougie dans le feed : user_id des personnes suivies dont un chien fete son anniversaire aujourd'hui
+  const [birthdayUserIds, setBirthdayUserIds] = useState<Set<string>>(new Set());
+
+  const loadBirthdays = useCallback(async (userId: string) => {
+    const { data: followRows } = await supabase
+      .from('follows').select('following_id')
+      .eq('follower_id', userId).eq('statut', 'accepte');
+    const ids = (followRows || []).map((f: any) => f.following_id);
+    if (!ids.length) { setBirthdayUserIds(new Set()); return; }
+    const { data: dogs } = await supabase
+      .from('chiens').select('user_id, date_naissance_parsed')
+      .in('user_id', ids).not('date_naissance_parsed', 'is', null);
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayIds = (dogs || [])
+      .filter((d: any) => d.date_naissance_parsed?.slice(5, 7) === mm && d.date_naissance_parsed?.slice(8, 10) === dd)
+      .map((d: any) => d.user_id);
+    setBirthdayUserIds(new Set(todayIds));
+  }, []);
+
+  useEffect(() => {
+    if (myUserId) loadBirthdays(myUserId);
+  }, [myUserId, loadBirthdays]);
+
   useEffect(() => {
     if (tab === 'feed') { loadFeed(); loadSuggestions(); }
     else if (tab === 'membres') loadMembres();
@@ -1452,21 +1482,30 @@ export default function FeedScreen() {
   return (
     <View style={styles.container}>
       {/* Tab bar */}
-      <View style={styles.tabsWrap}>
-        {([
-          { key: 'feed',     label: 'Feed',     badge: feedBadge },
-          { key: 'messages', label: 'Chat',     badge: chatBadge },
-          { key: 'membres',  label: 'Membres',  badge: membresBadge },
-        ] as const).map(t => (
-          <TouchableOpacity
-            key={t.key}
-            style={[styles.tab, tab === t.key && styles.tabActive]}
-            onPress={() => selectTab(t.key)}
-          >
-            {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.tabsRow}>
+        <View style={styles.tabsWrap}>
+          {([
+            { key: 'feed',     label: 'Feed',     badge: feedBadge },
+            { key: 'messages', label: 'Chat',     badge: chatBadge },
+            { key: 'membres',  label: 'Membres',  badge: membresBadge },
+          ] as const).map(t => (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.tab, tab === t.key && styles.tabActive]}
+              onPress={() => selectTab(t.key)}
+            >
+              {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
+              <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity
+          style={styles.birthdayTabBtn}
+          onPress={() => navigation.navigate('Anniversaires')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.birthdayTabBtnEmoji}>🎂</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Chat */}
@@ -1550,7 +1589,7 @@ export default function FeedScreen() {
               }
               renderItem={({ item }) =>
                 item.type === 'nouveau_lieu' ? (
-                  <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} />
+                  <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} birthdayUserIds={birthdayUserIds} />
                 ) : item.type === 'balade' ? (
                   <BaladeCard
                     post={item}
@@ -1560,6 +1599,7 @@ export default function FeedScreen() {
                     onBaladePress={openBalade}
                     onDeletePress={deletePost}
                     onAuthorPress={openAuthor}
+                    birthdayUserIds={birthdayUserIds}
                   />
                 ) : (
                   <PostCard
@@ -1570,6 +1610,7 @@ export default function FeedScreen() {
                     onLieuPress={openLieu}
                     onDeletePress={deletePost}
                     onAuthorPress={openAuthor}
+                    birthdayUserIds={birthdayUserIds}
                   />
                 )
               }
@@ -1849,11 +1890,20 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container:    { flex: 1, backgroundColor: colors.ivoryPale },
-  tabsWrap: {
-    flexDirection: 'row', backgroundColor: colors.white,
-    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+  tabsRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     marginHorizontal: 16, marginVertical: 12,
   },
+  tabsWrap: {
+    flex: 1, flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+  },
+  birthdayTabBtn: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  birthdayTabBtnEmoji: { fontSize: 18 },
   tab:          { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center', position: 'relative' },
   tabActive:    { backgroundColor: colors.bordeaux },
   tabText:      { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },

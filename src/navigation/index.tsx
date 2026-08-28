@@ -22,6 +22,7 @@ import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BookingScreen from '../screens/BookingScreen';
 import MesReservationsScreen from '../screens/MesReservationsScreen';
+import AnniversairesScreen from '../screens/AnniversairesScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import { colors } from '../lib/theme';
@@ -34,6 +35,7 @@ export type RootStackParamList = {
   Settings: undefined;
   Booking: { lieuId: string; lieuNom: string };
   MesReservations: undefined;
+  Anniversaires: undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -189,6 +191,8 @@ export default function Navigation() {
       if (data.userId) {
         navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });
       }
+    } else if (data.type === 'dog_birthday') {
+      navigationRef.navigate('Anniversaires' as any);
     } else if (data.type === 'reservation') {
       navigationRef.navigate('MesReservations' as any);
     } else if (data.type === 'new_reservation') {
@@ -399,6 +403,18 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: 'Mes réservations',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Anniversaires"
+          component={AnniversairesScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Anniversaires',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}
