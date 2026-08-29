@@ -520,6 +520,7 @@ export default function CarteScreen() {
   const [proposeAutreLabel, setProposeAutreLabel] = useState('');
   const [proposeTel, setProposeTel] = useState('');
   const [proposeSite, setProposeSite] = useState('');
+  const [proposeHoraires, setProposeHoraires] = useState('');
   const [proposeDesc, setProposeDesc] = useState('');
   const [proposeLat, setProposeLat] = useState<number | null>(null);
   const [proposeLng, setProposeLng] = useState<number | null>(null);
@@ -552,7 +553,7 @@ export default function CarteScreen() {
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [onboardingSlide, setOnboardingSlide] = useState(0);
   const [loginPromptVisible, setLoginPromptVisible] = useState(false);
-  const [proposeSuggestions, setProposeSuggestions] = useState<{ name: string; adresse: string; ville: string; lat: number; lng: number; displayAddr: string }[]>([]);
+  const [proposeSuggestions, setProposeSuggestions] = useState<{ name: string; adresse: string; ville: string; lat: number; lng: number; displayAddr: string; tel: string | null; site: string | null; horaires: string | null }[]>([]);
   const [prevSelectedId, setPrevSelectedId] = useState<string | null>(null);
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackType, setFeedbackType] = useState<'probleme' | 'amelioration'>('probleme');
@@ -1516,41 +1517,39 @@ export default function CarteScreen() {
   async function searchProposeSuggestions(query: string) {
     if (query.length < 3) { setProposeSuggestions([]); return; }
     try {
-      let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=8&addressdetails=1&accept-language=fr`;
-      if (userLat && userLng) url += `&viewbox=${userLng - 0.6},${userLat + 0.6},${userLng + 0.6},${userLat - 0.6}`;
-      const r = await fetch(url, { headers: { 'User-Agent': 'ThePackApp/1.0 (thepackclub.fr)' } });
-      const data = await r.json();
-      const suggestions = (data || []).map((item: any) => {
-        const addr = item.address || {};
-        const num = addr.house_number ? `${addr.house_number} ` : '';
-        const road = addr.road || addr.pedestrian || addr.path || addr.footway || addr.square || '';
-        let adresse = `${num}${road}`.trim();
-
-        // Pour les lieux sans rue (parcs, monuments…), extraire depuis display_name
-        if (!adresse) {
-          const parts = (item.display_name as string).split(', ');
-          const filtered = parts.slice(1).filter(p =>
-            !p.match(/^\d{4,5}$/) &&          // pas code postal
-            !p.match(/^France$/i) &&
-            !p.match(/^métropolitaine/i) &&
-            p !== addr.city && p !== addr.town && p !== addr.village
-          );
-          if (filtered.length > 0) adresse = filtered[0];
-        }
-
-        const ville = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
-        const cp = addr.postcode ? ` ${addr.postcode}` : '';
-        const displayAddr = [adresse, ville ? `${ville}${cp}` : ''].filter(Boolean).join(', ');
-
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_KEY,
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.addressComponents,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours',
+        },
+        body: JSON.stringify({
+          textQuery: query,
+          languageCode: 'fr',
+          regionCode: 'FR',
+          maxResultCount: 5,
+          ...(userLat && userLng ? { locationBias: { circle: { center: { latitude: userLat, longitude: userLng }, radius: 50000 } } } : {}),
+        }),
+      });
+      const json = await res.json();
+      const suggestions = (json.places || []).map((p: any) => {
+        const comps = p.addressComponents || [];
+        const find = (type: string) => comps.find((c: any) => c.types?.includes(type))?.longText || '';
+        const adresse = [find('street_number'), find('route')].filter(Boolean).join(' ');
+        const ville = find('locality') || find('postal_town') || find('administrative_area_level_2') || '';
         return {
-          name: item.name || (item.display_name as string).split(',')[0],
+          name: p.displayName?.text || '',
           adresse,
           ville,
-          lat: parseFloat(item.lat),
-          lng: parseFloat(item.lon),
-          displayAddr,
+          lat: p.location?.latitude,
+          lng: p.location?.longitude,
+          displayAddr: p.formattedAddress || '',
+          tel: p.nationalPhoneNumber || null,
+          site: p.websiteUri || null,
+          horaires: p.regularOpeningHours?.weekdayDescriptions?.length ? p.regularOpeningHours.weekdayDescriptions.join('\n') : null,
         };
-      }).filter((s: any) => s.name && s.name.length > 1);
+      }).filter((s: any) => s.name && s.lat != null && s.lng != null);
       setProposeSuggestions(suggestions.slice(0, 5));
     } catch {}
   }
@@ -1830,7 +1829,7 @@ export default function CarteScreen() {
     requireAuth(async () => {
       const { latitude, longitude } = e.nativeEvent.coordinate;
       setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-      setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+      setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeHoraires(''); setProposeDesc('');
       setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
       setProposeLat(latitude);
       setProposeLng(longitude);
@@ -1889,6 +1888,7 @@ export default function CarteScreen() {
       nom: proposeNom.trim(), adresse: proposeAdresse.trim() || null, ville: proposeVille.trim(),
       cat: proposeCats[0],
       tel: proposeTel.trim() || null, site_web: proposeSite.trim() || null,
+      horaires: proposeHoraires.trim() || null,
       description: (() => {
         const extras: string[] = [];
         if (proposeCats.length > 1) extras.push(`Typologies: ${proposeCats.map(k => CAT_CONFIG[k]?.label || k).join(', ')}`);
@@ -1946,7 +1946,7 @@ export default function CarteScreen() {
     if (error) { Alert.alert('Erreur', error.message); return; }
     setProposeModal(false);
     setProposeNom(''); setProposeAdresse(''); setProposeVille('');
-    setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeDesc('');
+    setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeHoraires(''); setProposeDesc('');
     setProposeLat(null); setProposeLng(null);
     setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
     setProposePhotos([]);
@@ -3274,6 +3274,9 @@ export default function CarteScreen() {
                           if (s.adresse) setProposeAdresse(s.adresse);
                           if (s.ville) setProposeVille(s.ville);
                           if (s.lat && s.lng) { setProposeLat(s.lat); setProposeLng(s.lng); }
+                          if (s.tel) setProposeTel(s.tel);
+                          if (s.site) setProposeSite(s.site);
+                          if (s.horaires) setProposeHoraires(s.horaires);
                           setProposeSuggestions([]);
                         }}
                       >
@@ -3382,6 +3385,10 @@ export default function CarteScreen() {
               <View style={styles.proposeField}>
                 <Text style={styles.proposeLabel}>Site web</Text>
                 <TextInput style={styles.proposeInput} value={proposeSite} onChangeText={setProposeSite} placeholder="https://…" placeholderTextColor={colors.textMuted} autoCapitalize="none" />
+              </View>
+              <View style={styles.proposeField}>
+                <Text style={styles.proposeLabel}>Horaires</Text>
+                <TextInput style={[styles.proposeInput, { minHeight: 60, textAlignVertical: 'top' }]} value={proposeHoraires} onChangeText={setProposeHoraires} placeholder="Ex : Lundi–Vendredi 9h–19h" placeholderTextColor={colors.textMuted} multiline />
               </View>
               <View style={styles.proposeField}>
                 <Text style={styles.proposeLabel}>Description</Text>
