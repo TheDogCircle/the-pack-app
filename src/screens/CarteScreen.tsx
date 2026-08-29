@@ -553,7 +553,7 @@ export default function CarteScreen() {
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const [onboardingSlide, setOnboardingSlide] = useState(0);
   const [loginPromptVisible, setLoginPromptVisible] = useState(false);
-  const [proposeSuggestions, setProposeSuggestions] = useState<{ name: string; adresse: string; ville: string; lat: number; lng: number; displayAddr: string; tel: string | null; site: string | null; horaires: string | null }[]>([]);
+  const [proposeSuggestions, setProposeSuggestions] = useState<{ placeId: string; name: string; displayAddr: string }[]>([]);
   const [prevSelectedId, setPrevSelectedId] = useState<string | null>(null);
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackType, setFeedbackType] = useState<'probleme' | 'amelioration'>('probleme');
@@ -613,6 +613,7 @@ export default function CarteScreen() {
   const MAX_BALADE_PHOTOS = 5;
   const [fabOpen, setFabOpen] = useState(false);
   const proposeSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const proposeSessionToken = useRef<string | null>(null);
   const skipNextFetchRef = useRef(false);
   const lastFetchedRegionRef = useRef<Region | null>(null);
   const sheetAnim = useRef(new Animated.Value(SCREEN_H)).current;
@@ -1514,43 +1515,70 @@ export default function CarteScreen() {
     fetchLieux(r, activeCat, true);
   }
 
+  function genSessionToken() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
   async function searchProposeSuggestions(query: string) {
     if (query.length < 3) { setProposeSuggestions([]); return; }
+    if (!proposeSessionToken.current) proposeSessionToken.current = genSessionToken();
     try {
-      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': GOOGLE_KEY,
-          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.addressComponents,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours',
-        },
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY },
         body: JSON.stringify({
-          textQuery: query,
+          input: query,
+          sessionToken: proposeSessionToken.current,
           languageCode: 'fr',
           regionCode: 'FR',
-          maxResultCount: 5,
+          includedRegionCodes: ['fr'],
           ...(userLat && userLng ? { locationBias: { circle: { center: { latitude: userLat, longitude: userLng }, radius: 50000 } } } : {}),
         }),
       });
       const json = await res.json();
-      const suggestions = (json.places || []).map((p: any) => {
-        const comps = p.addressComponents || [];
-        const find = (type: string) => comps.find((c: any) => c.types?.includes(type))?.longText || '';
-        const adresse = [find('street_number'), find('route')].filter(Boolean).join(' ');
-        const ville = find('locality') || find('postal_town') || find('administrative_area_level_2') || '';
-        return {
-          name: p.displayName?.text || '',
-          adresse,
-          ville,
-          lat: p.location?.latitude,
-          lng: p.location?.longitude,
-          displayAddr: p.formattedAddress || '',
-          tel: p.nationalPhoneNumber || null,
-          site: p.websiteUri || null,
-          horaires: p.regularOpeningHours?.weekdayDescriptions?.length ? p.regularOpeningHours.weekdayDescriptions.join('\n') : null,
-        };
-      }).filter((s: any) => s.name && s.lat != null && s.lng != null);
+      const suggestions = (json.suggestions || [])
+        .map((s: any) => s.placePrediction)
+        .filter((p: any) => p?.placeId)
+        .map((p: any) => ({
+          placeId: p.placeId,
+          name: p.structuredFormat?.mainText?.text || p.text?.text || '',
+          displayAddr: p.structuredFormat?.secondaryText?.text || '',
+        }));
       setProposeSuggestions(suggestions.slice(0, 5));
+    } catch {}
+  }
+
+  async function selectProposePlace(placeId: string, fallbackName: string) {
+    setProposeNom(fallbackName);
+    setProposeSuggestions([]);
+    const token = proposeSessionToken.current;
+    proposeSessionToken.current = null;
+    try {
+      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}?languageCode=fr&regionCode=FR${token ? `&sessionToken=${token}` : ''}`, {
+        headers: {
+          'X-Goog-Api-Key': GOOGLE_KEY,
+          'X-Goog-FieldMask': 'displayName,formattedAddress,location,addressComponents,nationalPhoneNumber,websiteUri,regularOpeningHours',
+        },
+      });
+      const p = await res.json();
+      const comps = p.addressComponents || [];
+      const find = (type: string) => comps.find((c: any) => c.types?.includes(type))?.longText || '';
+      const adresse = [find('street_number'), find('route')].filter(Boolean).join(' ');
+      const ville = find('locality') || find('postal_town') || find('administrative_area_level_2') || '';
+      if (p.displayName?.text) setProposeNom(p.displayName.text);
+      if (adresse) setProposeAdresse(adresse);
+      if (ville) setProposeVille(ville);
+      if (p.location?.latitude != null && p.location?.longitude != null) {
+        setProposeLat(p.location.latitude);
+        setProposeLng(p.location.longitude);
+      }
+      if (p.nationalPhoneNumber) setProposeTel(p.nationalPhoneNumber);
+      if (p.websiteUri) setProposeSite(p.websiteUri);
+      if (p.regularOpeningHours?.weekdayDescriptions?.length) setProposeHoraires(p.regularOpeningHours.weekdayDescriptions.join('\n'));
     } catch {}
   }
 
@@ -1828,6 +1856,7 @@ export default function CarteScreen() {
   async function handleMapLongPress(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) {
     requireAuth(async () => {
       const { latitude, longitude } = e.nativeEvent.coordinate;
+      proposeSessionToken.current = null;
       setProposeNom(''); setProposeAdresse(''); setProposeVille('');
       setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeHoraires(''); setProposeDesc('');
       setProposeAmenities({ chiens_salle: false, chiens_terrasse: false, espace_dedie: false, eau: false, gamelles: false, chiens_laches: false, chiens_laisse: false, petits_chiens: false, moyens_chiens: false, grands_chiens: false });
@@ -1945,6 +1974,7 @@ export default function CarteScreen() {
     setProposeLoading(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
     setProposeModal(false);
+    proposeSessionToken.current = null;
     setProposeNom(''); setProposeAdresse(''); setProposeVille('');
     setProposeCats([]); setProposeAutreLabel(''); setProposeTel(''); setProposeSite(''); setProposeHoraires(''); setProposeDesc('');
     setProposeLat(null); setProposeLng(null);
@@ -3243,7 +3273,7 @@ export default function CarteScreen() {
       <Modal visible={proposeModal} transparent animationType="slide">
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.modalCard, { maxHeight: SCREEN_H * 0.85 }]}>
-            <TouchableOpacity style={styles.modalCloseFixed} onPress={() => { setProposeModal(false); setProposeSuggestions([]); }}>
+            <TouchableOpacity style={styles.modalCloseFixed} onPress={() => { setProposeModal(false); setProposeSuggestions([]); proposeSessionToken.current = null; }}>
               <Ionicons name="close" size={22} color={colors.textMuted} />
             </TouchableOpacity>
             <Text style={[styles.modalTitle, { paddingRight: 36 }]}>Proposer un lieu</Text>
@@ -3269,16 +3299,7 @@ export default function CarteScreen() {
                       <TouchableOpacity
                         key={i}
                         style={[styles.proposeSuggestItem, i < proposeSuggestions.length - 1 && styles.proposeSuggestItemBorder]}
-                        onPress={() => {
-                          setProposeNom(s.name);
-                          if (s.adresse) setProposeAdresse(s.adresse);
-                          if (s.ville) setProposeVille(s.ville);
-                          if (s.lat && s.lng) { setProposeLat(s.lat); setProposeLng(s.lng); }
-                          if (s.tel) setProposeTel(s.tel);
-                          if (s.site) setProposeSite(s.site);
-                          if (s.horaires) setProposeHoraires(s.horaires);
-                          setProposeSuggestions([]);
-                        }}
+                        onPress={() => selectProposePlace(s.placeId, s.name)}
                       >
                         <Ionicons name="location-outline" size={14} color={colors.terra} />
                         <View style={{ flex: 1 }}>
