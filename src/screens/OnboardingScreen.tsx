@@ -10,10 +10,19 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import { RACES } from '../constants/races';
+import { COUNTRIES } from '../constants/countries';
 
 const GENRES = [
   { key: 'male',    label: 'Mâle',    emoji: '♂️' },
   { key: 'femelle', label: 'Femelle', emoji: '♀️' },
+];
+
+const OWNER_GENRES = [
+  { key: 'femme', label: 'Femme' },
+  { key: 'homme', label: 'Homme' },
+  { key: 'non_binaire', label: 'Non-binaire' },
+  { key: 'neutre', label: 'Neutre' },
+  { key: 'autre', label: 'Autre' },
 ];
 
 const TRANCHES_AGE = [
@@ -49,6 +58,9 @@ export default function OnboardingScreen() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [ville, setVille] = useState('');
+  const [pays, setPays] = useState('France');
+  const [ownerGenre, setOwnerGenre] = useState('');
+  const [ownerGenreError, setOwnerGenreError] = useState(false);
   const [dateMode, setDateMode] = useState<'date' | 'age'>('date');
   const [dateNaissance, setDateNaissance] = useState('');
   const [ageVal, setAgeVal] = useState('');
@@ -58,6 +70,14 @@ export default function OnboardingScreen() {
   const [usernameError, setUsernameError] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
   const [dateNaissanceError, setDateNaissanceError] = useState(false);
+
+  // Pays picker
+  const [paysModal, setPaysModal] = useState(false);
+  const [paysSearch, setPaysSearch] = useState('');
+  const filteredCountries = useMemo(
+    () => COUNTRIES.filter(c => c.toLowerCase().includes(paysSearch.toLowerCase())),
+    [paysSearch],
+  );
 
   // Step 2 — dog
   const [nomChien, setNomChien] = useState('');
@@ -133,14 +153,16 @@ export default function OnboardingScreen() {
     const n = !nom.trim();
     const e = !email.trim();
     const u = !!username && (usernameStatus === 'taken' || usernameStatus === 'invalid');
+    const og = !ownerGenre;
     const humanBirth = dateMode === 'date' ? dateNaissance.trim() : ageVal.trim();
     const d = !humanBirth;
     setPrenomError(p);
     setNomError(n);
     setEmailError(e);
     setUsernameError(u);
+    setOwnerGenreError(og);
     setDateNaissanceError(d);
-    if (p || n || e || u || d) return;
+    if (p || n || e || u || og || d) return;
     setStep(2);
   }
 
@@ -170,6 +192,8 @@ export default function OnboardingScreen() {
       email: email.trim(),
       username: username.trim() || null,
       ville: ville.trim() || null,
+      pays: pays || null,
+      genre: ownerGenre || null,
       date_naissance_humain: humanBirth,
       nom_chien: nomChien.trim(),
       race_chien: raceChien,
@@ -354,6 +378,34 @@ export default function OnboardingScreen() {
                 autoCapitalize="words"
                 returnKeyType="next"
               />
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Ton pays</Text>
+              <TouchableOpacity
+                style={styles.racePicker}
+                onPress={() => { setPaysSearch(''); setPaysModal(true); }}
+              >
+                <Text style={[styles.racePickerText, !pays && { color: colors.textMuted }]}>
+                  {pays || 'Choisir un pays…'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Ton genre *</Text>
+              <View style={styles.statutGrid}>
+                {OWNER_GENRES.map(g => {
+                  const active = ownerGenre === g.key;
+                  return (
+                    <TouchableOpacity
+                      key={g.key}
+                      style={[styles.statutPill, active && styles.statutPillActive, ownerGenreError && !ownerGenre && styles.inputError]}
+                      onPress={() => { setOwnerGenre(g.key); setOwnerGenreError(false); }}
+                    >
+                      <Text style={[styles.statutLabel, active && styles.statutLabelActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {ownerGenreError && <Text style={styles.errorText}>Le genre est requis</Text>}
 
               <Text style={[styles.label, { marginTop: 16 }]}>Ton anniversaire *</Text>
               <View style={styles.modeToggle}>
@@ -781,6 +833,62 @@ export default function OnboardingScreen() {
               ListEmptyComponent={
                 <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
                   Aucune race trouvée
+                </Text>
+              }
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={paysModal} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={styles.raceOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.raceCard}>
+            <View style={styles.raceHeader}>
+              <Text style={styles.raceTitle}>Choisir un pays</Text>
+              <TouchableOpacity onPress={() => setPaysModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.raceSearchWrap}>
+              <Ionicons name="search" size={15} color={colors.textMuted} />
+              <TextInput
+                style={styles.raceSearchInput}
+                placeholder="Rechercher un pays…"
+                placeholderTextColor={colors.textMuted}
+                value={paysSearch}
+                onChangeText={setPaysSearch}
+                autoCorrect={false}
+              />
+              {paysSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setPaysSearch('')}>
+                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <FlatList
+              data={filteredCountries}
+              extraData={paysSearch}
+              keyExtractor={c => c}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.raceItem, pays === item && styles.raceItemActive]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setPays(item);
+                    setPaysModal(false);
+                  }}
+                >
+                  <Text style={[styles.raceItemText, pays === item && styles.raceItemTextActive]}>{item}</Text>
+                  {pays === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
+                  Aucun pays trouvé
                 </Text>
               }
             />

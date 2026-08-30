@@ -12,10 +12,19 @@ import { colors } from '../lib/theme';
 import { savePushToken } from '../lib/notifications';
 import { normalizePhone } from '../lib/phone';
 import { RACES } from '../constants/races';
+import { COUNTRIES } from '../constants/countries';
 
 const GENRES = [
   { key: 'male',    label: 'Mâle',    emoji: '♂️' },
   { key: 'femelle', label: 'Femelle', emoji: '♀️' },
+];
+
+const OWNER_GENRES = [
+  { key: 'femme', label: 'Femme' },
+  { key: 'homme', label: 'Homme' },
+  { key: 'non_binaire', label: 'Non-binaire' },
+  { key: 'neutre', label: 'Neutre' },
+  { key: 'autre', label: 'Autre' },
 ];
 
 const TRANCHES_AGE = [
@@ -79,6 +88,8 @@ export default function SettingsScreen() {
   // Profil (human info only)
   const [prenom, setPrenom] = useState('');
   const [ville, setVille] = useState('');
+  const [pays, setPays] = useState('');
+  const [genre, setGenre] = useState('');
   const [telephone, setTelephone] = useState('');
   const [bio, setBio] = useState('');
   const [instagram, setInstagram] = useState('');
@@ -117,6 +128,14 @@ export default function SettingsScreen() {
     [raceSearch],
   );
 
+  // Pays picker
+  const [paysModal, setPaysModal] = useState(false);
+  const [paysSearch, setPaysSearch] = useState('');
+  const filteredCountries = useMemo(
+    () => COUNTRIES.filter(c => c.toLowerCase().includes(paysSearch.toLowerCase())),
+    [paysSearch],
+  );
+
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -135,7 +154,7 @@ export default function SettingsScreen() {
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
-        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,notif_birthday,rayon_km,prenom,ville,telephone,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,notif_birthday,rayon_km,prenom,ville,pays,genre,telephone,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
         .eq('id', session.user.id).single(),
       supabase.from('chiens')
         .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
@@ -159,6 +178,8 @@ export default function SettingsScreen() {
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
+      setPays(data.pays || '');
+      setGenre(data.genre || '');
       setTelephone(data.telephone || '');
       setBio(data.bio || '');
       setInstagram(data.instagram_url || '');
@@ -246,6 +267,8 @@ export default function SettingsScreen() {
     const { error } = await supabase.from('profils').update({
       prenom: prenom.trim() || null,
       ville: ville.trim() || null,
+      pays: pays || null,
+      genre: genre || null,
       telephone: telephone.trim() || null,
       bio: bio.trim() || null,
       instagram_url: instagram.trim() || null,
@@ -420,6 +443,31 @@ export default function SettingsScreen() {
           <Text style={styles.fieldLabel}>Ville</Text>
           <TextInput style={styles.fieldInput} value={ville} onChangeText={setVille}
             placeholder="Ex : Paris" placeholderTextColor={colors.textMuted} />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Pays</Text>
+          <TouchableOpacity style={styles.fieldInput} onPress={() => { setPaysSearch(''); setPaysModal(true); }}>
+            <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 14, color: pays ? colors.bordeaux : colors.textMuted }}>
+              {pays || 'Choisir un pays…'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Genre</Text>
+          <View style={styles.pillGrid}>
+            {OWNER_GENRES.map(g => {
+              const active = genre === g.key;
+              return (
+                <TouchableOpacity
+                  key={g.key}
+                  style={[styles.pill, active && styles.pillActive]}
+                  onPress={() => setGenre(active ? '' : g.key)}
+                >
+                  <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{g.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Téléphone</Text>
@@ -980,6 +1028,61 @@ export default function SettingsScreen() {
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    </Modal>
+
+    <Modal
+      visible={paysModal}
+      animationType="slide"
+      transparent
+      onRequestClose={() => { Keyboard.dismiss(); setPaysModal(false); setPaysSearch(''); }}
+    >
+      <KeyboardAvoidingView style={styles.raceModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={styles.raceModalCard}>
+          <View style={styles.raceModalHeader}>
+            <Text style={styles.raceModalTitle}>Choisir un pays</Text>
+            <TouchableOpacity onPress={() => { Keyboard.dismiss(); setPaysModal(false); setPaysSearch(''); }}>
+              <Ionicons name="close" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.raceSearchWrap}>
+            <Ionicons name="search" size={15} color={colors.textMuted} />
+            <TextInput
+              style={styles.raceSearchInput}
+              placeholder="Rechercher un pays…"
+              placeholderTextColor={colors.textMuted}
+              value={paysSearch}
+              onChangeText={setPaysSearch}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {paysSearch.length > 0 && (
+              <TouchableOpacity onPress={() => setPaysSearch('')}>
+                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <FlatList
+            data={filteredCountries}
+            extraData={paysSearch}
+            keyExtractor={c => c}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.raceItem, pays === item && styles.raceItemActive]}
+                onPress={() => { Keyboard.dismiss(); setPays(item); setPaysModal(false); setPaysSearch(''); }}
+              >
+                <Text style={[styles.raceItemText, pays === item && styles.raceItemTextActive]}>{item}</Text>
+                {pays === item && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={{ padding: 20, color: colors.textMuted, fontFamily: 'DMSans_400Regular', textAlign: 'center' }}>
+                Aucun pays trouvé
+              </Text>
+            }
+          />
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
     </>
   );
