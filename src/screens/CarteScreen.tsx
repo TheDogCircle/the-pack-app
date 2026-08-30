@@ -29,6 +29,26 @@ const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
 const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 
+// Les references photo Google mises en cache dans lieux.google_photo_url peuvent expirer :
+// cette fonction en redemande une fraiche et met a jour le cache en base.
+async function fetchAndCacheGooglePhoto(lieuData: { id: string; nom: string; ville: string }): Promise<string | null> {
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
+      body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
+    });
+    const json = await res.json();
+    const photoName = json.places?.[0]?.photos?.[0]?.name;
+    if (!photoName) return null;
+    const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
+    supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuData.id).then(() => {});
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 // Feature flag — mettre à true pour réactiver l'upload vidéo
 const ENABLE_VIDEO_UPLOAD = false;
 
@@ -318,10 +338,45 @@ type DiscoverPhoto = {
   nomChien: string | null; authorDisplay: string | null;
 };
 
+function ListCardPhoto({ uri, hasCommunityPhoto, lieu, style }: { uri: string; hasCommunityPhoto: boolean; lieu: { id: string; nom: string; ville: string }; style: any }) {
+  const [src, setSrc] = useState(uri);
+  const retried = useRef(false);
+  useEffect(() => { setSrc(uri); retried.current = false; }, [uri]);
+  if (!src) return null;
+  return (
+    <Image
+      source={{ uri: src }}
+      style={style}
+      resizeMode="cover"
+      onError={() => {
+        if (hasCommunityPhoto || retried.current) { setSrc(''); return; }
+        retried.current = true;
+        fetchAndCacheGooglePhoto(lieu).then(url => setSrc(url || ''));
+      }}
+    />
+  );
+}
+
 function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
   const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
-  const photo = lieu.photoUrl || lieu.google_photo_url;
-  if (photo) return <Image source={{ uri: photo }} style={style} resizeMode="cover" />;
+  const [photo, setPhoto] = useState(lieu.photoUrl || lieu.google_photo_url || null);
+  const retried = useRef(false);
+  useEffect(() => {
+    setPhoto(lieu.photoUrl || lieu.google_photo_url || null);
+    retried.current = false;
+  }, [lieu.id, lieu.photoUrl, lieu.google_photo_url]);
+  if (photo) return (
+    <Image
+      source={{ uri: photo }}
+      style={style}
+      resizeMode="cover"
+      onError={() => {
+        if (lieu.photoUrl || retried.current) { setPhoto(null); return; }
+        retried.current = true;
+        fetchAndCacheGooglePhoto(lieu).then(setPhoto);
+      }}
+    />
+  );
   return (
     <View style={[style, { backgroundColor: cfg.color + '18', alignItems: 'center', justifyContent: 'center' }]}>
       <Ionicons name={cfg.icon} size={28} color={cfg.color + '77'} />
@@ -364,11 +419,25 @@ function DiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => vo
 
 function FeaturedDiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => void }) {
   const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
-  const photo = lieu.photoUrl || lieu.google_photo_url;
+  const [photo, setPhoto] = useState(lieu.photoUrl || lieu.google_photo_url || null);
+  const retried = useRef(false);
+  useEffect(() => {
+    setPhoto(lieu.photoUrl || lieu.google_photo_url || null);
+    retried.current = false;
+  }, [lieu.id, lieu.photoUrl, lieu.google_photo_url]);
   return (
     <TouchableOpacity style={dstyles.featured} onPress={onPress} activeOpacity={0.88}>
       {photo ? (
-        <Image source={{ uri: photo }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <Image
+          source={{ uri: photo }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onError={() => {
+            if (lieu.photoUrl || retried.current) { setPhoto(null); return; }
+            retried.current = true;
+            fetchAndCacheGooglePhoto(lieu).then(setPhoto);
+          }}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: cfg.color + '22', alignItems: 'center', justifyContent: 'center' }]}>
           <Ionicons name={cfg.icon} size={48} color={cfg.color + '55'} />
@@ -510,6 +579,7 @@ export default function CarteScreen() {
   const [photos, setPhotos] = useState<PhotoFiche[]>([]);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [googlePhotoUrl, setGooglePhotoUrl] = useState<string | null>(null);
+  const googlePhotoRetried = useRef(false);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [ficheAvis, setFicheAvis] = useState<FicheAvisItem[]>([]);
   const [proposeModal, setProposeModal] = useState(false);
@@ -1249,6 +1319,7 @@ export default function CarteScreen() {
     Keyboard.dismiss();
     setLightboxIdx(null);
     setSheetLoading(true);
+    googlePhotoRetried.current = false;
     setPrevSelectedId(selectedLieu?.id ?? null);
     if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
     markerResetTimer.current = setTimeout(() => setPrevSelectedId(null), 600);
@@ -1338,23 +1409,7 @@ export default function CarteScreen() {
             setGooglePhotoUrl(lieuData.google_photo_url);
           } else {
             setGooglePhotoUrl(null);
-            const lieuId = lieuData.id;
-            (async () => {
-              try {
-                const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
-                  body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
-                });
-                const json = await res.json();
-                const photoName = json.places?.[0]?.photos?.[0]?.name;
-                if (photoName) {
-                  const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-                  setGooglePhotoUrl(url);
-                  supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuId).then(() => {});
-                }
-              } catch {}
-            })();
+            fetchAndCacheGooglePhoto(lieuData).then(setGooglePhotoUrl);
           }
         } else {
           setGooglePhotoUrl(null);
@@ -2284,7 +2339,18 @@ export default function CarteScreen() {
                 ))}
               </ScrollView>
             ) : googlePhotoUrl ? (
-              <Image source={{ uri: googlePhotoUrl }} style={[StyleSheet.absoluteFill, { width: SCREEN_W, height: FICHE_HEADER_H }]} resizeMode="cover" />
+              <Image
+                source={{ uri: googlePhotoUrl }}
+                style={[StyleSheet.absoluteFill, { width: SCREEN_W, height: FICHE_HEADER_H }]}
+                resizeMode="cover"
+                onError={() => {
+                  // La reference photo Google mise en cache peut expirer : on en redemande une
+                  // fraiche une seule fois, puis on abandonne si ca echoue aussi.
+                  if (!selectedLieu || googlePhotoRetried.current) { setGooglePhotoUrl(null); return; }
+                  googlePhotoRetried.current = true;
+                  fetchAndCacheGooglePhoto(selectedLieu).then(setGooglePhotoUrl);
+                }}
+              />
             ) : (
               <View style={[styles.ficheHeaderPlaceholder, { backgroundColor: cfg.color }]}>
                 <CatIcon cat={selectedLieu?.cat} name={cfg.icon} size={72} color="rgba(245,239,224,0.18)" />
@@ -2944,7 +3010,7 @@ export default function CarteScreen() {
                     >
                       <View style={[styles.listCardAccent, { backgroundColor: cfg.color }]} />
                       {photo ? (
-                        <Image source={{ uri: photo }} style={styles.listCardPhoto} resizeMode="cover" />
+                        <ListCardPhoto uri={photo} hasCommunityPhoto={!!listPhotoMap[item.id]} lieu={item} style={styles.listCardPhoto} />
                       ) : (
                         <View style={[styles.listCardPhoto, { backgroundColor: cfg.color + '18', alignItems: 'center', justifyContent: 'center' }]}>
                           <Ionicons name={cfg.icon} size={20} color={cfg.color + '99'} />
