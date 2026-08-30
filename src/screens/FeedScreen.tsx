@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Contacts from 'expo-contacts';
+import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
@@ -24,6 +25,19 @@ import { AmbassadeurBadge, ExplorateurBadge, BirthdayBadge } from '../components
 import MessagerieScreen from './MessagerieScreen';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Comptes toujours suggérés (marque + fondatrice), tant que l'utilisateur ne les suit pas déjà
+const PINNED_SUGGESTION_IDS = ['28f8c781-f384-4fcd-89a2-6347e7ca352a', '1a81459b-c68f-42ca-9ed8-8aa79f6a16aa'];
+
+const DISTANCE_OPTIONS = [10, 25, 50, 100, 250];
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,12 +78,14 @@ type MembreItem = {
   user: {
     id: string;
     prenom: string;
+    username?: string | null;
     avatar_url: string | null;
     ambassadeur?: boolean | null;
     explorateur?: boolean | null;
   };
   ville: string | null;
   nomChien: string | null;
+  distanceKm?: number | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -922,6 +938,10 @@ export default function FeedScreen() {
   const [search, setSearch] = useState('');
   const [regionFilter, setRegionFilter] = useState<string | null>(null);
   const [regionPickerVisible, setRegionPickerVisible] = useState(false);
+  const [distanceFilter, setDistanceFilter] = useState<number | null>(null);
+  const [distancePickerVisible, setDistancePickerVisible] = useState(false);
+  const [ambassadeurFilter, setAmbassadeurFilter] = useState(false);
+  const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
@@ -996,6 +1016,7 @@ export default function FeedScreen() {
       supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
     ]);
     const myVille = (myProfil?.ville || '').toLowerCase().trim();
+    const myRegion = getRegion(myProfil?.ville || null);
     const myFollowingSet = new Set((myFollowsData || []).map((f: any) => f.following_id));
 
     const { data: candidates } = await supabase
@@ -1013,10 +1034,14 @@ export default function FeedScreen() {
     });
 
     const ranked = pool
-      .map((c: any) => ({
-        c,
-        score: (mutualMap[c.id] || 0) * 10 + ((c.ville || '').toLowerCase().trim() === myVille && myVille ? 1 : 0),
-      }))
+      .map((c: any) => {
+        const sameVille = (c.ville || '').toLowerCase().trim() === myVille && myVille;
+        const sameRegion = !sameVille && myRegion && getRegion(c.ville) === myRegion;
+        return {
+          c,
+          score: (mutualMap[c.id] || 0) * 10 + (sameVille ? 1 : sameRegion ? 0.5 : 0),
+        };
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, 15)
       .map(({ c }) => ({
@@ -1026,8 +1051,22 @@ export default function FeedScreen() {
         nomChien: c.nom_chien || null,
       }));
 
+    // Comptes toujours mis en avant (marque + fondatrice) tant qu'on ne les suit pas deja
+    const pinnedIds = PINNED_SUGGESTION_IDS.filter(id => id !== myId && !myFollowingSet.has(id) && !ranked.some(r => r.id === id));
+    let pinned: MembreItem[] = [];
+    if (pinnedIds.length) {
+      const { data: pinnedProfils } = await supabase
+        .from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur').in('id', pinnedIds);
+      pinned = (pinnedProfils || []).map((c: any) => ({
+        id: c.id,
+        user: { id: c.id, prenom: c.prenom || 'Membre', avatar_url: c.avatar_url, ambassadeur: c.ambassadeur || null, explorateur: false },
+        ville: c.ville || null,
+        nomChien: c.nom_chien || null,
+      }));
+    }
+
     setMutuals(prev => ({ ...prev, ...mutualMap }));
-    setSuggestions(ranked);
+    setSuggestions([...pinned, ...ranked]);
     setSuggestionsLoading(false);
   }
 
@@ -1405,7 +1444,7 @@ export default function FeedScreen() {
     setMyUserId(myId);
 
     const [{ data: membresData }, { data: myFollowsData }, { data: explorateurRows }] = await Promise.all([
-      supabase.from('profils').select('id,prenom,avatar_url,ville,nom_chien,ambassadeur').neq('id', myId).range(0, 999),
+      supabase.from('profils').select('id,prenom,username,avatar_url,ville,lat,lng,nom_chien,ambassadeur').neq('id', myId).range(0, 999),
       supabase.from('follows').select('following_id').eq('follower_id', myId).eq('statut', 'accepte'),
       supabase.from('explorateurs').select('user_id').eq('statut', 'actif').not('user_id', 'is', null),
     ]);
@@ -1424,13 +1463,54 @@ export default function FeedScreen() {
 
     setFollowing(new Set(memberIds.filter((id: string) => myFollowingSet.has(id))));
     setMutuals(mutualMap);
-    setMembres(membresData.map((p: any) => ({
+
+    let loc = myLoc;
+    if (!loc) {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const pos = await Location.getCurrentPositionAsync({});
+          loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setMyLoc(loc);
+        }
+      } catch {}
+    }
+
+    const buildMembre = (p: any): MembreItem => ({
       id: p.id,
-      user: { id: p.id, prenom: p.prenom || 'Membre', avatar_url: p.avatar_url, ambassadeur: p.ambassadeur || null, explorateur: expIds.has(p.id) },
+      user: { id: p.id, prenom: p.prenom || 'Membre', username: p.username || null, avatar_url: p.avatar_url, ambassadeur: p.ambassadeur || null, explorateur: expIds.has(p.id) },
       ville: p.ville || null,
       nomChien: p.nom_chien || null,
-    })));
+      distanceKm: loc && p.lat != null && p.lng != null ? haversineKm(loc.lat, loc.lng, p.lat, p.lng) : null,
+    });
+
+    setMembres(membresData.map(buildMembre));
     setMembresLoading(false);
+
+    // Geocodage progressif : les villes des membres sans lat/lng connu sont resolues
+    // en tache de fond (cache partage via profils.lat/lng), plafonne pour rester leger.
+    const villesToGeocode = [...new Set(
+      membresData.filter((p: any) => p.ville && (p.lat == null || p.lng == null)).map((p: any) => p.ville)
+    )].slice(0, 15);
+    if (villesToGeocode.length) {
+      (async () => {
+        for (const ville of villesToGeocode) {
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(ville + ', France')}&limit=1`, { headers: { 'Accept-Language': 'fr' } });
+            const json = await res.json();
+            const hit = json?.[0];
+            if (hit) {
+              const glat = parseFloat(hit.lat), glng = parseFloat(hit.lon);
+              await supabase.from('profils').update({ lat: glat, lng: glng }).eq('ville', ville).is('lat', null);
+              setMembres(prev => prev.map(m => (m.ville === ville && m.distanceKm == null && loc)
+                ? { ...m, distanceKm: haversineKm(loc!.lat, loc!.lng, glat, glng) }
+                : m));
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 1100));
+        }
+      })();
+    }
   }
 
   async function toggleFollow(memberId: string) {
@@ -1465,12 +1545,21 @@ export default function FeedScreen() {
       const q = search.toLowerCase();
       return (
         (m.user.prenom || '').toLowerCase().includes(q) ||
+        (m.user.username || '').toLowerCase().includes(q) ||
         (m.nomChien || '').toLowerCase().includes(q) ||
         (m.ville || '').toLowerCase().includes(q)
       );
     })
-    .filter(m => !regionFilter || membreRegions.get(m.id) === regionFilter),
-    [membres, search, regionFilter, membreRegions]);
+    .filter(m => !regionFilter || membreRegions.get(m.id) === regionFilter)
+    .filter(m => !ambassadeurFilter || m.user.ambassadeur)
+    .filter(m => !distanceFilter || (m.distanceKm != null && m.distanceKm <= distanceFilter))
+    .sort((a, b) => {
+      if (a.distanceKm == null && b.distanceKm == null) return 0;
+      if (a.distanceKm == null) return 1;
+      if (b.distanceKm == null) return -1;
+      return a.distanceKm - b.distanceKm;
+    }),
+    [membres, search, regionFilter, ambassadeurFilter, distanceFilter, membreRegions]);
 
   // ── Render ──
 
@@ -1617,34 +1706,24 @@ export default function FeedScreen() {
       ) : membresLoading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
-        <FlatList
-          data={filteredMembres}
-          keyExtractor={m => m.id}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={membresRefreshing}
-              onRefresh={async () => { setMembresRefreshing(true); await loadMembres(); setMembresRefreshing(false); }}
-              tintColor={colors.terra}
-            />
-          }
-          ListHeaderComponent={
-            <>
-              <View style={styles.searchBar}>
-                <Ionicons name="search" size={15} color={colors.textMuted} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Rechercher un membre…"
-                  placeholderTextColor={colors.textMuted}
-                  value={search}
-                  onChangeText={setSearch}
-                />
-                {search.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearch('')}>
-                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                  </TouchableOpacity>
-                )}
-              </View>
+        <>
+          <View style={styles.membresFixedHeader}>
+            <View style={styles.searchBar}>
+              <Ionicons name="search" size={15} color={colors.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Nom, pseudo, chien ou ville…"
+                placeholderTextColor={colors.textMuted}
+                value={search}
+                onChangeText={setSearch}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch('')}>
+                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.membresFilterRow}>
               <TouchableOpacity style={styles.regionFilterBtn} onPress={() => setRegionPickerVisible(true)}>
                 <Ionicons name="location-outline" size={14} color={colors.terra} />
                 <Text style={styles.regionFilterBtnText}>{regionFilter || 'Toutes les régions'}</Text>
@@ -1655,6 +1734,37 @@ export default function FeedScreen() {
                   </TouchableOpacity>
                 )}
               </TouchableOpacity>
+              <TouchableOpacity style={styles.regionFilterBtn} onPress={() => setDistancePickerVisible(true)}>
+                <Ionicons name="navigate-outline" size={14} color={colors.terra} />
+                <Text style={styles.regionFilterBtnText}>{distanceFilter ? `≤ ${distanceFilter} km` : 'Toutes distances'}</Text>
+                <Ionicons name="chevron-down" size={14} color={colors.terra} />
+                {distanceFilter && (
+                  <TouchableOpacity onPress={() => setDistanceFilter(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={15} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.regionFilterBtn, ambassadeurFilter && styles.regionFilterBtnActive]}
+                onPress={() => setAmbassadeurFilter(v => !v)}
+              >
+                <Ionicons name="star" size={14} color={ambassadeurFilter ? colors.white : colors.terra} />
+                <Text style={[styles.regionFilterBtnText, ambassadeurFilter && styles.regionFilterBtnTextActive]}>Ambassadeurs</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+          <FlatList
+            data={filteredMembres}
+            keyExtractor={m => m.id}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={membresRefreshing}
+                onRefresh={async () => { setMembresRefreshing(true); await loadMembres(); setMembresRefreshing(false); }}
+                tintColor={colors.terra}
+              />
+            }
+            ListHeaderComponent={
               <TouchableOpacity style={styles.findContactsBtn} onPress={findFriendsFromContacts} disabled={contactMatchesLoading}>
                 {contactMatchesLoading ? (
                   <ActivityIndicator size="small" color={colors.terra} />
@@ -1663,9 +1773,8 @@ export default function FeedScreen() {
                 )}
                 <Text style={styles.findContactsBtnText}>Trouver des amis via mes contacts</Text>
               </TouchableOpacity>
-            </>
-          }
-          ListEmptyComponent={
+            }
+            ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>🐾</Text>
               <Text style={styles.emptyText}>Aucun membre pour l'instant.</Text>
@@ -1714,7 +1823,8 @@ export default function FeedScreen() {
               </TouchableOpacity>
             </TouchableOpacity>
           )}
-        />
+          />
+        </>
       )}
 
       {/* Modals */}
@@ -1873,6 +1983,45 @@ export default function FeedScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={distancePickerVisible} animationType="slide" transparent onRequestClose={() => setDistancePickerVisible(false)}>
+        <View style={styles.contactModalOverlay}>
+          <View style={styles.contactModalCard}>
+            <View style={styles.contactModalHeader}>
+              <Text style={styles.contactModalTitle}>Filtrer par distance</Text>
+              <TouchableOpacity onPress={() => setDistancePickerVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {!myLoc && (
+              <Text style={styles.emptyText}>
+                Active ta localisation pour trier et filtrer les membres par distance.
+              </Text>
+            )}
+            <ErrorBoundary label="distance_modal" onClose={() => setDistancePickerVisible(false)}>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={styles.regionOptionRow}
+                onPress={() => { setDistanceFilter(null); setDistancePickerVisible(false); }}
+              >
+                <Text style={[styles.regionOptionText, !distanceFilter && styles.regionOptionTextActive]}>Toutes distances</Text>
+                {!distanceFilter && <Ionicons name="checkmark" size={18} color={colors.terra} />}
+              </TouchableOpacity>
+              {DISTANCE_OPTIONS.map(km => (
+                <TouchableOpacity
+                  key={km}
+                  style={styles.regionOptionRow}
+                  onPress={() => { setDistanceFilter(km); setDistancePickerVisible(false); }}
+                >
+                  <Text style={[styles.regionOptionText, distanceFilter === km && styles.regionOptionTextActive]}>≤ {km} km</Text>
+                  {distanceFilter === km && <Ionicons name="checkmark" size={18} color={colors.terra} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            </ErrorBoundary>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1914,8 +2063,12 @@ const styles = StyleSheet.create({
   suggestFollowBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.ivory },
   findContactsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.white, marginHorizontal: 14, marginTop: 10, marginBottom: 4, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
   findContactsBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
-  regionFilterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: colors.white, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border, marginBottom: 4 },
+  regionFilterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: colors.white, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border },
+  regionFilterBtnActive: { backgroundColor: colors.terra, borderColor: colors.terra },
   regionFilterBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
+  regionFilterBtnTextActive: { color: colors.white },
+  membresFixedHeader: { backgroundColor: colors.ivoryPale, paddingHorizontal: 16, paddingTop: 10 },
+  membresFilterRow: { flexDirection: 'row', gap: 8, paddingBottom: 10 },
   regionOptionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border },
   regionOptionText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
   regionOptionTextActive: { fontFamily: 'DMSans_500Medium', color: colors.terra },
