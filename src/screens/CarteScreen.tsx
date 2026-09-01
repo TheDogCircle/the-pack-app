@@ -670,6 +670,7 @@ export default function CarteScreen() {
   const [baladeDesc, setBaladeDesc] = useState('');
   const [baladeLoading, setBaladeLoading] = useState(false);
   const [baladeFiltres, setBaladeFiltres] = useState<BaladeFiltres>(FILTRES_VIDE);
+  const [baladeSearchFiltres, setBaladeSearchFiltres] = useState<(keyof BaladeFiltres)[]>([]);
   const [baladeVisibilite, setBaladeVisibilite] = useState<'prive' | 'abonnes' | 'public'>('public');
   const [baladePhotoUris, setBaladePhotoUris] = useState<string[]>([]);
   // ── Suivi live (façon Strava) ──
@@ -2127,6 +2128,11 @@ export default function CarteScreen() {
     });
   }, [lieux, filterMinNote, filterEquipements, filterCat, filterDistance, userLat, userLng]);
 
+  const filteredBalades = useMemo(() => {
+    if (!baladeSearchFiltres.length) return balades;
+    return balades.filter(b => baladeSearchFiltres.every(key => (b as any)[key]));
+  }, [balades, baladeSearchFiltres]);
+
   const clusterIndex = useMemo(() => {
     const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 13 });
     index.load(filteredLieux.map(l => ({
@@ -2156,7 +2162,7 @@ export default function CarteScreen() {
     }
   }, [clusterIndex, region]);
 
-  const filterActive = filterMinNote > 0 || filterEquipements.length > 0 || filterCat !== null || filterDistance !== null;
+  const filterActive = filterMinNote > 0 || filterEquipements.length > 0 || filterCat !== null || filterDistance !== null || baladeSearchFiltres.length > 0;
 
   function openFilterModal() {
     setFilterModal(true);
@@ -2168,7 +2174,10 @@ export default function CarteScreen() {
   function toggleEquip(key: string) {
     setFilterEquipements(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   }
-  function resetFilters() { setFilterMinNote(0); setFilterEquipements([]); setFilterCat(null); setFilterDistance(null); }
+  function toggleBaladeSearchFiltre(key: keyof BaladeFiltres) {
+    setBaladeSearchFiltres(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  }
+  function resetFilters() { setFilterMinNote(0); setFilterEquipements([]); setFilterCat(null); setFilterDistance(null); setBaladeSearchFiltres([]); }
 
   function renderFilterModal() {
     if (!filterModal) return null;
@@ -2268,6 +2277,27 @@ export default function CarteScreen() {
                 );
               })}
             </View>
+            {/* Balades */}
+            {showBalades && (
+              <>
+                <Text style={[styles.filterSectionLabel, { marginTop: 20 }]}>BALADES</Text>
+                <View style={styles.filterChipsGrid}>
+                  {FILTRES_DEF.map(f => {
+                    const active = baladeSearchFiltres.includes(f.key);
+                    return (
+                      <TouchableOpacity
+                        key={f.key}
+                        style={[styles.filterEquipChip, active && styles.filterEquipChipActive, active && { backgroundColor: colors.sage, borderColor: colors.sage }]}
+                        onPress={() => toggleBaladeSearchFiltre(f.key)}
+                      >
+                        <Ionicons name={f.icon as IoniconsName} size={15} color={active ? colors.ivory : colors.bordeaux} />
+                        <Text style={[styles.filterEquipLabel, active && { color: colors.ivory }]}>{f.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
           </ScrollView>
           {/* CTA */}
           <View style={{ paddingHorizontal: 20, paddingBottom: 32, paddingTop: 8 }}>
@@ -2276,7 +2306,9 @@ export default function CarteScreen() {
               onPress={closeFilterModal}
             >
               <Text style={styles.filterCTAText}>
-                Afficher {filteredLieux.length} lieu{filteredLieux.length !== 1 ? 'x' : ''}
+                {showBalades
+                  ? `Afficher ${filteredBalades.length} balade${filteredBalades.length !== 1 ? 's' : ''}`
+                  : `Afficher ${filteredLieux.length} lieu${filteredLieux.length !== 1 ? 'x' : ''}`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2830,7 +2862,7 @@ export default function CarteScreen() {
             onPress={() => setSelectedMapEvent(e)}
           />
         ))}
-        {showBalades && !showEvents && balades.map(b => (
+        {showBalades && !showEvents && filteredBalades.map(b => (
           <BaladePin
             key={`bal-${b.id}`}
             latitude={b.depart_lat}
