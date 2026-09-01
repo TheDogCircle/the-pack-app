@@ -17,7 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase, uploadToR2 } from '../lib/supabase';
+import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
@@ -1316,6 +1316,7 @@ export default function CarteScreen() {
   }
 
   async function openFiche(lieu: Lieu) {
+    trackEvent('page_view', 'carte_fiche', { target_type: 'lieu', target_id: lieu.id });
     Keyboard.dismiss();
     setLightboxIdx(null);
     setSheetLoading(true);
@@ -2523,7 +2524,7 @@ export default function CarteScreen() {
                 {(() => { const d = stripTypoPrefix(selectedLieu.description); return d ? <Text style={styles.description}>{d}</Text> : null; })()}
 
                 {selectedLieu.tel ? (
-                  <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(`tel:${selectedLieu.tel}`)}>
+                  <TouchableOpacity style={styles.infoRow} onPress={() => { trackEvent('click', 'carte_fiche', { target_type: 'lieu', target_id: selectedLieu.id, action: 'phone' }); Linking.openURL(`tel:${selectedLieu.tel}`); }}>
                     <Ionicons name="call-outline" size={15} color={colors.textMuted} />
                     <Text style={[styles.infoText, { color: colors.terra }]}>{selectedLieu.tel}</Text>
                   </TouchableOpacity>
@@ -2537,7 +2538,7 @@ export default function CarteScreen() {
                 ) : null}
 
                 {selectedLieu.site_web ? (
-                  <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(selectedLieu.site_web!)}>
+                  <TouchableOpacity style={styles.infoRow} onPress={() => { trackEvent('click', 'carte_fiche', { target_type: 'lieu', target_id: selectedLieu.id, action: 'website' }); Linking.openURL(selectedLieu.site_web!); }}>
                     <Ionicons name="globe-outline" size={15} color={colors.textMuted} />
                     <Text style={[styles.infoText, { color: colors.terra }]} numberOfLines={1}>
                       {selectedLieu.site_web.replace(/^https?:\/\//, '')}
@@ -2568,6 +2569,7 @@ export default function CarteScreen() {
                   <TouchableOpacity
                     style={styles.actionPrimary}
                     onPress={() => {
+                      trackEvent('click', 'carte_fiche', { target_type: 'lieu', target_id: selectedLieu.id, action: 'directions' });
                       const url = `maps://?daddr=${selectedLieu.lat},${selectedLieu.lng}`;
                       Linking.openURL(url).catch(() => Linking.openURL(`https://maps.google.com/?q=${selectedLieu.lat},${selectedLieu.lng}`));
                     }}

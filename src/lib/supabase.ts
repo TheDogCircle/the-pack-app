@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 const SUPABASE_URL = 'https://rdioupfyinxcmjascmcb.supabase.co';
 const SUPABASE_KEY =
@@ -40,3 +41,25 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
     flowType: 'implicit',
   },
 });
+
+const APP_SESSION_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+export function trackEvent(
+  eventType: 'page_view' | 'click',
+  page: string,
+  opts: { target_type?: string; target_id?: string; action?: string } = {}
+) {
+  supabase
+    .from('analytics_events')
+    .insert({
+      event_type: eventType,
+      page,
+      platform: Platform.OS === 'ios' ? 'ios' : 'android',
+      session_id: APP_SESSION_ID,
+      ...opts,
+    })
+    .then(
+      () => {},
+      () => {}
+    );
+}

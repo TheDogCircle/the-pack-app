@@ -8,7 +8,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import { supabase, trackEvent } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -192,6 +192,9 @@ function BrandModal({
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
   useEffect(() => { if (!visible) setRevealed({}); }, [visible]);
+  useEffect(() => {
+    if (visible && partenaire) trackEvent('page_view', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id });
+  }, [visible, partenaire]);
 
   if (!partenaire) return null;
 
@@ -248,7 +251,7 @@ function BrandModal({
         <View style={s.body}>
           <View style={s.linksRow}>
             {partenaire.site_web ? (
-              <TouchableOpacity style={s.siteLink} onPress={() => Linking.openURL(partenaire.site_web!)}>
+              <TouchableOpacity style={s.siteLink} onPress={() => { trackEvent('click', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id, action: 'website' }); Linking.openURL(partenaire.site_web!); }}>
                 <Ionicons name="globe-outline" size={14} color={colors.terra} />
                 <Text style={s.siteLinkText}>Site web</Text>
               </TouchableOpacity>
@@ -318,7 +321,7 @@ function BrandModal({
                       <View style={s.postItemFooter}>
                         {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
                         {post.lien ? (
-                          <TouchableOpacity style={s.ctaBtn} onPress={() => Linking.openURL(post.lien!)}>
+                          <TouchableOpacity style={s.ctaBtn} onPress={() => { trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'offer_cta' }); Linking.openURL(post.lien!); }}>
                             <Text style={s.ctaBtnText}>Voir</Text>
                             <Ionicons name="arrow-forward" size={12} color={colors.ivory} />
                           </TouchableOpacity>
@@ -370,7 +373,7 @@ function BrandModal({
                         ) : (
                           <TouchableOpacity
                             style={s.revealBtn}
-                            onPress={() => setRevealed(prev => ({ ...prev, [post.id]: true }))}
+                            onPress={() => { trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'reveal_code' }); setRevealed(prev => ({ ...prev, [post.id]: true })); }}
                           >
                             <Ionicons name="lock-open-outline" size={14} color={colors.ivory} />
                             <Text style={s.revealBtnText}>Voir le code</Text>
@@ -381,7 +384,7 @@ function BrandModal({
                       <View style={s.postItemFooter}>
                         {periode ? <Text style={s.postItemMeta}>{periode}</Text> : null}
                         {post.lien ? (
-                          <TouchableOpacity style={s.ctaBtn} onPress={() => Linking.openURL(post.lien!)}>
+                          <TouchableOpacity style={s.ctaBtn} onPress={() => { trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'offer_cta' }); Linking.openURL(post.lien!); }}>
                             <Text style={s.ctaBtnText}>Profiter de l'offre</Text>
                             <Ionicons name="arrow-forward" size={12} color={colors.ivory} />
                           </TouchableOpacity>
