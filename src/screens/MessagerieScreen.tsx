@@ -843,13 +843,29 @@ export default function MessagerieScreen({
                 <TouchableOpacity onPress={() => setMembersModalVisible(false)}><Ionicons name="close" size={22} color={colors.textMuted} /></TouchableOpacity>
               </View>
               <ScrollView style={{ maxHeight: 420 }}>
-                {selectedConv.members.map(m => (
-                  <View key={m.user_id} style={s.memberListRow}>
-                    {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
-                    <Text style={s.memberName}>{m.user_id === myUserId ? 'Moi' : m.prenom}</Text>
-                    {m.user_id === selectedConv.created_by && <Text style={s.memberOwnerTag}>Créateur</Text>}
-                  </View>
-                ))}
+                {selectedConv.members.map(m => {
+                  const isMe = m.user_id === myUserId;
+                  const row = (
+                    <View key={m.user_id} style={s.memberListRow}>
+                      {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
+                      <Text style={s.memberName}>{isMe ? 'Moi' : m.prenom}</Text>
+                      {m.user_id === selectedConv.created_by && <Text style={s.memberOwnerTag}>Créateur</Text>}
+                      {!isMe && <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />}
+                    </View>
+                  );
+                  if (isMe) return row;
+                  return (
+                    <TouchableOpacity
+                      key={m.user_id}
+                      onPress={() => {
+                        setMembersModalVisible(false);
+                        navigation.navigate('ProfilPublic', { userId: m.user_id, prenom: m.prenom, avatarUrl: m.avatar_url });
+                      }}
+                    >
+                      {row}
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
           </View>
@@ -1283,7 +1299,7 @@ const s = StyleSheet.create({
   memberAvatar: { width: 40, height: 40, borderRadius: 20 },
   memberAvatarFallback: { backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
   memberAvatarLetter: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
-  memberName: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  memberName: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
   memberNameSelected: { fontFamily: 'DMSans_500Medium', color: colors.terra },
   memberVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   createBtn: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 4 },
