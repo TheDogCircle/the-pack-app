@@ -23,6 +23,7 @@ type Evenement = {
   lat: number | null; lng: number | null;
   max_participants: number | null; payant: boolean; prix: number | null;
   image_url: string | null; images: string[] | null; site_web: string | null;
+  code_promo: string | null; mise_en_avant?: boolean;
   races: string[] | null;
   partenaires_mentions: { type: 'partenaire' | 'instagram'; nom: string; id?: string; logo_url?: string | null; url?: string }[] | null;
   organisateur_id: string | null; valide?: boolean;
@@ -363,6 +364,9 @@ export default function EvenementsScreen() {
     (!villeFilter || e.ville === villeFilter) &&
     (!raceFilter || !e.races?.length || e.races.includes(raceFilter))
   );
+  if (filter !== 'mesEvents') {
+    evenementsAffiches.sort((a, b) => (b.mise_en_avant ? 1 : 0) - (a.mise_en_avant ? 1 : 0));
+  }
 
   return (
     <View style={styles.container}>
@@ -511,6 +515,9 @@ export default function EvenementsScreen() {
                 <View style={styles.cardBody}>
                   {/* Badges */}
                   <View style={styles.badgeRow}>
+                    {e.mise_en_avant && (
+                      <View style={styles.featuredBadge}><Text style={styles.featuredText}>✨ En avant</Text></View>
+                    )}
                     {filter === 'mesEvents' && !e.valide && (
                       <View style={styles.pendingBadge}><Text style={styles.pendingText}>En attente de validation</Text></View>
                     )}
@@ -658,6 +665,12 @@ export default function EvenementsScreen() {
 
                     {selectedEvent.site_web ? (
                       <>
+                        {selectedEvent.code_promo ? (
+                          <View style={styles.promoBox}>
+                            <Text style={styles.promoLabel}>Code promo à utiliser sur leur site</Text>
+                            <Text style={styles.promoCode}>{selectedEvent.code_promo}</Text>
+                          </View>
+                        ) : null}
                         <TouchableOpacity style={styles.joinBtn} onPress={() => Linking.openURL(selectedEvent.site_web!)}>
                           <Text style={styles.joinBtnText}>Voir le site officiel</Text>
                         </TouchableOpacity>
@@ -916,6 +929,8 @@ const styles = StyleSheet.create({
   saveBtnNoImg: { backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border },
   paidBadge: { backgroundColor: '#fce4ec', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   paidText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#c62828' },
+  featuredBadge: { backgroundColor: colors.terra, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  featuredText: { fontFamily: 'DMSans_600SemiBold', fontSize: 10, color: '#fff' },
   freeBadge: { backgroundColor: '#e8f5e9', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   freeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: '#2e7d32' },
   raceBadge: { backgroundColor: 'rgba(196,105,58,0.12)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
@@ -956,6 +971,12 @@ const styles = StyleSheet.create({
   modalInfoMain: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.textMid },
   modalInfoSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   modalDesc: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 22, marginBottom: 20 },
+  promoBox: {
+    backgroundColor: colors.terra + '14', borderWidth: 1, borderColor: colors.terra, borderStyle: 'dashed',
+    borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 8,
+  },
+  promoLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
+  promoCode: { fontFamily: 'DMSans_600SemiBold', fontSize: 17, color: colors.terra, letterSpacing: 1 },
   joinBtn: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 8 },
   joinBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
   externalNote: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 8 },
