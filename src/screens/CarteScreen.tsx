@@ -189,6 +189,7 @@ type LieuFull = Lieu & {
   petits_chiens: boolean | null; moyens_chiens: boolean | null; grands_chiens: boolean | null;
   manager_user_id: string | null; google_photo_url: string | null;
   plan: string | null;
+  ferme?: boolean | null;
 };
 // react-native-maps prend un instantane statique du contenu des marqueurs
 // personnalises (tracksViewChanges) plutot que de les re-rendre en continu, pour la
@@ -2519,6 +2520,12 @@ export default function CarteScreen() {
                 {[selectedLieu.adresse, selectedLieu.ville].filter(Boolean).join(' · ')}
               </Text>
             ) : null}
+            {selectedLieu.ferme ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, alignSelf: 'flex-start', backgroundColor: 'rgba(211,47,47,0.10)', borderRadius: 8, paddingVertical: 5, paddingHorizontal: 10 }}>
+                <Ionicons name="close-circle" size={13} color="#c62828" />
+                <Text style={{ fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: '#c62828' }}>Fermé définitivement</Text>
+              </View>
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
               {selectedLieu.note_moyenne ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -2563,7 +2570,7 @@ export default function CarteScreen() {
 
                 {(() => { const d = stripTypoPrefix(selectedLieu.description); return d ? <Text style={styles.description}>{d}</Text> : null; })()}
 
-                {selectedLieu.tel ? (
+                {(!selectedLieu.ferme && selectedLieu.tel) ? (
                   <TouchableOpacity style={styles.infoRow} onPress={() => { trackEvent('click', 'carte_fiche', { target_type: 'lieu', target_id: selectedLieu.id, action: 'phone' }); Linking.openURL(`tel:${selectedLieu.tel}`); }}>
                     <Ionicons name="call-outline" size={15} color={colors.textMuted} />
                     <Text style={[styles.infoText, { color: colors.terra }]}>{selectedLieu.tel}</Text>
@@ -2577,7 +2584,7 @@ export default function CarteScreen() {
                   </View>
                 ) : null}
 
-                {selectedLieu.site_web ? (
+                {(!selectedLieu.ferme && selectedLieu.site_web) ? (
                   <TouchableOpacity style={styles.infoRow} onPress={() => { trackEvent('click', 'carte_fiche', { target_type: 'lieu', target_id: selectedLieu.id, action: 'website' }); Linking.openURL(selectedLieu.site_web!); }}>
                     <Ionicons name="globe-outline" size={15} color={colors.textMuted} />
                     <Text style={[styles.infoText, { color: colors.terra }]} numberOfLines={1}>
@@ -2617,7 +2624,7 @@ export default function CarteScreen() {
                     <Ionicons name="navigate" size={16} color={colors.ivory} />
                     <Text style={styles.actionPrimaryText}>Itinéraire</Text>
                   </TouchableOpacity>
-                  {selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
+                  {!selectedLieu.ferme && selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
                     <TouchableOpacity
                       style={styles.actionReserver}
                       onPress={() => navigation.navigate('Booking', { lieuId: selectedLieu.id, lieuNom: selectedLieu.nom })}
