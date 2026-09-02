@@ -301,15 +301,18 @@ export default function MessagerieScreen({
         user_id: m.user_id, prenom: pm[m.user_id]?.prenom || 'Membre', avatar_url: pm[m.user_id]?.avatar_url || null,
       });
     });
-    const lastMsgResults = await Promise.all(
-      convIds.map((cid: string) =>
-        supabase.from('messages').select('contenu,image_url,created_at,user_id')
-          .eq('conversation_id', cid).eq('actif', true)
-          .order('created_at', { ascending: false }).limit(1)
-      )
-    );
+    // Une requete par conversation ici tirait autant de requetes reseau sequentielles/
+    // paralleles que de conversations (N+1), ralentissant fortement le chargement de la
+    // liste des qu'on est dans plusieurs groupes. Une seule requete batchee sur les
+    // messages recents de toutes les conversations, groupee cote client, suffit tant que
+    // chaque conversation a au moins un message parmi les 500 plus recents (largement
+    // le cas en pratique).
+    const { data: recentMsgs } = await supabase.from('messages')
+      .select('conversation_id,contenu,image_url,created_at,user_id')
+      .in('conversation_id', convIds).eq('actif', true)
+      .order('created_at', { ascending: false }).limit(500);
     const lastMessages: Record<string, any> = {};
-    convIds.forEach((cid: string, i: number) => { if (lastMsgResults[i].data?.[0]) lastMessages[cid] = lastMsgResults[i].data![0]; });
+    (recentMsgs || []).forEach((m: any) => { if (!lastMessages[m.conversation_id]) lastMessages[m.conversation_id] = m; });
     const list: Conversation[] = (convData || []).map((c: any) => ({
       id: c.id, nom: c.nom, created_by: c.created_by,
       members: membersByConv[c.id] || [],
@@ -327,8 +330,16 @@ export default function MessagerieScreen({
   async function openConversation(conv: Conversation) {
     setSelectedConv(conv);
     setMsgLoading(true);
-    await loadMessages(conv.id);
-    setMsgLoading(false);
+    try {
+      await loadMessages(conv.id);
+    } catch (e: any) {
+      // Sans ce catch, la moindre erreur reseau ici (timeout, connexion coupee...)
+      // laissait msgLoading bloque a true pour toujours -- roulette infinie sans
+      // aucun moyen de s'en sortir a part relancer l'app.
+      Alert.alert('Erreur', "Impossible de charger la conversation. Vérifie ta connexion et réessaie.");
+    } finally {
+      setMsgLoading(false);
+    }
     if (channelRef.current) channelRef.current.unsubscribe();
     channelRef.current = supabase.channel(`conv:${conv.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
