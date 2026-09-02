@@ -524,12 +524,20 @@ const dstyles = StyleSheet.create({
 
 async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string>> {
   if (!ids.length) return {};
-  const { data } = await supabase
-    .from('photos').select('lieu_id,url')
-    .in('lieu_id', ids).eq('validee', true)
-    .order('created_at', { ascending: false });
+  // .in('lieu_id', ids) sur une longue liste d'ids depasse la limite de longueur
+  // d'URL de PostgREST (echec silencieux au-dela d'environ 650-700 uuids) : on
+  // decoupe en lots pour rester tres en dessous du seuil observe.
+  const CHUNK_SIZE = 150;
   const map: Record<string, string> = {};
-  (data || []).forEach((p: any) => { if (!map[p.lieu_id]) map[p.lieu_id] = p.url; });
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from('photos').select('lieu_id,url')
+      .in('lieu_id', chunk).eq('validee', true)
+      .order('created_at', { ascending: false });
+    if (error) { console.warn('[fetchPhotosForLieux] chunk failed:', error.message); continue; }
+    (data || []).forEach((p: any) => { if (!map[p.lieu_id]) map[p.lieu_id] = p.url; });
+  }
   return map;
 }
 
