@@ -494,6 +494,13 @@ export default function ProfilScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Mes rendez-vous */}
+      <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.8}>
+        <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+        <Text style={styles.resaBannerText}>Mes rendez-vous</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </TouchableOpacity>
+
       {/* Demandes en attente */}
       {pendingRequests.length > 0 && (
         <View style={styles.pendingSection}>
@@ -968,6 +975,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
   },
   shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  resaBannerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    paddingVertical: 12, paddingHorizontal: 14, marginHorizontal: 16, marginBottom: 10,
+  },
+  resaBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   explorateurCard: {
     marginHorizontal: 16, marginBottom: 16, height: 100, borderRadius: 16, overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,

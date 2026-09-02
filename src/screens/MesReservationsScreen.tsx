@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
@@ -13,6 +15,7 @@ type Reservation = {
   id: string;
   date: string;
   heure_debut: string;
+  heure_fin: string;
   statut: string;
   statut_paiement: string;
   montant_ht: number;
@@ -20,6 +23,44 @@ type Reservation = {
   lieux: { nom: string } | null;
   prestations: { nom: string } | null;
 };
+
+// Format .ics universel (Apple Calendar, Google Calendar, tout client compatible RFC 5545) --
+// evite d'avoir a integrer deux SDK/OAuth differents pour un simple ajout d'evenement.
+function icsDate(date: string, heure: string): string {
+  return `${date.replace(/-/g, '')}T${heure.replace(/:/g, '').slice(0, 6)}Z`;
+}
+function icsEscape(text: string): string {
+  return text.replace(/[\\,;]/g, m => '\\' + m).replace(/\n/g, '\\n');
+}
+function buildIcs(resa: Reservation): string {
+  const summary = icsEscape([resa.prestations?.nom, resa.lieux?.nom].filter(Boolean).join(' — ') || 'Rendez-vous The Pack La Meute');
+  const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//The Pack La Meute//FR',
+    'BEGIN:VEVENT',
+    `UID:${resa.id}@thepacklameute.fr`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${icsDate(resa.date, resa.heure_debut)}`,
+    `DTEND:${icsDate(resa.date, resa.heure_fin || resa.heure_debut)}`,
+    `SUMMARY:${summary}`,
+    'DESCRIPTION:Rendez-vous pris via The Pack La Meute',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+async function addToCalendar(resa: Reservation) {
+  try {
+    const uri = FileSystem.cacheDirectory + `rdv-${resa.id}.ics`;
+    await FileSystem.writeAsStringAsync(uri, buildIcs(resa));
+    const canShare = await Sharing.isAvailableAsync();
+    if (!canShare) { Alert.alert('Indisponible', "Le partage n'est pas disponible sur cet appareil."); return; }
+    await Sharing.shareAsync(uri, { mimeType: 'text/calendar', dialogTitle: 'Ajouter au calendrier', UTI: 'com.apple.ical.ics' });
+  } catch (e: any) {
+    Alert.alert('Erreur', "Impossible de générer l'événement calendrier.");
+  }
+}
 
 const STATUT_LABELS: Record<string, { label: string; color: string }> = {
   en_attente: { label: 'En attente de paiement', color: colors.textMuted },
@@ -48,7 +89,7 @@ export default function MesReservationsScreen() {
     if (!session) return;
     const { data } = await supabase
       .from('reservations')
-      .select('id, date, heure_debut, statut, statut_paiement, montant_ht, montant_rembourse, lieux(nom), prestations(nom)')
+      .select('id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, montant_rembourse, lieux(nom), prestations(nom)')
       .eq('user_id', session.user.id)
       .order('date', { ascending: false })
       .order('heure_debut', { ascending: false });
@@ -145,17 +186,25 @@ export default function MesReservationsScreen() {
                 <Text style={styles.previewText}>Si annulation maintenant : {preview.label.toLowerCase()}</Text>
               )}
 
-              {estAnnulable && (
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  disabled={cancellingId === resa.id}
-                  onPress={() => handleCancel(resa)}
-                >
-                  {cancellingId === resa.id
-                    ? <ActivityIndicator color="#C62828" size="small" />
-                    : <Text style={styles.cancelBtnText}>Annuler ce RDV</Text>}
-                </TouchableOpacity>
-              )}
+              <View style={styles.actionsRow}>
+                {resa.statut === 'confirmee' && (
+                  <TouchableOpacity style={styles.calendarBtn} onPress={() => addToCalendar(resa)}>
+                    <Ionicons name="calendar-outline" size={13} color={colors.bordeaux} />
+                    <Text style={styles.calendarBtnText}>Ajouter au calendrier</Text>
+                  </TouchableOpacity>
+                )}
+                {estAnnulable && (
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    disabled={cancellingId === resa.id}
+                    onPress={() => handleCancel(resa)}
+                  >
+                    {cancellingId === resa.id
+                      ? <ActivityIndicator color="#C62828" size="small" />
+                      : <Text style={styles.cancelBtnText}>Annuler ce RDV</Text>}
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           );
         })
@@ -182,8 +231,15 @@ const styles = StyleSheet.create({
   metaText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, textTransform: 'capitalize' },
   refundedText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.sage, marginTop: 4 },
   previewText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 4 },
+  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  calendarBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8,
+    borderWidth: 1.5, borderColor: colors.border,
+  },
+  calendarBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
   cancelBtn: {
-    marginTop: 10, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14,
+    alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 14,
     borderRadius: 8, borderWidth: 1.5, borderColor: '#C62828',
   },
   cancelBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: '#C62828' },
