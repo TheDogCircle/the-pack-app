@@ -196,25 +196,44 @@ type LieuFull = Lieu & {
 // performance. Sur certains appareils/versions Android, cet instantane peut etre
 // pris avant que le rond colore + l'icone aient fini de se dessiner (independamment
 // du chargement des polices, deja precharge par ailleurs), ne laissant que la pointe
-// du repere visible en permanence. Ce hook force donc tracksViewChanges a true
-// pendant une courte fenetre apres le montage, le temps qu'un instantane fiable
-// soit pris, avant de repasser en mode statique.
-function useSettledTracking(forceTrack: boolean): boolean {
+// du repere visible en permanence -- et un simple minuteur fixe reste fragile : sur
+// un appareil bas de gamme ou avec beaucoup de marqueurs qui montent en meme temps
+// (ouverture de la carte, eclatement d'un cluster), 700ms peut ne pas suffire, et
+// tracksViewChanges peut aussi rater son effet a cause du batching des mises a jour
+// natives. En plus du minuteur (qui garde le tracking actif un peu plus longtemps),
+// on appelle donc explicitement Marker.redraw() -- l'API imperative documentee par
+// react-native-maps precisement pour ce cas : elle force une regeneration native du
+// bitmap independamment de l'etat React, a deux reprises pour couvrir aussi bien le
+// cas normal que les appareils lents.
+function useSettledTracking(forceTrack: boolean): { tracksViewChanges: boolean; markerRef: React.RefObject<any> } {
   const [settled, setSettled] = useState(false);
+  // Type assoupli a `any` : les types de react-native-maps pour Marker (RefObject<MapMarker>,
+  // sans null) sont incompatibles avec le RefObject<T|null> renvoye par useRef sous les
+  // @types/react recents -- seul redraw() est appele dessus, deja protege par l'optional
+  // chaining plus bas, donc pas de risque a l'assouplir ici plutot que de forcer un cast
+  // a chaque site d'utilisation (4 composants).
+  const markerRef = useRef<any>(null);
   useEffect(() => {
-    const t = setTimeout(() => setSettled(true), 700);
-    return () => clearTimeout(t);
+    const t1 = setTimeout(() => {
+      setSettled(true);
+      if (Platform.OS === 'android') markerRef.current?.redraw();
+    }, 1000);
+    const t2 = setTimeout(() => {
+      if (Platform.OS === 'android') markerRef.current?.redraw();
+    }, 1800);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
-  return forceTrack || !settled;
+  return { tracksViewChanges: forceTrack || !settled, markerRef };
 }
 
 function LieuMarker({ lieu, isSelected, forceTrack, onPress }: { lieu: Lieu; isSelected: boolean; forceTrack: boolean; onPress: () => void }) {
-  const tracksViewChanges = useSettledTracking(isSelected || forceTrack);
+  const { tracksViewChanges, markerRef } = useSettledTracking(isSelected || forceTrack);
   const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
   const size = isSelected ? 44 : 34;
   const iconSize = isSelected ? 22 : 16;
   return (
     <Marker
+      ref={markerRef}
       coordinate={{ latitude: lieu.lat, longitude: lieu.lng }}
       onPress={onPress}
       tracksViewChanges={tracksViewChanges}
@@ -232,9 +251,9 @@ function LieuMarker({ lieu, isSelected, forceTrack, onPress }: { lieu: Lieu; isS
 }
 
 function MapEventPin({ latitude, longitude, isSelected, onPress }: { latitude: number; longitude: number; isSelected: boolean; onPress: () => void }) {
-  const tracksViewChanges = useSettledTracking(isSelected);
+  const { tracksViewChanges, markerRef } = useSettledTracking(isSelected);
   return (
-    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
+    <Marker ref={markerRef} coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
       <View style={styles.eventPin}>
         <View style={[styles.eventBubble, isSelected && styles.eventBubbleSelected]}>
           <Ionicons name="calendar" size={14} color="#fff" />
@@ -246,9 +265,9 @@ function MapEventPin({ latitude, longitude, isSelected, onPress }: { latitude: n
 }
 
 function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: number; longitude: number; isSelected: boolean; onPress: () => void }) {
-  const tracksViewChanges = useSettledTracking(isSelected);
+  const { tracksViewChanges, markerRef } = useSettledTracking(isSelected);
   return (
-    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
+    <Marker ref={markerRef} coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
       <View style={styles.baladePin}>
         <View style={[styles.baladeBubble, isSelected && styles.baladeBubbleSelected]}>
           <Ionicons name="walk-outline" size={16} color="#fff" />
@@ -260,10 +279,10 @@ function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: num
 }
 
 function ClusterMarker({ latitude, longitude, pointCount, onPress }: { latitude: number; longitude: number; pointCount: number; onPress: () => void }) {
-  const tracksViewChanges = useSettledTracking(false);
+  const { tracksViewChanges, markerRef } = useSettledTracking(false);
   const size = pointCount >= 10 ? 48 : 40;
   return (
-    <Marker coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 0.5 }} onPress={onPress}>
+    <Marker ref={markerRef} coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 0.5 }} onPress={onPress}>
       <View style={[styles.clusterBubble, { width: size, height: size, borderRadius: size / 2 }]}>
         <View style={styles.markerShine} />
         <Text style={styles.clusterText}>{pointCount}</Text>
