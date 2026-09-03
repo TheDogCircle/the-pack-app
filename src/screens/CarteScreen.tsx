@@ -2854,13 +2854,24 @@ export default function CarteScreen() {
         style={styles.map}
         initialRegion={region}
         onRegionChangeComplete={r => {
-          setRegion(r);
+          // onRegionChangeComplete se declenche plusieurs fois pendant un seul geste de
+          // pincement continu (pas uniquement une fois le geste termine) -- react-native-maps
+          // le remonte a chaque "batch" de changement livre par le natif. Comme `region` pilote
+          // directement le recalcul des clusters Supercluster ci-dessous, et que ce recalcul
+          // change les cluster_id (donc les `key` des <Marker>), un setRegion() synchrone ici
+          // provoquait un demontage/remontage des marqueurs a CHAQUE micro-etape du zoom -- et
+          // chaque remontage relance le cycle de stabilisation `tracksViewChanges` (1 a 1.8s sur
+          // Android, cf useSettledTracking plus haut), d'ou les bulles qui semblaient disparaitre
+          // puis reapparaitre pendant le zoom/dezoom. En debounçant setRegion (et non plus
+          // seulement le fetch reseau), les nombreux evenements intermediaires d'un meme geste
+          // sont regroupes en un seul recalcul de clusters une fois le geste stabilise.
           if (regionTimer.current) clearTimeout(regionTimer.current);
           regionTimer.current = setTimeout(() => {
+            setRegion(r);
             if (skipNextFetchRef.current) { skipNextFetchRef.current = false; return; }
             if (!favFilter) fetchLieux(r, activeCat);
             if (showBalades) fetchBalades(r);
-          }, 600);
+          }, 350);
         }}
         onLongPress={handleMapLongPress}
         showsUserLocation
