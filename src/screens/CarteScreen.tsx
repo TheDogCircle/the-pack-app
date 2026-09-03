@@ -778,47 +778,69 @@ export default function CarteScreen() {
     action();
   }
 
+  const openLieuById = useCallback((lieuId: string) => {
+    supabase.from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis')
+      .eq('id', lieuId).single()
+      .then(({ data }) => { if (data) openFiche(data as Lieu); });
+  }, []);
+
+  const openBaladeById = useCallback((baladeId: string) => {
+    supabase.from('balades')
+      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
+      .eq('id', baladeId)
+      .single()
+      .then(({ data, error }) => {
+        if (data && !error) {
+          setListView(false);
+          setShowBalades(true);
+          setSelectedBalade(data as Balade);
+          const trace = (data as any).trace as { latitude: number; longitude: number }[] | null;
+          if (trace && trace.length > 1) {
+            mapRef.current?.fitToCoordinates(trace, {
+              edgePadding: { top: 80, right: 60, bottom: 340, left: 60 },
+              animated: true,
+            });
+          } else {
+            mapRef.current?.animateToRegion({
+              latitude: data.depart_lat,
+              longitude: data.depart_lng,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            }, 800);
+          }
+        }
+      });
+  }, []);
+
+  const openProposeByName = useCallback((name: string) => {
+    setProposeNom(name);
+    setProposeModal(true);
+  }, []);
+
+  // navigate('Tabs', { screen: 'Carte' }) est un no-op silencieux si Carte est deja
+  // l'onglet actif -- aucun focus ne se redeclenche alors, donc ce useFocusEffect seul
+  // (utile au tout premier montage) peut ne jamais recevoir le lieu/la balade en attente
+  // dans ce cas. L'abonnement direct ci-dessous couvre ce cas : des que la notif est
+  // tapee, si CarteScreen est deja monte, l'action s'execute immediatement.
   useFocusEffect(useCallback(() => {
     const lieuId = mapNavigation.consume();
-    if (lieuId) {
-      supabase.from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis')
-        .eq('id', lieuId).single()
-        .then(({ data }) => { if (data) openFiche(data as Lieu); });
-    }
+    if (lieuId) openLieuById(lieuId);
     const baladeId = mapNavigation.consumeBalade();
-    if (baladeId) {
-      supabase.from('balades')
-        .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
-        .eq('id', baladeId)
-        .single()
-        .then(({ data, error }) => {
-          if (data && !error) {
-            setListView(false);
-            setShowBalades(true);
-            setSelectedBalade(data as Balade);
-            const trace = (data as any).trace as { latitude: number; longitude: number }[] | null;
-            if (trace && trace.length > 1) {
-              mapRef.current?.fitToCoordinates(trace, {
-                edgePadding: { top: 80, right: 60, bottom: 340, left: 60 },
-                animated: true,
-              });
-            } else {
-              mapRef.current?.animateToRegion({
-                latitude: data.depart_lat,
-                longitude: data.depart_lng,
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05,
-              }, 800);
-            }
-          }
-        });
-    }
+    if (baladeId) openBaladeById(baladeId);
     const proposeName = mapNavigation.consumePropose();
-    if (proposeName) {
-      setProposeNom(proposeName);
-      setProposeModal(true);
-    }
-  }, []));
+    if (proposeName) openProposeByName(proposeName);
+  }, [openLieuById, openBaladeById, openProposeByName]));
+
+  useEffect(() => {
+    mapNavigation.onLieuPending(openLieuById);
+    mapNavigation.onBaladePending(openBaladeById);
+    mapNavigation.onProposePending(openProposeByName);
+    return () => {
+      mapNavigation.onLieuPending(null);
+      mapNavigation.onBaladePending(null);
+      mapNavigation.onProposePending(null);
+    };
+  }, [openLieuById, openBaladeById, openProposeByName]);
 
   useEffect(() => {
     // Chargement initial sur la region par defaut, independant du GPS : on ne peut pas

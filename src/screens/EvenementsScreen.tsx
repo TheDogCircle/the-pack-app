@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, ScrollView,
@@ -88,18 +88,34 @@ export default function EvenementsScreen() {
 
   useEffect(() => { setModalPhotoIndex(0); }, [selectedEvent?.id]);
 
-  // Ouvre directement un evenement quand on arrive via une notification
+  // Ouvre directement un evenement quand on arrive via une notification.
+  // navigate('Tabs', { screen: 'Events' }) est un no-op silencieux si Events est deja
+  // l'onglet actif, et cet effet ne se redeclenche de toute facon que si `evenements`
+  // change (pas a chaque navigation) -- dans les deux cas l'id en attente pouvait ne
+  // jamais etre consomme. L'abonnement direct plus bas couvre ces cas : il s'execute
+  // des que la notif est tapee, sans dependre d'un focus ou d'un changement de liste.
+  const openEventById = useCallback((pendingId: string) => {
+    setEvenements(current => {
+      const found = current.find(e => e.id === pendingId);
+      if (found) { setSelectedEvent(found); return current; }
+      // Pas dans la liste actuelle (filtre different) : on va le chercher directement
+      supabase.from('evenements')
+        .select('*, profils(prenom, username, avatar_url)')
+        .eq('id', pendingId).maybeSingle()
+        .then(({ data }) => { if (data) setSelectedEvent(data as Evenement); });
+      return current;
+    });
+  }, []);
+
   useEffect(() => {
     const pendingId = mapNavigation.consumeEvent();
-    if (!pendingId) return;
-    const found = evenements.find(e => e.id === pendingId);
-    if (found) { setSelectedEvent(found); return; }
-    // Pas dans la liste actuelle (filtre different) : on va le chercher directement
-    supabase.from('evenements')
-      .select('*, profils(prenom, username, avatar_url)')
-      .eq('id', pendingId).maybeSingle()
-      .then(({ data }) => { if (data) setSelectedEvent(data as Evenement); });
-  }, [evenements]);
+    if (pendingId) openEventById(pendingId);
+  }, [evenements, openEventById]);
+
+  useEffect(() => {
+    mapNavigation.onEventPending(openEventById);
+    return () => mapNavigation.onEventPending(null);
+  }, [openEventById]);
 
   async function load() {
     setLoading(true);

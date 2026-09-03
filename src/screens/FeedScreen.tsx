@@ -906,6 +906,16 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
 
   // Notification "message" tapee : bascule sur l'onglet Chat et ouvre la conversation
   // Notification "photo_like" tapee : bascule sur l'onglet Feed et ouvre la photo/le post
+  //
+  // navigate('Tabs', { screen: 'Meute' }) est un no-op silencieux quand l'onglet Meute
+  // est deja actif (cas frequent : on est deja dans Chat/Feed en tapant la notif) --
+  // aucun focus ne se redeclenche alors, donc ce useFocusEffect seul ne recevait jamais
+  // la conversation/le post en attente dans ce cas precis. En plus de ce useFocusEffect
+  // (utile au tout premier montage, avant que l'abonnement ci-dessous n'existe), on
+  // s'abonne aussi directement a mapNavigation des le montage : des que la notif est
+  // tapee, si FeedScreen est deja monte (quasi toujours vrai, un onglet reste monte une
+  // fois visite), la conversation/le post s'ouvre immediatement, sans dependre d'un
+  // evenement de focus qui peut ne jamais arriver.
   useFocusEffect(useCallback(() => {
     const cid = mapNavigation.consumeConversation();
     supabase.from('push_debug_logs').insert({
@@ -916,6 +926,19 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
     const pid = mapNavigation.consumePost();
     if (pid) { selectTab('feed'); setPendingPostId(pid); }
   }, []));
+
+  useEffect(() => {
+    mapNavigation.onConversationPending((cid) => {
+      supabase.from('push_debug_logs').insert({
+        to_token: 'FEED_SUBSCRIBE', title: 'FeedScreen onConversationPending',
+        detail: JSON.stringify({ conversationId: cid }),
+      }).then(() => {}, () => {});
+      selectTab('messages');
+      setPendingConvId(cid);
+    });
+    mapNavigation.onPostPending((pid) => { selectTab('feed'); setPendingPostId(pid); });
+    return () => { mapNavigation.onConversationPending(null); mapNavigation.onPostPending(null); };
+  }, []);
 
   // Feed
   const [posts, setPosts] = useState<CommunityPost[]>([]);
