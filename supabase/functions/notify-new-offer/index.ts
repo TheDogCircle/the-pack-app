@@ -17,8 +17,22 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  const { data: lieu } = await supabase.from('lieux').select('nom, manager_user_id').eq('id', record.lieu_id).maybeSingle();
+  const { data: lieu } = await supabase.from('lieux').select('nom, manager_user_id, last_offer_notif_at').eq('id', record.lieu_id).maybeSingle();
   const lieuNom = lieu?.nom || 'un partenaire';
+
+  // Anti-spam : un pro peut creer autant de prestations qu'il veut (aucune validation
+  // admin sur ce chemin), et chaque insertion active declenchait jusqu'ici une diffusion
+  // push a toute la base opt-in. On limite a une diffusion "nouvelle offre" par lieu
+  // toutes les 24h -- la prestation est bien creee dans tous les cas, seule la
+  // notification est retenue.
+  const OFFER_NOTIF_COOLDOWN_HOURS = 24;
+  if (lieu?.last_offer_notif_at) {
+    const elapsedHours = (Date.now() - new Date(lieu.last_offer_notif_at).getTime()) / 3_600_000;
+    if (elapsedHours < OFFER_NOTIF_COOLDOWN_HOURS) {
+      console.log(`[notify-new-offer] throttled: derniere diffusion il y a ${elapsedHours.toFixed(1)}h pour ce lieu`);
+      return new Response(JSON.stringify({ sent: 0, reason: 'throttled' }), { status: 200 });
+    }
+  }
 
   // Garde-fou : les lieux geres par un compte de test ne notifient jamais le
   // grand public, seulement l'appareil de test dedie.
@@ -71,6 +85,13 @@ serve(async (req) => {
     });
     const expoJson = await expoRes.json();
     console.log('[notify-new-offer] expo response batch', Math.floor(i / 100), ':', JSON.stringify(expoJson).slice(0, 500));
+  }
+
+  // Le cooldown ne concerne que les vraies diffusions publiques -- un envoi de test
+  // (isTestLieu) reste isole a l'appareil de test dedie et ne doit pas bloquer la
+  // prochaine vraie annonce pour ce lieu.
+  if (!isTestLieu) {
+    await supabase.from('lieux').update({ last_offer_notif_at: new Date().toISOString() }).eq('id', record.lieu_id);
   }
 
   return new Response(JSON.stringify({ sent: messages.length }), { status: 200 });
