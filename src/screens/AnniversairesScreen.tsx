@@ -13,6 +13,7 @@ type BirthdayRow = {
   ownerPrenom: string;
   ownerAvatarUrl: string | null;
   daysUntil: number;
+  ageTurning: number;
 };
 
 function isLeapYear(y: number): boolean {
@@ -35,6 +36,12 @@ function daysUntilLabel(daysUntil: number): string {
   if (daysUntil === 0) return "Aujourd'hui";
   if (daysUntil === 1) return 'Demain';
   return `Dans ${daysUntil} jours`;
+}
+
+function ageLabel(daysUntil: number, ageTurning: number): string {
+  const plural = ageTurning > 1 ? 's' : '';
+  if (daysUntil === 0) return `${ageTurning} an${plural} aujourd'hui 🎉`;
+  return `Bientôt ${ageTurning} an${plural}`;
 }
 
 export default function AnniversairesScreen() {
@@ -82,6 +89,7 @@ export default function AnniversairesScreen() {
     const computed: BirthdayRow[] = dogs.map((d: any) => {
       const next = nextOccurrence(d.date_naissance_parsed);
       const daysUntil = Math.round((next.getTime() - todayMidnight.getTime()) / 86_400_000);
+      const birthYear = Number(d.date_naissance_parsed.slice(0, 4));
       const owner = profilMap.get(d.user_id);
       return {
         chienId: d.id,
@@ -90,6 +98,7 @@ export default function AnniversairesScreen() {
         ownerPrenom: owner?.prenom || 'un copain',
         ownerAvatarUrl: owner?.avatar_url ?? null,
         daysUntil,
+        ageTurning: next.getFullYear() - birthYear,
       };
     });
 
@@ -149,6 +158,9 @@ export default function AnniversairesScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.dogName}>{row.nomChien}</Text>
               <Text style={styles.ownerName}>chez {row.ownerPrenom}</Text>
+              <Text style={[styles.ageText, row.daysUntil === 0 && styles.ageTextToday]}>
+                {ageLabel(row.daysUntil, row.ageTurning)}
+              </Text>
             </View>
             <View style={[styles.badge, row.daysUntil === 0 && styles.badgeToday]}>
               <Text style={[styles.badgeText, row.daysUntil === 0 && styles.badgeTextToday]}>
@@ -184,6 +196,8 @@ const styles = StyleSheet.create({
   avatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.ivory },
   dogName: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux },
   ownerName: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  ageText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginTop: 3 },
+  ageTextToday: { color: colors.bordeaux, fontFamily: 'DMSans_600SemiBold' },
   badge: {
     paddingVertical: 5, paddingHorizontal: 10, borderRadius: 20,
     backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border,
