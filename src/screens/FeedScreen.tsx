@@ -835,7 +835,7 @@ function NewPostModal({
 
 // ─── FeedScreen ───────────────────────────────────────────────────────────────
 
-export default function FeedScreen() {
+export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?: () => React.ReactNode } = {}) {
   const navigation = useNavigation<any>();
   const { session, loading: sessionLoading } = useSession();
   const [tab, setTab] = useState<'feed' | 'messages' | 'membres'>('feed');
@@ -1598,6 +1598,7 @@ export default function FeedScreen() {
         <MessagerieScreen
           pendingConversationId={pendingConvId}
           onConsumedPendingConversation={() => setPendingConvId(null)}
+          defaultHeaderRight={defaultHeaderRight}
         />
 
       /* Feed */

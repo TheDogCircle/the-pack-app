@@ -137,8 +137,8 @@ function GroupeCard({
 // ── Main screen ──────────────────────────────────────────────────────────────
 
 export default function MessagerieScreen({
-  pendingConversationId, onConsumedPendingConversation,
-}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void } = {}) {
+  pendingConversationId, onConsumedPendingConversation, defaultHeaderRight,
+}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode } = {}) {
   const navigation = useNavigation<any>();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
@@ -273,8 +273,18 @@ export default function MessagerieScreen({
         ),
       });
     } else {
-      navigation.setOptions({ title: 'La Meute', headerLeft: undefined, headerRight: undefined });
+      // Cette navigation est en realite celle de l'onglet Meute parent (MessagerieScreen
+      // n'est pas sa propre Screen, juste un composant rendu dans FeedScreen) -- remettre
+      // headerRight a undefined ici effacait silencieusement le coeur d'activite du header
+      // Meute des qu'on revenait a la liste des conversations, sans jamais le restaurer.
+      navigation.setOptions({ title: 'La Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
     }
+    // Demonte quand on quitte l'onglet Chat de FeedScreen (rendu conditionnel) : sans ce
+    // cleanup, le header restait bloque sur l'etat "conversation fermee" (donc sans coeur)
+    // meme apres avoir quitte cet onglet.
+    return () => {
+      navigation.setOptions({ title: 'Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
+    };
   }, [selectedConv, myMuted]);
 
   // ── Conversations ──

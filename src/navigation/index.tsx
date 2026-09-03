@@ -56,6 +56,19 @@ const TAB_ICONS: Record<string, { active: IoniconsName; inactive: IoniconsName }
   Profil:      { active: 'person-circle',   inactive: 'person-circle-outline' },
 };
 
+function renderMeuteHeartButton(navigation: any, activityBadge: boolean, setActivityBadge: (v: boolean) => void) {
+  return (
+    <TouchableOpacity
+      style={headerStyles.heartBtn}
+      onPress={() => { setActivityBadge(false); navigation.navigate('Activite' as any); }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      <Ionicons name="heart-outline" size={22} color={colors.ivory} />
+      {activityBadge ? <View style={headerStyles.heartDot} /> : null}
+    </TouchableOpacity>
+  );
+}
+
 function MainTabs() {
   const { session } = useSession();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -192,23 +205,26 @@ function MainTabs() {
     >
       <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
       <Tab.Screen
-        name="Meute" component={FeedScreen}
+        name="Meute"
         options={({ navigation }) => ({
           title: 'Meute',
           tabBarBadge: meuteBadge ? ' ' : undefined,
-          headerRight: () => (
-            <TouchableOpacity
-              style={headerStyles.heartBtn}
-              onPress={() => { setActivityBadge(false); navigation.navigate('Activite' as any); }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="heart-outline" size={22} color={colors.ivory} />
-              {activityBadge ? <View style={headerStyles.heartDot} /> : null}
-            </TouchableOpacity>
-          ),
+          headerRight: () => renderMeuteHeartButton(navigation, activityBadge, setActivityBadge),
         })}
         listeners={{ focus: () => setMeuteBadge(false) }}
-      />
+      >
+        {(props) => (
+          <FeedScreen
+            {...props}
+            // MessagerieScreen (rendue a l'interieur de FeedScreen, pas comme sa propre
+            // Screen) reutilise cette meme navigation pour gerer son propre header une
+            // fois dans une conversation -- sans ca, elle n'a aucun moyen de restaurer
+            // le coeur d'activite en revenant a la liste des conversations, et le
+            // remplace silencieusement par rien (voir MessagerieScreen).
+            defaultHeaderRight={() => renderMeuteHeartButton(props.navigation, activityBadge, setActivityBadge)}
+          />
+        )}
+      </Tab.Screen>
       <Tab.Screen name="Events" component={EvenementsScreen} options={{ title: 'Events' }} />
       <Tab.Screen
         name="Services" component={PartenairesScreen}
