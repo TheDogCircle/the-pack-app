@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
@@ -99,7 +99,13 @@ export default function AnniversairesScreen() {
     setRefreshing(false);
   }, [session?.user?.id]);
 
-  useEffect(() => { load(); }, [load]);
+  // useEffect(mount-once) laissait l'ecran affiche une liste figee des qu'on y
+  // revient depuis un onglet deja monte par React Navigation (le composant n'est
+  // jamais demonte entre deux visites) -- un anniversaire du jour arrivant apres
+  // la premiere visite restait invisible tant qu'on ne faisait pas explicitement
+  // un pull-to-refresh. useFocusEffect recharge a chaque fois que l'ecran reprend
+  // le focus, pas seulement au tout premier montage.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   if (loading) {
     return (

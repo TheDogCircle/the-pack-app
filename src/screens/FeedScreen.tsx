@@ -996,9 +996,14 @@ export default function FeedScreen() {
     setBirthdayUserIds(new Set(todayIds));
   }, []);
 
-  useEffect(() => {
+  // useEffect(myUserId) ne se redeclenchait qu'une fois par connexion -- si le Feed
+  // reste monte depuis avant qu'un anniversaire du jour ne devienne "aujourd'hui"
+  // (l'utilisateur ne quitte jamais l'onglet Feed), la bougie n'apparaissait jamais
+  // tant que myUserId ne changeait pas. useFocusEffect recharge a chaque reprise de
+  // focus sur l'onglet, pas seulement au premier montage.
+  useFocusEffect(useCallback(() => {
     if (myUserId) loadBirthdays(myUserId);
-  }, [myUserId, loadBirthdays]);
+  }, [myUserId, loadBirthdays]));
 
   useEffect(() => {
     if (tab === 'feed') { loadFeed(); loadSuggestions(); }
