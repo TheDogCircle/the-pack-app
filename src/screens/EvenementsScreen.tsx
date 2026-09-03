@@ -527,6 +527,10 @@ export default function EvenementsScreen() {
     if (error) { Alert.alert('Erreur', error.message); return; }
     setCreateModal(false);
     resetForm();
+    // Sans ca, rester sur l'onglet "Mes events" au moment de la creation ne faisait
+    // jamais apparaitre le nouvel event tant qu'on ne changeait pas d'onglet ou ne
+    // tirait pas pour rafraichir.
+    load();
     Alert.alert('Événement soumis', 'Il sera visible après validation par l\'équipe The Pack.');
   }
 
@@ -834,7 +838,9 @@ export default function EvenementsScreen() {
             </TouchableOpacity>
             {selectedPrivate && (
               <ScrollView contentContainerStyle={styles.modalContent}>
-                <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🔒 Événement privé</Text></View>
+                <View style={styles.lockBadge}>
+                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🔒 Événement privé'}</Text>
+                </View>
                 <Text style={[styles.modalTitle, { marginTop: 10 }]}>{selectedPrivate.titre}</Text>
                 <View style={styles.modalInfoRow}>
                   <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
