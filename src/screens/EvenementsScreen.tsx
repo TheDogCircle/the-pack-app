@@ -332,7 +332,7 @@ export default function EvenementsScreen() {
       // cote serveur par le trigger sur evenements_invitations (accepter une invitation,
       // ou l'auto-invitation d'un event ouvert -> rejoindre).
       const { data: conv, error: convErr } = await supabase.from('conversations')
-        .insert({ nom: (pOuvertATous ? '🌍 ' : '🏡 ') + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
+        .insert({ nom: (pOuvertATous ? '🌍 ' : '🐾 ') + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
         .select().single();
       if (convErr || !conv) throw convErr || new Error('Création du salon impossible');
       await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
@@ -439,7 +439,7 @@ export default function EvenementsScreen() {
       const { data: profs } = await supabase.from('profils').select('id,push_token,notif_messages').in('id', inviteSelected.map(p => p.id));
       (profs || []).forEach((pr: any) => {
         if (pr.push_token && pr.notif_messages !== false) {
-          sendPushNotification(pr.push_token, '🏡 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
+          sendPushNotification(pr.push_token, '🐾 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
         }
       });
       setInviteModal(false);
@@ -625,7 +625,7 @@ export default function EvenementsScreen() {
           const d = new Date(e.date_heure);
           return (
             <View key={inv.id} style={styles.privateCard}>
-              <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🏡 Privé</Text></View>
+              <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🐾 Privé</Text></View>
               <Text style={styles.privateCardTitle}>{e.titre}</Text>
               <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
               {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
@@ -641,7 +641,7 @@ export default function EvenementsScreen() {
           );
         })}
         {(privateOrganized.length + privateAccepted.length) > 0 && (
-          <Text style={[styles.privateSectionTitle, privatePending.length > 0 && { marginTop: 14 }]}>🏡 Tes événements privés</Text>
+          <Text style={[styles.privateSectionTitle, privatePending.length > 0 && { marginTop: 14 }]}>🐾 Tes événements privés</Text>
         )}
         {[
           ...privateOrganized.map(e => ({ ...e, _role: 'organisateur' as const })),
@@ -651,7 +651,7 @@ export default function EvenementsScreen() {
           return (
             <TouchableOpacity key={e.id} style={styles.privateCard} onPress={() => setSelectedPrivate(e)} activeOpacity={0.8}>
               <View style={styles.lockBadge}>
-                <Text style={styles.lockBadgeText}>{e.ouvert_a_tous ? '🌍 Ouvert à tous' : `🏡 ${e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}`}</Text>
+                <Text style={styles.lockBadgeText}>{e.ouvert_a_tous ? '🌍 Ouvert à tous' : `🐾 ${e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}`}</Text>
               </View>
               <Text style={styles.privateCardTitle}>{e.titre}</Text>
               <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
@@ -882,7 +882,7 @@ export default function EvenementsScreen() {
         <Ionicons name="add" size={26} color={colors.ivory} />
       </TouchableOpacity>
       <TouchableOpacity style={styles.fabSecondary} onPress={() => { resetPriveForm(); setCreatePriveModal(true); }} activeOpacity={0.85}>
-        <Ionicons name="home" size={18} color={colors.ivory} />
+        <Ionicons name="paw" size={18} color={colors.ivory} />
       </TouchableOpacity>
 
       {/* ── Modal détail événement privé ── */}
@@ -895,7 +895,7 @@ export default function EvenementsScreen() {
             {selectedPrivate && (
               <ScrollView contentContainerStyle={styles.modalContent}>
                 <View style={styles.lockBadge}>
-                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🏡 Événement privé'}</Text>
+                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🐾 Événement privé'}</Text>
                 </View>
                 <Text style={[styles.modalTitle, { marginTop: 10 }]}>{selectedPrivate.titre}</Text>
                 <View style={styles.modalInfoRow}>
@@ -941,7 +941,7 @@ export default function EvenementsScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalSheet, { maxHeight: '95%' }]}>
               <View style={styles.createHeader}>
-                <Text style={styles.createTitle}>🏡 Événement privé</Text>
+                <Text style={styles.createTitle}>🐾 Événement privé</Text>
                 <TouchableOpacity onPress={() => { setCreatePriveModal(false); resetPriveForm(); }}>
                   <Ionicons name="close" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
@@ -955,7 +955,7 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Qui peut voir cet événement ?</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity style={[styles.priveModeBtn, !pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(false)}>
-                    <Text style={[styles.priveModeBtnText, !pOuvertATous && styles.priveModeBtnTextActive]}>🏡 Sur invitation</Text>
+                    <Text style={[styles.priveModeBtnText, !pOuvertATous && styles.priveModeBtnTextActive]}>🐾 Sur invitation</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[styles.priveModeBtn, pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(true)}>
                     <Text style={[styles.priveModeBtnText, pOuvertATous && styles.priveModeBtnTextActive]}>🌍 Ouvert à tous</Text>
