@@ -263,9 +263,14 @@ export default function Navigation() {
 
   function applyNotificationData(data: any) {
     if (!data) return;
+    // data.lieu_id en secours : admin.html a longtemps envoye cette cle en snake_case
+    // pour "suggestion_validee" (corrige cote emetteur), mais un ancien envoi en vol au
+    // moment du deploiement, ou un futur oubli de convention, ne doit pas se traduire
+    // par une notif qui ne fait rien au tap.
+    const lieuId = data.lieuId || data.lieu_id;
     if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer') {
-      if (data.lieuId) {
-        mapNavigation.setPendingLieu(data.lieuId);
+      if (lieuId) {
+        mapNavigation.setPendingLieu(lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
       }
     } else if (data.type === 'photo_like' || data.type === 'new_post') {
@@ -298,8 +303,8 @@ export default function Navigation() {
         navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
       }
     } else if (data.type === 'broadcast') {
-      if (data.targetType === 'lieu' && data.lieuId) {
-        mapNavigation.setPendingLieu(data.lieuId);
+      if (data.targetType === 'lieu' && lieuId) {
+        mapNavigation.setPendingLieu(lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
       } else if (data.targetType === 'event' && data.eventId) {
         mapNavigation.setPendingEvent(data.eventId);

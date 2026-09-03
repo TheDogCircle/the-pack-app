@@ -33,7 +33,7 @@ type Evenement = {
   created_by?: string;
 };
 
-type Filter = 'avenir' | 'mesEvents' | 'semaine' | 'prives';
+type Filter = 'avenir' | 'mesEvents' | 'semaine';
 
 type EvenementPrive = {
   id: string; titre: string; description: string | null; date_heure: string;
@@ -44,7 +44,7 @@ type Invitation = {
   id: string; evenement_id: string; statut: 'en_attente' | 'accepte' | 'refuse';
   evenements_prives: EvenementPrive;
 };
-type ProfilSearch = { id: string; username: string | null; prenom: string | null; avatar_url: string | null };
+type ProfilSearch = { id: string; username: string | null; prenom: string | null; avatar_url: string | null; ville?: string | null };
 
 function fmtDate(d: Date) {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -113,13 +113,17 @@ export default function EvenementsScreen() {
   const [inviteModal, setInviteModal] = useState(false);
   const [inviteEventId, setInviteEventId] = useState<string | null>(null);
   const [inviteSearch, setInviteSearch] = useState('');
-  const [inviteResults, setInviteResults] = useState<ProfilSearch[]>([]);
   const [inviteSelected, setInviteSelected] = useState<ProfilSearch[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
+  const [inviteMode, setInviteModeState] = useState<'amis' | 'tous'>('amis');
+  const [inviteVilleFilter, setInviteVilleFilter] = useState('');
+  const [myFriends, setMyFriends] = useState<ProfilSearch[] | null>(null);
+  const [inviteAllCache, setInviteAllCache] = useState<ProfilSearch[] | null>(null);
+  const [inviteListLoading, setInviteListLoading] = useState(false);
 
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
-    if (filter === 'prives') loadPrivateEvents(); else load();
+    load();
   }, [session?.user?.id, filter]);
 
   useEffect(() => { if (session?.user?.id) loadPrivateEvents(); }, [session?.user?.id]);
@@ -217,13 +221,18 @@ export default function EvenementsScreen() {
     // part qui n'ont pas ce filtre par defaut - on l'applique explicitement pour ne
     // pas laisser trainer indefiniment des events passes dans "Mes events".
     const now = new Date().toISOString();
-    const mine = baseMapped.filter(e => e.je_suis_inscrit || e.est_enregistre || e.organisateur_id === userId || e.created_by === userId);
+    // !e.site_web : les fiches d'evenements tiers (curatees via admin, lien externe)
+    // ont souvent organisateur_id/created_by pointant vers le compte admin qui les a
+    // ajoutees -- ca ne veut pas dire que ce compte "organise" l'event. Sans ce filtre,
+    // "Mes events" listait indument toutes ces fiches pour le compte admin.
+    const mine = baseMapped.filter(e => e.je_suis_inscrit || e.est_enregistre || (!e.site_web && (e.organisateur_id === userId || e.created_by === userId)));
     const byId = new Map<string, Evenement>();
     mine.forEach(e => byId.set(e.id, e));
     try {
       const { data: ownAll } = await supabase.from('evenements')
         .select('*, profils(prenom, username, avatar_url)')
         .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`)
+        .is('site_web', null)
         .gte('date_heure', now);
       (ownAll || []).forEach((e: any) => {
         if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false, est_enregistre: false });
@@ -323,7 +332,7 @@ export default function EvenementsScreen() {
       // cote serveur par le trigger sur evenements_invitations (accepter une invitation,
       // ou l'auto-invitation d'un event ouvert -> rejoindre).
       const { data: conv, error: convErr } = await supabase.from('conversations')
-        .insert({ nom: (pOuvertATous ? '🌍 ' : '🔒 ') + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
+        .insert({ nom: (pOuvertATous ? '🌍 ' : '🏡 ') + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
         .select().single();
       if (convErr || !conv) throw convErr || new Error('Création du salon impossible');
       await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
@@ -347,24 +356,73 @@ export default function EvenementsScreen() {
     }
   }
 
-  function openInviteModal(eventId: string) {
-    setInviteEventId(eventId);
-    setInviteSearch(''); setInviteResults([]); setInviteSelected([]);
-    setInviteModal(true);
+  async function loadMyFriends(): Promise<ProfilSearch[]> {
+    if (myFriends) return myFriends;
+    if (!myUserId) return [];
+    const { data: followRows } = await supabase.from('follows').select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
+    const ids = (followRows || []).map((f: any) => f.following_id);
+    if (!ids.length) { setMyFriends([]); return []; }
+    const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url,ville').in('id', ids);
+    const sorted = ((data || []) as ProfilSearch[]).sort((a, b) => (a.prenom || '').localeCompare(b.prenom || '', 'fr'));
+    setMyFriends(sorted);
+    return sorted;
   }
 
-  async function searchInviteUsers(q: string) {
-    setInviteSearch(q);
-    if (q.trim().length < 2) { setInviteResults([]); return; }
-    const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url')
-      .ilike('username', `%${q.trim()}%`).neq('id', myUserId).limit(15);
-    setInviteResults((data || []).filter((p: ProfilSearch) => !inviteSelected.some(s => s.id === p.id)));
+  async function loadAllMembersCache(): Promise<ProfilSearch[]> {
+    if (inviteAllCache) return inviteAllCache;
+    if (!myUserId) return [];
+    const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url,ville').neq('id', myUserId).limit(500);
+    const list = (data || []) as ProfilSearch[];
+    setInviteAllCache(list);
+    return list;
+  }
+
+  function setInviteMode(mode: 'amis' | 'tous') {
+    setInviteModeState(mode);
+    if (mode === 'tous' && !inviteAllCache) {
+      setInviteListLoading(true);
+      loadAllMembersCache().finally(() => setInviteListLoading(false));
+    }
+  }
+
+  async function openInviteModal(eventId: string) {
+    setInviteEventId(eventId);
+    setInviteSearch(''); setInviteSelected([]); setInviteVilleFilter(''); setInviteModeState('amis');
+    setInviteModal(true);
+    if (!myFriends) {
+      setInviteListLoading(true);
+      await loadMyFriends();
+      setInviteListLoading(false);
+    }
+  }
+
+  // "Mes amis" en tete (prioritaires, cf. demande explicite), puis recherche prenom OU
+  // pseudo, puis filtre ville -- chercher seulement par pseudo rendait les gens trop
+  // difficiles a retrouver.
+  function getInviteCandidates(): ProfilSearch[] {
+    let candidates: ProfilSearch[];
+    if (inviteMode === 'amis') {
+      candidates = myFriends || [];
+    } else {
+      const all = inviteAllCache || [];
+      const friendIds = new Set((myFriends || []).map(f => f.id));
+      candidates = [...all].sort((a, b) => {
+        const fa = friendIds.has(a.id) ? 1 : 0, fb = friendIds.has(b.id) ? 1 : 0;
+        if (fa !== fb) return fb - fa;
+        return (a.prenom || '').localeCompare(b.prenom || '', 'fr');
+      });
+    }
+    let filtered = candidates.filter(p => !inviteSelected.some(s => s.id === p.id));
+    const q = inviteSearch.trim().toLowerCase();
+    if (q) filtered = filtered.filter(p => (p.prenom || '').toLowerCase().includes(q) || (p.username || '').toLowerCase().includes(q));
+    if (inviteVilleFilter) filtered = filtered.filter(p => p.ville === inviteVilleFilter);
+    return filtered;
   }
 
   function selectInviteUser(p: ProfilSearch) {
     if (inviteSelected.some(s => s.id === p.id)) return;
     setInviteSelected(prev => [...prev, p]);
-    setInviteSearch(''); setInviteResults([]);
+    setInviteSearch('');
   }
 
   function removeInviteUser(id: string) {
@@ -381,7 +439,7 @@ export default function EvenementsScreen() {
       const { data: profs } = await supabase.from('profils').select('id,push_token,notif_messages').in('id', inviteSelected.map(p => p.id));
       (profs || []).forEach((pr: any) => {
         if (pr.push_token && pr.notif_messages !== false) {
-          sendPushNotification(pr.push_token, '🔒 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
+          sendPushNotification(pr.push_token, '🏡 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
         }
       });
       setInviteModal(false);
@@ -541,7 +599,6 @@ export default function EvenementsScreen() {
     { key: 'avenir',  label: 'À venir',       icon: 'calendar-outline' },
     { key: 'semaine', label: 'Cette semaine',  icon: 'today-outline' },
     { key: 'mesEvents',label: 'Mes events',  icon: 'checkmark-circle-outline' },
-    { key: 'prives',  label: privatePending.length ? `Privés (${privatePending.length})` : 'Privés', icon: 'lock-closed-outline' },
   ];
 
   const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
@@ -554,23 +611,96 @@ export default function EvenementsScreen() {
     evenementsAffiches.sort((a, b) => (b.mise_en_avant ? 1 : 0) - (a.mise_en_avant ? 1 : 0));
   }
 
+  // Rendue en ListHeaderComponent de l'onglet "À venir" (et non plus comme onglet a
+  // part) -- renvoie null si rien a montrer, pour ne pas alourdir la vue publique par
+  // defaut quand l'utilisateur n'a aucun evenement prive.
+  function renderPrivateSection() {
+    const total = privatePending.length + privateOrganized.length + privateAccepted.length + openToJoin.length;
+    if (!total) return null;
+    return (
+      <View style={styles.privateSection}>
+        {privatePending.length > 0 && <Text style={styles.privateSectionTitle}>Invitations en attente</Text>}
+        {privatePending.map(inv => {
+          const e = inv.evenements_prives;
+          const d = new Date(e.date_heure);
+          return (
+            <View key={inv.id} style={styles.privateCard}>
+              <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🏡 Privé</Text></View>
+              <Text style={styles.privateCardTitle}>{e.titre}</Text>
+              <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
+              {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
+              <View style={styles.inviteActionsRow}>
+                <TouchableOpacity style={styles.acceptBtn} onPress={() => respondInvitation(inv.id, 'accepte')}>
+                  <Text style={styles.acceptBtnText}>Accepter</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.refuseBtn} onPress={() => respondInvitation(inv.id, 'refuse')}>
+                  <Text style={styles.refuseBtnText}>Refuser</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+        {(privateOrganized.length + privateAccepted.length) > 0 && (
+          <Text style={[styles.privateSectionTitle, privatePending.length > 0 && { marginTop: 14 }]}>🏡 Tes événements privés</Text>
+        )}
+        {[
+          ...privateOrganized.map(e => ({ ...e, _role: 'organisateur' as const })),
+          ...privateAccepted.map(e => ({ ...e, _role: 'invite' as const })),
+        ].sort((a, b) => new Date(a.date_heure).getTime() - new Date(b.date_heure).getTime()).map(e => {
+          const d = new Date(e.date_heure);
+          return (
+            <TouchableOpacity key={e.id} style={styles.privateCard} onPress={() => setSelectedPrivate(e)} activeOpacity={0.8}>
+              <View style={styles.lockBadge}>
+                <Text style={styles.lockBadgeText}>{e.ouvert_a_tous ? '🌍 Ouvert à tous' : `🏡 ${e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}`}</Text>
+              </View>
+              <Text style={styles.privateCardTitle}>{e.titre}</Text>
+              <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
+              {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
+            </TouchableOpacity>
+          );
+        })}
+        {openToJoin.length > 0 && <Text style={[styles.privateSectionTitle, { marginTop: 14 }]}>Événements ouverts à rejoindre</Text>}
+        {openToJoin.map(e => {
+          const d = new Date(e.date_heure);
+          return (
+            <View key={e.id} style={styles.privateCard}>
+              <View style={[styles.lockBadge, { backgroundColor: colors.terra + '1F' }]}>
+                <Text style={[styles.lockBadgeText, { color: colors.terra }]}>🌍 Ouvert à tous</Text>
+              </View>
+              <Text style={styles.privateCardTitle}>{e.titre}</Text>
+              <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
+              {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
+              <TouchableOpacity style={styles.joinOpenBtn} onPress={() => joinOpenEvent(e.id)}>
+                <Text style={styles.joinOpenBtnText}>Rejoindre</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  const inviteVilles = [...new Set((myFriends || []).map(f => f.ville).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, 'fr'));
+  const inviteCandidates = getInviteCandidates();
+  const inviteCandidatesCapped = inviteCandidates.slice(0, 40);
+
   return (
     <View style={styles.container}>
       {/* Filtres */}
-      <View style={styles.tabsWrap}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabsWrap}>
         {FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
             style={[styles.tab, filter === f.key && styles.tabActive]}
             onPress={() => setFilter(f.key)}
           >
-            <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]}>{f.label}</Text>
+            <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]} numberOfLines={1}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Filtres ville / race */}
-      {filter !== 'prives' && (villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
+      {(villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
         <View style={styles.dropdownFiltersRow}>
           {villesDisponibles.length > 0 && (
             <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setVilleModalOpen(true)}>
@@ -656,89 +786,15 @@ export default function EvenementsScreen() {
       </Modal>
 
       {/* Liste */}
-      {filter === 'prives' ? (
-        privateLoading ? (
-          <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
-        ) : (
-          <ScrollView
-            contentContainerStyle={[styles.list, (privatePending.length + privateOrganized.length + privateAccepted.length + openToJoin.length) === 0 && { flex: 1 }]}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await loadPrivateEvents(); setRefreshing(false); }} tintColor={colors.terra} />}
-          >
-            {(privatePending.length + privateOrganized.length + privateAccepted.length + openToJoin.length) === 0 ? (
-              <View style={styles.empty}>
-                <Ionicons name="lock-closed-outline" size={44} color={colors.border} />
-                <Text style={styles.emptyTitle}>Aucun événement privé</Text>
-                <Text style={styles.emptyText}>Crée un événement privé avec le bouton 🔒 pour inviter tes proches.</Text>
-              </View>
-            ) : (
-              <>
-                {privatePending.length > 0 && <Text style={styles.privateSectionTitle}>Invitations en attente</Text>}
-                {privatePending.map(inv => {
-                  const e = inv.evenements_prives;
-                  const d = new Date(e.date_heure);
-                  return (
-                    <View key={inv.id} style={styles.privateCard}>
-                      <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🔒 Privé</Text></View>
-                      <Text style={styles.privateCardTitle}>{e.titre}</Text>
-                      <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
-                      {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
-                      <View style={styles.inviteActionsRow}>
-                        <TouchableOpacity style={styles.acceptBtn} onPress={() => respondInvitation(inv.id, 'accepte')}>
-                          <Text style={styles.acceptBtnText}>Accepter</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.refuseBtn} onPress={() => respondInvitation(inv.id, 'refuse')}>
-                          <Text style={styles.refuseBtnText}>Refuser</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-                {(privateOrganized.length + privateAccepted.length) > 0 && <Text style={styles.privateSectionTitle}>Mes événements privés</Text>}
-                {[
-                  ...privateOrganized.map(e => ({ ...e, _role: 'organisateur' as const })),
-                  ...privateAccepted.map(e => ({ ...e, _role: 'invite' as const })),
-                ].sort((a, b) => new Date(a.date_heure).getTime() - new Date(b.date_heure).getTime()).map(e => {
-                  const d = new Date(e.date_heure);
-                  return (
-                    <TouchableOpacity key={e.id} style={styles.privateCard} onPress={() => setSelectedPrivate(e)} activeOpacity={0.8}>
-                      <View style={styles.lockBadge}>
-                        <Text style={styles.lockBadgeText}>{e.ouvert_a_tous ? '🌍 Ouvert à tous' : `🔒 ${e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}`}</Text>
-                      </View>
-                      <Text style={styles.privateCardTitle}>{e.titre}</Text>
-                      <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
-                      {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
-                    </TouchableOpacity>
-                  );
-                })}
-                {openToJoin.length > 0 && <Text style={styles.privateSectionTitle}>Événements ouverts à rejoindre</Text>}
-                {openToJoin.map(e => {
-                  const d = new Date(e.date_heure);
-                  return (
-                    <View key={e.id} style={styles.privateCard}>
-                      <View style={[styles.lockBadge, { backgroundColor: colors.terra + '1F' }]}>
-                        <Text style={[styles.lockBadgeText, { color: colors.terra }]}>🌍 Ouvert à tous</Text>
-                      </View>
-                      <Text style={styles.privateCardTitle}>{e.titre}</Text>
-                      <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
-                      {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
-                      <TouchableOpacity style={styles.joinOpenBtn} onPress={() => joinOpenEvent(e.id)}>
-                        <Text style={styles.joinOpenBtnText}>Rejoindre</Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </>
-            )}
-          </ScrollView>
-        )
-      ) : loading ? (
+      {loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
         <FlatList
           data={evenementsAffiches}
           keyExtractor={e => e.id}
           contentContainerStyle={[styles.list, evenements.length === 0 && { flex: 1 }]}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={colors.terra} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await Promise.all([load(), loadPrivateEvents()]); setRefreshing(false); }} tintColor={colors.terra} />}
+          ListHeaderComponent={filter === 'avenir' ? renderPrivateSection : null}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="calendar-outline" size={44} color={colors.border} />
@@ -826,7 +882,7 @@ export default function EvenementsScreen() {
         <Ionicons name="add" size={26} color={colors.ivory} />
       </TouchableOpacity>
       <TouchableOpacity style={styles.fabSecondary} onPress={() => { resetPriveForm(); setCreatePriveModal(true); }} activeOpacity={0.85}>
-        <Ionicons name="lock-closed" size={18} color={colors.ivory} />
+        <Ionicons name="home" size={18} color={colors.ivory} />
       </TouchableOpacity>
 
       {/* ── Modal détail événement privé ── */}
@@ -839,7 +895,7 @@ export default function EvenementsScreen() {
             {selectedPrivate && (
               <ScrollView contentContainerStyle={styles.modalContent}>
                 <View style={styles.lockBadge}>
-                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🔒 Événement privé'}</Text>
+                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🏡 Événement privé'}</Text>
                 </View>
                 <Text style={[styles.modalTitle, { marginTop: 10 }]}>{selectedPrivate.titre}</Text>
                 <View style={styles.modalInfoRow}>
@@ -885,7 +941,7 @@ export default function EvenementsScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalSheet, { maxHeight: '95%' }]}>
               <View style={styles.createHeader}>
-                <Text style={styles.createTitle}>🔒 Événement privé</Text>
+                <Text style={styles.createTitle}>🏡 Événement privé</Text>
                 <TouchableOpacity onPress={() => { setCreatePriveModal(false); resetPriveForm(); }}>
                   <Ionicons name="close" size={22} color={colors.textMuted} />
                 </TouchableOpacity>
@@ -899,7 +955,7 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Qui peut voir cet événement ?</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity style={[styles.priveModeBtn, !pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(false)}>
-                    <Text style={[styles.priveModeBtnText, !pOuvertATous && styles.priveModeBtnTextActive]}>🔒 Sur invitation</Text>
+                    <Text style={[styles.priveModeBtnText, !pOuvertATous && styles.priveModeBtnTextActive]}>🏡 Sur invitation</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[styles.priveModeBtn, pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(true)}>
                     <Text style={[styles.priveModeBtnText, pOuvertATous && styles.priveModeBtnTextActive]}>🌍 Ouvert à tous</Text>
@@ -968,14 +1024,40 @@ export default function EvenementsScreen() {
                 </TouchableOpacity>
               </View>
               <View style={styles.createForm}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={[styles.priveModeBtn, inviteMode === 'amis' && styles.priveModeBtnActive]} onPress={() => setInviteMode('amis')}>
+                    <Text style={[styles.priveModeBtnText, inviteMode === 'amis' && styles.priveModeBtnTextActive]}>Mes amis</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.priveModeBtn, inviteMode === 'tous' && styles.priveModeBtnActive]} onPress={() => setInviteMode('tous')}>
+                    <Text style={[styles.priveModeBtnText, inviteMode === 'tous' && styles.priveModeBtnTextActive]}>Tous les membres</Text>
+                  </TouchableOpacity>
+                </View>
                 <TextInput
-                  style={styles.input} value={inviteSearch} onChangeText={searchInviteUsers}
-                  placeholder="Rechercher par pseudo…" placeholderTextColor={colors.textMuted}
+                  style={[styles.input, { marginTop: 10 }]} value={inviteSearch} onChangeText={setInviteSearch}
+                  placeholder="Rechercher par prénom ou pseudo…" placeholderTextColor={colors.textMuted}
                 />
-                {inviteResults.length > 0 && (
-                  <View style={{ marginTop: 8, maxHeight: 220 }}>
+                {inviteVilles.length > 1 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }} contentContainerStyle={{ gap: 6 }}>
+                    <TouchableOpacity style={[styles.villeChip, !inviteVilleFilter && styles.villeChipActive]} onPress={() => setInviteVilleFilter('')}>
+                      <Text style={[styles.villeChipText, !inviteVilleFilter && styles.villeChipTextActive]}>Toutes les villes</Text>
+                    </TouchableOpacity>
+                    {inviteVilles.map(v => (
+                      <TouchableOpacity key={v} style={[styles.villeChip, inviteVilleFilter === v && styles.villeChipActive]} onPress={() => setInviteVilleFilter(v)}>
+                        <Text style={[styles.villeChipText, inviteVilleFilter === v && styles.villeChipTextActive]}>{v}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+                <View style={{ marginTop: 10, maxHeight: 260 }}>
+                  {inviteListLoading ? (
+                    <ActivityIndicator color={colors.terra} style={{ marginTop: 12 }} />
+                  ) : inviteCandidatesCapped.length === 0 ? (
+                    <Text style={styles.fieldSub}>
+                      {inviteMode === 'amis' && !(myFriends || []).length ? 'Tu ne suis encore personne — passe sur "Tous les membres".' : 'Aucun résultat'}
+                    </Text>
+                  ) : (
                     <FlatList
-                      data={inviteResults}
+                      data={inviteCandidatesCapped}
                       keyExtractor={p => p.id}
                       renderItem={({ item: p }) => (
                         <TouchableOpacity style={styles.inviteResultRow} onPress={() => selectInviteUser(p)}>
@@ -984,13 +1066,16 @@ export default function EvenementsScreen() {
                           )}
                           <View>
                             <Text style={styles.pickerRowText}>{p.prenom || '—'}</Text>
-                            <Text style={styles.fieldSub}>@{p.username || 'sans pseudo'}</Text>
+                            <Text style={styles.fieldSub}>@{p.username || 'sans pseudo'}{p.ville ? ` · ${p.ville}` : ''}</Text>
                           </View>
                         </TouchableOpacity>
                       )}
+                      ListFooterComponent={inviteCandidates.length > 40 ? (
+                        <Text style={[styles.fieldSub, { textAlign: 'center', paddingVertical: 6 }]}>+{inviteCandidates.length - 40} autres — affine ta recherche</Text>
+                      ) : null}
                     />
-                  </View>
-                )}
+                  )}
+                </View>
                 {inviteSelected.length > 0 && (
                   <View style={styles.raceChipsWrap}>
                     {inviteSelected.map(p => (
@@ -1311,12 +1396,13 @@ export default function EvenementsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
-  tabsWrap: {
-    flexDirection: 'row', backgroundColor: colors.white,
-    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
+  tabsScroll: {
+    backgroundColor: colors.white,
+    borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     marginHorizontal: 16, marginVertical: 12,
   },
-  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
+  tabsWrap: { flexDirection: 'row', padding: 4, gap: 4 },
+  tab: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center' },
   tabActive: { backgroundColor: colors.bordeaux },
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
@@ -1410,6 +1496,7 @@ const styles = StyleSheet.create({
   },
 
   // Événements privés
+  privateSection: { marginBottom: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   privateSectionTitle: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8, marginTop: 4 },
   privateCard: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 },
   privateCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.bordeaux, marginTop: 8, marginBottom: 4 },
@@ -1429,6 +1516,10 @@ const styles = StyleSheet.create({
   priveModeBtnActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
   priveModeBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   priveModeBtnTextActive: { color: colors.ivory },
+  villeChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: colors.ivoryPale },
+  villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  villeChipTextActive: { color: colors.ivory },
   joinOpenBtn: { backgroundColor: colors.terra, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginTop: 10 },
   joinOpenBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.ivory },
 
