@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     }
 
     const [{ data: lieu, error: lieuErr }, { data: prestation, error: prestaErr }] = await Promise.all([
-      supabaseAdmin.from('lieux').select('id, nom, plan, stripe_account_id, stripe_charges_enabled').eq('id', lieu_id).maybeSingle(),
+      supabaseAdmin.from('lieux').select('id, nom, plan, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle(),
       supabaseAdmin.from('prestations').select('id, lieu_id, prix, duree, actif').eq('id', prestation_id).maybeSingle(),
     ])
     if (lieuErr) throw lieuErr
@@ -82,8 +82,13 @@ Deno.serve(async (req) => {
       .eq('statut', 'en_attente')
       .lt('created_at', new Date(Date.now() - ABANDON_MINUTES * 60_000).toISOString())
 
-    const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
-    const percent = settings?.value?.percent ?? 20
+    // Un taux specifique negocie avec ce partenaire (lieux.commission_rate_percent)
+    // prime sur le taux global -- sinon on retombe sur app_settings.commission_rate.
+    let percent = lieu.commission_rate_percent
+    if (percent === null || percent === undefined) {
+      const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
+      percent = settings?.value?.percent ?? 20
+    }
 
     const { data: reservation, error: insertErr } = await supabaseAdmin
       .from('reservations')
