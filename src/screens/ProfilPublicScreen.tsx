@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Image, ActivityIndicator, Dimensions, Modal, FlatList, Linking,
+  Image, ActivityIndicator, Dimensions, Modal, FlatList, Linking, Alert,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
+import { findOrCreateDM } from '../lib/conversations';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -56,6 +57,7 @@ export default function ProfilPublicScreen() {
   const [stats, setStats] = useState({ avis: 0, favoris: 0, followers: 0 });
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [messaging, setMessaging] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'adresses' | 'photos' | 'avis'>('adresses');
@@ -138,6 +140,19 @@ export default function ProfilPublicScreen() {
       }
     }
     setFollowLoading(false);
+  }
+
+  async function messageUser() {
+    if (!myId || messaging) return;
+    setMessaging(true);
+    try {
+      const cid = await findOrCreateDM(myId, userId);
+      if (!cid) { Alert.alert('Erreur', "Impossible d'ouvrir la conversation, réessaie."); return; }
+      mapNavigation.setPendingConversation(cid);
+      navigation.navigate('Tabs', { screen: 'Meute' });
+    } finally {
+      setMessaging(false);
+    }
   }
 
   async function openFollowersModal() {
@@ -223,18 +238,30 @@ export default function ProfilPublicScreen() {
         </View>
 
         {myId && myId !== userId && (
-          <TouchableOpacity style={[styles.followBtn, isFollowing && styles.followBtnActive]} onPress={toggleFollow} disabled={followLoading}>
-            {followLoading ? (
-              <ActivityIndicator size="small" color={isFollowing ? colors.terra : colors.ivory} />
-            ) : (
-              <>
-                <Ionicons name={isFollowing ? 'checkmark' : 'person-add-outline'} size={15} color={isFollowing ? colors.terra : colors.ivory} />
-                <Text style={[styles.followBtnText, isFollowing && styles.followBtnTextActive]}>
-                  {isFollowing ? 'Abonné' : 'Suivre'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={[styles.followBtn, { flex: 1 }, isFollowing && styles.followBtnActive]} onPress={toggleFollow} disabled={followLoading}>
+              {followLoading ? (
+                <ActivityIndicator size="small" color={isFollowing ? colors.terra : colors.ivory} />
+              ) : (
+                <>
+                  <Ionicons name={isFollowing ? 'checkmark' : 'person-add-outline'} size={15} color={isFollowing ? colors.terra : colors.ivory} />
+                  <Text style={[styles.followBtnText, isFollowing && styles.followBtnTextActive]}>
+                    {isFollowing ? 'Abonné' : 'Suivre'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.followBtn, styles.messageBtn, { flex: 1 }]} onPress={messageUser} disabled={messaging}>
+              {messaging ? (
+                <ActivityIndicator size="small" color={colors.terra} />
+              ) : (
+                <>
+                  <Ionicons name="chatbubble-outline" size={15} color={colors.terra} />
+                  <Text style={[styles.followBtnText, styles.followBtnTextActive]}>Message</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Info chien */}
@@ -449,11 +476,13 @@ const styles = StyleSheet.create({
   stat: { alignItems: 'center', gap: 2 },
   statNum: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
   statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.6)', textTransform: 'uppercase', letterSpacing: 0.5 },
+  actionsRow: { flexDirection: 'row', gap: 10 },
   followBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 11,
   },
   followBtnActive: { backgroundColor: 'rgba(245,239,224,0.1)', borderWidth: 1, borderColor: colors.terra + '66' },
+  messageBtn: { backgroundColor: 'rgba(245,239,224,0.1)', borderWidth: 1, borderColor: colors.terra + '66' },
   followBtnText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 14 },
   followBtnTextActive: { color: colors.terra },
   dogRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

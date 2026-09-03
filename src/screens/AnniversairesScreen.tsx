@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
@@ -14,12 +15,19 @@ type BirthdayRow = {
   daysUntil: number;
 };
 
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
 function nextOccurrence(dateNaissanceParsed: string): Date {
   const [, mm, dd] = dateNaissanceParsed.split('-').map(Number);
   const now = new Date();
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let next = new Date(now.getFullYear(), mm - 1, dd);
-  if (next < todayMidnight) next = new Date(now.getFullYear() + 1, mm - 1, dd);
+  // Anniversaire un 29 fevrier : sur une annee non bissextile, on le fete le 28
+  // (sinon `new Date(year, 1, 29)` deborde silencieusement sur le 1er mars).
+  const dayFor = (year: number) => (mm === 2 && dd === 29 && !isLeapYear(year)) ? 28 : dd;
+  let next = new Date(now.getFullYear(), mm - 1, dayFor(now.getFullYear()));
+  if (next < todayMidnight) next = new Date(now.getFullYear() + 1, mm - 1, dayFor(now.getFullYear() + 1));
   return next;
 }
 
@@ -30,6 +38,7 @@ function daysUntilLabel(daysUntil: number): string {
 }
 
 export default function AnniversairesScreen() {
+  const navigation = useNavigation<any>();
   const { session } = useSession();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -118,7 +127,12 @@ export default function AnniversairesScreen() {
         </View>
       ) : (
         rows.map(row => (
-          <View key={row.chienId} style={[styles.card, row.daysUntil === 0 && styles.cardToday]}>
+          <TouchableOpacity
+            key={row.chienId}
+            style={[styles.card, row.daysUntil === 0 && styles.cardToday]}
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate('ProfilPublic', { userId: row.ownerId, prenom: row.ownerPrenom, avatarUrl: row.ownerAvatarUrl })}
+          >
             {row.ownerAvatarUrl ? (
               <Image source={{ uri: row.ownerAvatarUrl }} style={styles.avatar} />
             ) : (
@@ -135,7 +149,8 @@ export default function AnniversairesScreen() {
                 {daysUntilLabel(row.daysUntil)}
               </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+          </TouchableOpacity>
         ))
       )}
     </ScrollView>
