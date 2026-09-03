@@ -39,6 +39,7 @@ type EvenementPrive = {
   id: string; titre: string; description: string | null; date_heure: string;
   adresse: string | null; ville: string | null; organisateur_id: string;
   conversation_id: string | null; actif: boolean; ouvert_a_tous: boolean;
+  image_url: string | null; images: string[] | null;
 };
 type Invitation = {
   id: string; evenement_id: string; statut: 'en_attente' | 'accepte' | 'refuse';
@@ -110,6 +111,23 @@ export default function EvenementsScreen() {
   const [pDate, setPDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0); return d; });
   const [pShowDatePicker, setPShowDatePicker] = useState(false);
   const [pShowTimePicker, setPShowTimePicker] = useState(false);
+  const [pPhotoUris, setPPhotoUris] = useState<string[]>([]);
+  const [uploadingPrivePhotos, setUploadingPrivePhotos] = useState(false);
+
+  // ── Édition événement privé ──
+  const [editPriveModal, setEditPriveModal] = useState(false);
+  const [editingPriveId, setEditingPriveId] = useState<string | null>(null);
+  const [savingEditPrive, setSavingEditPrive] = useState(false);
+  const [ePTitre, setEPTitre] = useState('');
+  const [ePOuvertATous, setEPOuvertATous] = useState(false);
+  const [ePDescription, setEPDescription] = useState('');
+  const [ePVille, setEPVille] = useState('');
+  const [ePAdresse, setEPAdresse] = useState('');
+  const [ePDate, setEPDate] = useState(new Date());
+  const [ePShowDatePicker, setEPShowDatePicker] = useState(false);
+  const [ePShowTimePicker, setEPShowTimePicker] = useState(false);
+  const [ePPhotoUris, setEPPhotoUris] = useState<string[]>([]);
+
   const [inviteModal, setInviteModal] = useState(false);
   const [inviteEventId, setInviteEventId] = useState<string | null>(null);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -315,10 +333,63 @@ export default function EvenementsScreen() {
   }
 
   function resetPriveForm() {
-    setPTitre(''); setPDescription(''); setPVille(''); setPAdresse(''); setPOuvertATous(false);
+    setPTitre(''); setPDescription(''); setPVille(''); setPAdresse(''); setPOuvertATous(false); setPPhotoUris([]);
     const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
     setPDate(d);
   }
+
+  // Reutilisee par la creation ET l'edition d'un event prive (ajout de photos).
+  function pickPhotosGeneric(currentUris: string[], setUris: (fn: (prev: string[]) => string[]) => void) {
+    Alert.alert('Ajouter des photos', '', [
+      {
+        text: 'Prendre une photo',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès à la caméra requis', 'Autorise The Pack à accéder à ta caméra dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
+            if (result.canceled || !result.assets?.length) return;
+            setUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_EVENT_PHOTOS));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || "Impossible d'ouvrir la caméra.");
+          }
+        },
+      },
+      {
+        text: 'Choisir depuis la galerie',
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert('Accès aux photos requis', 'Autorise The Pack à accéder à ta galerie dans les Réglages.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Ouvrir les Réglages', onPress: () => Linking.openSettings() },
+              ]);
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'], quality: 0.8,
+              allowsMultipleSelection: true, selectionLimit: MAX_EVENT_PHOTOS - currentUris.length,
+              preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+            });
+            if (result.canceled || !result.assets?.length) return;
+            setUris(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, MAX_EVENT_PHOTOS));
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || "Impossible d'ouvrir la galerie.");
+          }
+        },
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  }
+  function pickPrivateEventPhotos() { pickPhotosGeneric(pPhotoUris, setPPhotoUris); }
+  function pickEditPrivePhotos() { pickPhotosGeneric(ePPhotoUris, setEPPhotoUris); }
 
   async function submitPrivateEvent() {
     if (!pTitre.trim() || !myUserId) {
@@ -327,6 +398,17 @@ export default function EvenementsScreen() {
     }
     setSavingPrive(true);
     try {
+      setUploadingPrivePhotos(true);
+      const urls: string[] = [];
+      for (const uri of pPhotoUris) {
+        try {
+          const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+          const r2Key = `lieu-photos/evenements/${myUserId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          urls.push(await uploadToR2(uri, r2Key));
+        } catch {}
+      }
+      setUploadingPrivePhotos(false);
+
       // Le salon est cree ici par un simple insert (protege par les policies existantes,
       // pas de logique de securite) ; qui peut le rejoindre ensuite est decide uniquement
       // cote serveur par le trigger sur evenements_invitations (accepter une invitation,
@@ -341,6 +423,7 @@ export default function EvenementsScreen() {
         titre: pTitre.trim(), description: pDescription.trim() || null, date_heure: pDate.toISOString(),
         adresse: pAdresse.trim() || null, ville: pVille.trim() || null, ouvert_a_tous: pOuvertATous,
         organisateur_id: myUserId, conversation_id: conv.id,
+        image_url: urls[0] || null, images: urls.length > 1 ? urls : null,
       }).select().single();
       if (error || !ev) throw error || new Error('Création impossible');
 
@@ -354,6 +437,77 @@ export default function EvenementsScreen() {
     } finally {
       setSavingPrive(false);
     }
+  }
+
+  function isRemoteUrl(uri: string) { return uri.startsWith('http://') || uri.startsWith('https://'); }
+
+  function openEditPriveModal(ev: EvenementPrive) {
+    setEditingPriveId(ev.id);
+    setEPTitre(ev.titre);
+    setEPDescription(ev.description || '');
+    setEPVille(ev.ville || '');
+    setEPAdresse(ev.adresse || '');
+    setEPDate(new Date(ev.date_heure));
+    setEPOuvertATous(ev.ouvert_a_tous);
+    setEPPhotoUris(ev.images && ev.images.length ? ev.images : (ev.image_url ? [ev.image_url] : []));
+    setSelectedPrivate(null);
+    setEditPriveModal(true);
+  }
+
+  async function submitEditPrive() {
+    if (!editingPriveId || !ePTitre.trim()) {
+      Alert.alert('Champ requis', 'Le titre est obligatoire.');
+      return;
+    }
+    setSavingEditPrive(true);
+    try {
+      const newLocalUris = ePPhotoUris.filter(u => !isRemoteUrl(u));
+      const keptRemoteUrls = ePPhotoUris.filter(isRemoteUrl);
+      const uploadedUrls: string[] = [];
+      for (const uri of newLocalUris) {
+        try {
+          const ext = uri.split('.').pop()?.toLowerCase() === 'png' ? 'png' : 'jpg';
+          const r2Key = `lieu-photos/evenements/${myUserId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          uploadedUrls.push(await uploadToR2(uri, r2Key));
+        } catch {}
+      }
+      const allUrls = [...keptRemoteUrls, ...uploadedUrls];
+
+      const { error } = await supabase.from('evenements_prives').update({
+        titre: ePTitre.trim(), description: ePDescription.trim() || null, date_heure: ePDate.toISOString(),
+        adresse: ePAdresse.trim() || null, ville: ePVille.trim() || null, ouvert_a_tous: ePOuvertATous,
+        image_url: allUrls[0] || null, images: allUrls.length > 1 ? allUrls : null,
+      }).eq('id', editingPriveId);
+      if (error) throw error;
+
+      setEditPriveModal(false);
+      setEditingPriveId(null);
+      loadPrivateEvents();
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Réessaie.');
+    } finally {
+      setSavingEditPrive(false);
+    }
+  }
+
+  function deletePriveEvent() {
+    if (!editingPriveId) return;
+    Alert.alert('Supprimer cet événement ?', 'Les invités ne pourront plus y accéder.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer', style: 'destructive', onPress: async () => {
+          const ev = privateOrganized.find(e => e.id === editingPriveId);
+          const { error } = await supabase.from('evenements_prives').update({ actif: false }).eq('id', editingPriveId);
+          if (error) { Alert.alert('Erreur', error.message); return; }
+          if (ev?.conversation_id) {
+            await supabase.from('conversations').update({ actif: false }).eq('id', ev.conversation_id);
+          }
+          setEditPriveModal(false);
+          setEditingPriveId(null);
+          loadPrivateEvents();
+        },
+      },
+    ]);
   }
 
   async function loadMyFriends(): Promise<ProfilSearch[]> {
@@ -598,7 +752,7 @@ export default function EvenementsScreen() {
   const FILTERS: { key: Filter; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
     { key: 'avenir',  label: 'À venir',       icon: 'calendar-outline' },
     { key: 'semaine', label: 'Cette semaine',  icon: 'today-outline' },
-    { key: 'mesEvents',label: 'Mes events',  icon: 'checkmark-circle-outline' },
+    { key: 'mesEvents',label: privatePending.length ? `Mes events (${privatePending.length})` : 'Mes events', icon: 'checkmark-circle-outline' },
   ];
 
   const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
@@ -794,7 +948,7 @@ export default function EvenementsScreen() {
           keyExtractor={e => e.id}
           contentContainerStyle={[styles.list, evenements.length === 0 && { flex: 1 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await Promise.all([load(), loadPrivateEvents()]); setRefreshing(false); }} tintColor={colors.terra} />}
-          ListHeaderComponent={filter === 'avenir' ? renderPrivateSection : null}
+          ListHeaderComponent={filter === 'mesEvents' ? renderPrivateSection : null}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="calendar-outline" size={44} color={colors.border} />
@@ -877,12 +1031,10 @@ export default function EvenementsScreen() {
         />
       )}
 
-      {/* FAB créer */}
-      <TouchableOpacity style={styles.fab} onPress={() => setCreateModal(true)} activeOpacity={0.85}>
+      {/* FAB créer -- creation d'un event public retiree de cet ecran : geree
+          desormais via l'espace pro (B2B) ou l'admin, pour rester gerable. */}
+      <TouchableOpacity style={styles.fab} onPress={() => { resetPriveForm(); setCreatePriveModal(true); }} activeOpacity={0.85}>
         <Ionicons name="add" size={26} color={colors.ivory} />
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.fabSecondary} onPress={() => { resetPriveForm(); setCreatePriveModal(true); }} activeOpacity={0.85}>
-        <Ionicons name="paw" size={18} color={colors.ivory} />
       </TouchableOpacity>
 
       {/* ── Modal détail événement privé ── */}
@@ -892,8 +1044,17 @@ export default function EvenementsScreen() {
             <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedPrivate(null)}>
               <Ionicons name="close" size={22} color={colors.textMid} />
             </TouchableOpacity>
-            {selectedPrivate && (
+            {selectedPrivate && (() => {
+              const privatePhotos = selectedPrivate.images?.length ? selectedPrivate.images : (selectedPrivate.image_url ? [selectedPrivate.image_url] : []);
+              return (
               <ScrollView contentContainerStyle={styles.modalContent}>
+                {privatePhotos.length > 0 && (
+                  <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20, marginTop: -20, marginBottom: 16 }}>
+                    {privatePhotos.map((url, idx) => (
+                      <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
+                    ))}
+                  </ScrollView>
+                )}
                 <View style={styles.lockBadge}>
                   <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🐾 Événement privé'}</Text>
                 </View>
@@ -921,16 +1082,26 @@ export default function EvenementsScreen() {
                   </TouchableOpacity>
                 ) : null}
                 {selectedPrivate._role === 'organisateur' ? (
-                  <TouchableOpacity
-                    style={[styles.cancelBtn, { marginTop: 10 }]}
-                    onPress={() => { const id = selectedPrivate.id; setSelectedPrivate(null); openInviteModal(id); }}
-                  >
-                    <Ionicons name="person-add-outline" size={16} color="#e65100" />
-                    <Text style={styles.cancelBtnText}>Inviter d'autres personnes</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      style={[styles.cancelBtn, { marginTop: 10 }]}
+                      onPress={() => { const id = selectedPrivate.id; setSelectedPrivate(null); openInviteModal(id); }}
+                    >
+                      <Ionicons name="person-add-outline" size={16} color="#e65100" />
+                      <Text style={styles.cancelBtnText}>Inviter d'autres personnes</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.saveBtnFull, { marginTop: 10 }]}
+                      onPress={() => openEditPriveModal(selectedPrivate)}
+                    >
+                      <Ionicons name="pencil-outline" size={16} color={colors.bordeaux} />
+                      <Text style={styles.saveBtnFullText}>Modifier l'événement</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : null}
               </ScrollView>
-            )}
+              );
+            })()}
           </View>
         </View>
       </Modal>
@@ -1003,8 +1174,117 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Adresse (optionnel)</Text>
                 <TextInput style={styles.input} value={pAdresse} onChangeText={setPAdresse} placeholder="Ex : 12 rue des Lilas" placeholderTextColor={colors.textMuted} />
 
+                <Text style={styles.fieldLabel}>Photos (max {MAX_EVENT_PHOTOS}, optionnel)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
+                  {pPhotoUris.map((uri, idx) => (
+                    <View key={idx} style={styles.photoThumb}>
+                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <TouchableOpacity style={styles.photoRemove} onPress={() => setPPhotoUris(p => p.filter((_, i) => i !== idx))}>
+                        <Ionicons name="close-circle" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  {pPhotoUris.length < MAX_EVENT_PHOTOS && (
+                    <TouchableOpacity style={[styles.photoThumb, styles.photoAdd]} onPress={pickPrivateEventPhotos}>
+                      <Ionicons name="camera-outline" size={24} color={colors.bordeaux} />
+                      <Text style={styles.photoAddLabel}>Ajouter</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+
                 <TouchableOpacity style={styles.submitBtn} onPress={submitPrivateEvent} disabled={savingPrive}>
-                  {savingPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>{pOuvertATous ? "Créer l'événement" : 'Créer et inviter'}</Text>}
+                  {savingPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>{uploadingPrivePhotos ? 'Envoi des photos…' : (pOuvertATous ? "Créer l'événement" : 'Créer et inviter')}</Text>}
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Modal modifier événement privé ── */}
+      <Modal visible={editPriveModal} animationType="slide" transparent onRequestClose={() => setEditPriveModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalSheet, { maxHeight: '95%' }]}>
+              <View style={styles.createHeader}>
+                <Text style={styles.createTitle}>Modifier l'événement</Text>
+                <TouchableOpacity onPress={() => setEditPriveModal(false)}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView contentContainerStyle={styles.createForm} keyboardShouldPersistTaps="handled">
+                <Text style={styles.fieldLabel}>Titre *</Text>
+                <TextInput style={styles.input} value={ePTitre} onChangeText={setEPTitre} placeholderTextColor={colors.textMuted} />
+
+                <Text style={styles.fieldLabel}>Qui peut voir cet événement ?</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={[styles.priveModeBtn, !ePOuvertATous && styles.priveModeBtnActive]} onPress={() => setEPOuvertATous(false)}>
+                    <Text style={[styles.priveModeBtnText, !ePOuvertATous && styles.priveModeBtnTextActive]}>🐾 Sur invitation</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.priveModeBtn, ePOuvertATous && styles.priveModeBtnActive]} onPress={() => setEPOuvertATous(true)}>
+                    <Text style={[styles.priveModeBtnText, ePOuvertATous && styles.priveModeBtnTextActive]}>🌍 Ouvert à tous</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.fieldLabel}>Description</Text>
+                <TextInput style={[styles.input, styles.inputMulti]} value={ePDescription} onChangeText={setEPDescription} placeholderTextColor={colors.textMuted} multiline />
+
+                <Text style={styles.fieldLabel}>Date</Text>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => setEPShowDatePicker(true)}>
+                  <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                  <Text style={styles.dateBtnText}>{ePDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                </TouchableOpacity>
+                {ePShowDatePicker && (
+                  <DateTimePicker
+                    value={ePDate} mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => { setEPShowDatePicker(Platform.OS === 'ios'); if (d) setEPDate(prev => { const n = new Date(prev); n.setFullYear(d.getFullYear(), d.getMonth(), d.getDate()); return n; }); }}
+                  />
+                )}
+
+                <Text style={styles.fieldLabel}>Heure</Text>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => setEPShowTimePicker(true)}>
+                  <Ionicons name="time-outline" size={16} color={colors.bordeaux} />
+                  <Text style={styles.dateBtnText}>{fmtHeure(ePDate)}</Text>
+                </TouchableOpacity>
+                {ePShowTimePicker && (
+                  <DateTimePicker
+                    value={ePDate} mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => { setEPShowTimePicker(Platform.OS === 'ios'); if (d) setEPDate(prev => { const n = new Date(prev); n.setHours(d.getHours(), d.getMinutes()); return n; }); }}
+                  />
+                )}
+
+                <Text style={styles.fieldLabel}>Ville</Text>
+                <TextInput style={styles.input} value={ePVille} onChangeText={setEPVille} placeholderTextColor={colors.textMuted} />
+
+                <Text style={styles.fieldLabel}>Adresse (optionnel)</Text>
+                <TextInput style={styles.input} value={ePAdresse} onChangeText={setEPAdresse} placeholderTextColor={colors.textMuted} />
+
+                <Text style={styles.fieldLabel}>Photos (max {MAX_EVENT_PHOTOS}, optionnel)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
+                  {ePPhotoUris.map((uri, idx) => (
+                    <View key={idx} style={styles.photoThumb}>
+                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <TouchableOpacity style={styles.photoRemove} onPress={() => setEPPhotoUris(p => p.filter((_, i) => i !== idx))}>
+                        <Ionicons name="close-circle" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  {ePPhotoUris.length < MAX_EVENT_PHOTOS && (
+                    <TouchableOpacity style={[styles.photoThumb, styles.photoAdd]} onPress={pickEditPrivePhotos}>
+                      <Ionicons name="camera-outline" size={24} color={colors.bordeaux} />
+                      <Text style={styles.photoAddLabel}>Ajouter</Text>
+                    </TouchableOpacity>
+                  )}
+                </ScrollView>
+
+                <TouchableOpacity style={styles.submitBtn} onPress={submitEditPrive} disabled={savingEditPrive}>
+                  {savingEditPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Enregistrer</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={deletePriveEvent}>
+                  <Ionicons name="trash-outline" size={16} color="#e65100" />
+                  <Text style={styles.cancelBtnText}>Supprimer l'événement</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
