@@ -687,7 +687,7 @@ export default function EvenementsScreen() {
   return (
     <View style={styles.container}>
       {/* Filtres */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabsWrap}>
+      <View style={styles.tabsWrap}>
         {FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
@@ -697,7 +697,7 @@ export default function EvenementsScreen() {
             <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]} numberOfLines={1}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       {/* Filtres ville / race */}
       {(villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
@@ -1396,13 +1396,12 @@ export default function EvenementsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
 
-  tabsScroll: {
-    backgroundColor: colors.white,
-    borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+  tabsWrap: {
+    flexDirection: 'row', backgroundColor: colors.white,
+    borderRadius: 12, padding: 4, borderWidth: 1, borderColor: colors.border,
     marginHorizontal: 16, marginVertical: 12,
   },
-  tabsWrap: { flexDirection: 'row', padding: 4, gap: 4 },
-  tab: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center' },
+  tab: { flex: 1, paddingVertical: 9, paddingHorizontal: 4, borderRadius: 8, alignItems: 'center' },
   tabActive: { backgroundColor: colors.bordeaux },
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
