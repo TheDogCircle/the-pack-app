@@ -38,7 +38,7 @@ type Filter = 'avenir' | 'mesEvents' | 'semaine';
 type EvenementPrive = {
   id: string; titre: string; description: string | null; date_heure: string;
   adresse: string | null; ville: string | null; organisateur_id: string;
-  conversation_id: string | null; actif: boolean; ouvert_a_tous: boolean;
+  conversation_id: string | null; actif: boolean;
   image_url: string | null; images: string[] | null;
 };
 type Invitation = {
@@ -98,13 +98,11 @@ export default function EvenementsScreen() {
   const [privateOrganized, setPrivateOrganized] = useState<EvenementPrive[]>([]);
   const [privateAccepted, setPrivateAccepted] = useState<EvenementPrive[]>([]);
   const [privatePending, setPrivatePending] = useState<Invitation[]>([]);
-  const [openToJoin, setOpenToJoin] = useState<EvenementPrive[]>([]);
   const [privateLoading, setPrivateLoading] = useState(false);
   const [selectedPrivate, setSelectedPrivate] = useState<(EvenementPrive & { _role?: 'organisateur' | 'invite' }) | null>(null);
   const [createPriveModal, setCreatePriveModal] = useState(false);
   const [savingPrive, setSavingPrive] = useState(false);
   const [pTitre, setPTitre] = useState('');
-  const [pOuvertATous, setPOuvertATous] = useState(false);
   const [pDescription, setPDescription] = useState('');
   const [pVille, setPVille] = useState('');
   const [pAdresse, setPAdresse] = useState('');
@@ -119,7 +117,6 @@ export default function EvenementsScreen() {
   const [editingPriveId, setEditingPriveId] = useState<string | null>(null);
   const [savingEditPrive, setSavingEditPrive] = useState(false);
   const [ePTitre, setEPTitre] = useState('');
-  const [ePOuvertATous, setEPOuvertATous] = useState(false);
   const [ePDescription, setEPDescription] = useState('');
   const [ePVille, setEPVille] = useState('');
   const [ePAdresse, setEPAdresse] = useState('');
@@ -310,30 +307,19 @@ export default function EvenementsScreen() {
     if (!session?.user?.id) return;
     setPrivateLoading(true);
     const uid = session.user.id;
-    const [{ data: organized }, { data: invitations }, { data: open }] = await Promise.all([
+    const [{ data: organized }, { data: invitations }] = await Promise.all([
       supabase.from('evenements_prives').select('*').eq('organisateur_id', uid).eq('actif', true).order('date_heure', { ascending: true }),
       supabase.from('evenements_invitations').select('*, evenements_prives(*)').eq('invite_id', uid),
-      supabase.from('evenements_prives').select('*').eq('ouvert_a_tous', true).eq('actif', true).neq('organisateur_id', uid).order('date_heure', { ascending: true }),
     ]);
     setPrivateOrganized((organized || []) as EvenementPrive[]);
     const invRows = ((invitations || []) as Invitation[]).filter(i => i.evenements_prives?.actif);
     setPrivatePending(invRows.filter(i => i.statut === 'en_attente'));
     setPrivateAccepted(invRows.filter(i => i.statut === 'accepte').map(i => i.evenements_prives));
-    const invitedIds = new Set(invRows.map(i => i.evenement_id));
-    setOpenToJoin(((open || []) as EvenementPrive[]).filter(e => !invitedIds.has(e.id)));
     setPrivateLoading(false);
   }
 
-  async function joinOpenEvent(id: string) {
-    if (!myUserId) return;
-    const { error } = await supabase.from('evenements_invitations')
-      .insert({ evenement_id: id, invite_id: myUserId, invited_by: myUserId, statut: 'accepte' });
-    if (error) { Alert.alert('Erreur', error.message); return; }
-    loadPrivateEvents();
-  }
-
   function resetPriveForm() {
-    setPTitre(''); setPDescription(''); setPVille(''); setPAdresse(''); setPOuvertATous(false); setPPhotoUris([]);
+    setPTitre(''); setPDescription(''); setPVille(''); setPAdresse(''); setPPhotoUris([]);
     const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
     setPDate(d);
   }
@@ -411,27 +397,26 @@ export default function EvenementsScreen() {
 
       // Le salon est cree ici par un simple insert (protege par les policies existantes,
       // pas de logique de securite) ; qui peut le rejoindre ensuite est decide uniquement
-      // cote serveur par le trigger sur evenements_invitations (accepter une invitation,
-      // ou l'auto-invitation d'un event ouvert -> rejoindre).
+      // cote serveur par le trigger sur evenements_invitations, exclusivement via une
+      // invitation acceptee (un event prive est toujours sur invitation).
       const { data: conv, error: convErr } = await supabase.from('conversations')
-        .insert({ nom: (pOuvertATous ? '🌍 ' : '🐾 ') + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
+        .insert({ nom: '🐾 ' + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
         .select().single();
       if (convErr || !conv) throw convErr || new Error('Création du salon impossible');
       await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
 
       const { data: ev, error } = await supabase.from('evenements_prives').insert({
         titre: pTitre.trim(), description: pDescription.trim() || null, date_heure: pDate.toISOString(),
-        adresse: pAdresse.trim() || null, ville: pVille.trim() || null, ouvert_a_tous: pOuvertATous,
+        adresse: pAdresse.trim() || null, ville: pVille.trim() || null,
         organisateur_id: myUserId, conversation_id: conv.id,
         image_url: urls[0] || null, images: urls.length > 1 ? urls : null,
       }).select().single();
       if (error || !ev) throw error || new Error('Création impossible');
 
       setCreatePriveModal(false);
-      const wasOuvert = pOuvertATous;
       resetPriveForm();
       loadPrivateEvents();
-      if (!wasOuvert) openInviteModal(ev.id);
+      openInviteModal(ev.id);
     } catch (e: any) {
       Alert.alert('Erreur', e?.message || 'Réessaie.');
     } finally {
@@ -448,7 +433,6 @@ export default function EvenementsScreen() {
     setEPVille(ev.ville || '');
     setEPAdresse(ev.adresse || '');
     setEPDate(new Date(ev.date_heure));
-    setEPOuvertATous(ev.ouvert_a_tous);
     setEPPhotoUris(ev.images && ev.images.length ? ev.images : (ev.image_url ? [ev.image_url] : []));
     setSelectedPrivate(null);
     setEditPriveModal(true);
@@ -475,7 +459,7 @@ export default function EvenementsScreen() {
 
       const { error } = await supabase.from('evenements_prives').update({
         titre: ePTitre.trim(), description: ePDescription.trim() || null, date_heure: ePDate.toISOString(),
-        adresse: ePAdresse.trim() || null, ville: ePVille.trim() || null, ouvert_a_tous: ePOuvertATous,
+        adresse: ePAdresse.trim() || null, ville: ePVille.trim() || null,
         image_url: allUrls[0] || null, images: allUrls.length > 1 ? allUrls : null,
       }).eq('id', editingPriveId);
       if (error) throw error;
@@ -769,7 +753,7 @@ export default function EvenementsScreen() {
   // part) -- renvoie null si rien a montrer, pour ne pas alourdir la vue publique par
   // defaut quand l'utilisateur n'a aucun evenement prive.
   function renderPrivateSection() {
-    const total = privatePending.length + privateOrganized.length + privateAccepted.length + openToJoin.length;
+    const total = privatePending.length + privateOrganized.length + privateAccepted.length;
     if (!total) return null;
     return (
       <View style={styles.privateSection}>
@@ -805,29 +789,12 @@ export default function EvenementsScreen() {
           return (
             <TouchableOpacity key={e.id} style={styles.privateCard} onPress={() => setSelectedPrivate(e)} activeOpacity={0.8}>
               <View style={styles.lockBadge}>
-                <Text style={styles.lockBadgeText}>{e.ouvert_a_tous ? '🌍 Ouvert à tous' : `🐾 ${e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}`}</Text>
+                <Text style={styles.lockBadgeText}>🐾 {e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}</Text>
               </View>
               <Text style={styles.privateCardTitle}>{e.titre}</Text>
               <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
               {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
             </TouchableOpacity>
-          );
-        })}
-        {openToJoin.length > 0 && <Text style={[styles.privateSectionTitle, { marginTop: 14 }]}>Événements ouverts à rejoindre</Text>}
-        {openToJoin.map(e => {
-          const d = new Date(e.date_heure);
-          return (
-            <View key={e.id} style={styles.privateCard}>
-              <View style={[styles.lockBadge, { backgroundColor: colors.terra + '1F' }]}>
-                <Text style={[styles.lockBadgeText, { color: colors.terra }]}>🌍 Ouvert à tous</Text>
-              </View>
-              <Text style={styles.privateCardTitle}>{e.titre}</Text>
-              <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
-              {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
-              <TouchableOpacity style={styles.joinOpenBtn} onPress={() => joinOpenEvent(e.id)}>
-                <Text style={styles.joinOpenBtnText}>Rejoindre</Text>
-              </TouchableOpacity>
-            </View>
           );
         })}
       </View>
@@ -1056,7 +1023,7 @@ export default function EvenementsScreen() {
                   </ScrollView>
                 )}
                 <View style={styles.lockBadge}>
-                  <Text style={styles.lockBadgeText}>{selectedPrivate.ouvert_a_tous ? '🌍 Événement ouvert à tous' : '🐾 Événement privé'}</Text>
+                  <Text style={styles.lockBadgeText}>🐾 Événement privé</Text>
                 </View>
                 <Text style={[styles.modalTitle, { marginTop: 10 }]}>{selectedPrivate.titre}</Text>
                 <View style={styles.modalInfoRow}>
@@ -1123,21 +1090,6 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Titre *</Text>
                 <TextInput style={styles.input} value={pTitre} onChangeText={setPTitre} placeholder="Anniversaire de Rex, pique-nique entre amis…" placeholderTextColor={colors.textMuted} />
 
-                <Text style={styles.fieldLabel}>Qui peut voir cet événement ?</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity style={[styles.priveModeBtn, !pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(false)}>
-                    <Text style={[styles.priveModeBtnText, !pOuvertATous && styles.priveModeBtnTextActive]}>🐾 Sur invitation</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.priveModeBtn, pOuvertATous && styles.priveModeBtnActive]} onPress={() => setPOuvertATous(true)}>
-                    <Text style={[styles.priveModeBtnText, pOuvertATous && styles.priveModeBtnTextActive]}>🌍 Ouvert à tous</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.fieldSub}>
-                  {pOuvertATous
-                    ? "Tout membre connecté de l'app peut voir cet événement et le rejoindre en un tap."
-                    : 'Tu choisis toi-même qui peut voir et rejoindre l\'événement, un par un.'}
-                </Text>
-
                 <Text style={styles.fieldLabel}>Description</Text>
                 <TextInput style={[styles.input, styles.inputMulti]} value={pDescription} onChangeText={setPDescription} placeholder="Détails, ce qu'il faut prévoir…" placeholderTextColor={colors.textMuted} multiline />
 
@@ -1193,7 +1145,7 @@ export default function EvenementsScreen() {
                 </ScrollView>
 
                 <TouchableOpacity style={styles.submitBtn} onPress={submitPrivateEvent} disabled={savingPrive}>
-                  {savingPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>{uploadingPrivePhotos ? 'Envoi des photos…' : (pOuvertATous ? "Créer l'événement" : 'Créer et inviter')}</Text>}
+                  {savingPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>{uploadingPrivePhotos ? 'Envoi des photos…' : 'Créer et inviter'}</Text>}
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -1216,15 +1168,6 @@ export default function EvenementsScreen() {
                 <Text style={styles.fieldLabel}>Titre *</Text>
                 <TextInput style={styles.input} value={ePTitre} onChangeText={setEPTitre} placeholderTextColor={colors.textMuted} />
 
-                <Text style={styles.fieldLabel}>Qui peut voir cet événement ?</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity style={[styles.priveModeBtn, !ePOuvertATous && styles.priveModeBtnActive]} onPress={() => setEPOuvertATous(false)}>
-                    <Text style={[styles.priveModeBtnText, !ePOuvertATous && styles.priveModeBtnTextActive]}>🐾 Sur invitation</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.priveModeBtn, ePOuvertATous && styles.priveModeBtnActive]} onPress={() => setEPOuvertATous(true)}>
-                    <Text style={[styles.priveModeBtnText, ePOuvertATous && styles.priveModeBtnTextActive]}>🌍 Ouvert à tous</Text>
-                  </TouchableOpacity>
-                </View>
 
                 <Text style={styles.fieldLabel}>Description</Text>
                 <TextInput style={[styles.input, styles.inputMulti]} value={ePDescription} onChangeText={setEPDescription} placeholderTextColor={colors.textMuted} multiline />
@@ -1799,8 +1742,6 @@ const styles = StyleSheet.create({
   villeChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
   villeChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
   villeChipTextActive: { color: colors.ivory },
-  joinOpenBtn: { backgroundColor: colors.terra, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginTop: 10 },
-  joinOpenBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.ivory },
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
