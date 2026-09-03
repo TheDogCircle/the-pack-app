@@ -22,7 +22,7 @@ import { sendPushNotification } from '../lib/notifications';
 
 type ConvMember = { user_id: string; prenom: string; avatar_url: string | null };
 type Conversation = {
-  id: string; nom: string | null; created_by: string;
+  id: string; nom: string | null; created_by: string; type?: string | null;
   members: ConvMember[];
   last_message: { contenu: string; image_url: string | null; created_at: string; user_id: string } | null;
 };
@@ -296,7 +296,7 @@ export default function MessagerieScreen({
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }
     const convIds = memberRows.map((r: any) => r.conversation_id);
     const [{ data: convData }, { data: allMembers }] = await Promise.all([
-      supabase.from('conversations').select('id,nom,created_by').in('id', convIds).eq('actif', true),
+      supabase.from('conversations').select('id,nom,created_by,type').in('id', convIds).eq('actif', true),
       supabase.from('conversation_members').select('conversation_id,user_id').in('conversation_id', convIds),
     ]);
     if (!convData?.length) { setConversations([]); setLoading(false); return; }
@@ -324,7 +324,7 @@ export default function MessagerieScreen({
     const lastMessages: Record<string, any> = {};
     (recentMsgs || []).forEach((m: any) => { if (!lastMessages[m.conversation_id]) lastMessages[m.conversation_id] = m; });
     const list: Conversation[] = (convData || []).map((c: any) => ({
-      id: c.id, nom: c.nom, created_by: c.created_by,
+      id: c.id, nom: c.nom, created_by: c.created_by, type: c.type,
       members: membersByConv[c.id] || [],
       last_message: lastMessages[c.id] || null,
     })).sort((a, b) => {

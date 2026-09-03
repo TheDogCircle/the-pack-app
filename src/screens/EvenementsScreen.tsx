@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, uploadToR2 } from '../lib/supabase';
+import { sendPushNotification } from '../lib/notifications';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -32,7 +33,18 @@ type Evenement = {
   created_by?: string;
 };
 
-type Filter = 'avenir' | 'mesEvents' | 'semaine';
+type Filter = 'avenir' | 'mesEvents' | 'semaine' | 'prives';
+
+type EvenementPrive = {
+  id: string; titre: string; description: string | null; date_heure: string;
+  adresse: string | null; ville: string | null; organisateur_id: string;
+  conversation_id: string | null; actif: boolean;
+};
+type Invitation = {
+  id: string; evenement_id: string; statut: 'en_attente' | 'accepte' | 'refuse';
+  evenements_prives: EvenementPrive;
+};
+type ProfilSearch = { id: string; username: string | null; prenom: string | null; avatar_url: string | null };
 
 function fmtDate(d: Date) {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -81,10 +93,34 @@ export default function EvenementsScreen() {
   const [raceCreateModalOpen, setRaceCreateModalOpen] = useState(false);
   const [raceCreateSearch, setRaceCreateSearch] = useState('');
 
+  // ── Événements privés ──
+  const [privateOrganized, setPrivateOrganized] = useState<EvenementPrive[]>([]);
+  const [privateAccepted, setPrivateAccepted] = useState<EvenementPrive[]>([]);
+  const [privatePending, setPrivatePending] = useState<Invitation[]>([]);
+  const [privateLoading, setPrivateLoading] = useState(false);
+  const [selectedPrivate, setSelectedPrivate] = useState<(EvenementPrive & { _role?: 'organisateur' | 'invite' }) | null>(null);
+  const [createPriveModal, setCreatePriveModal] = useState(false);
+  const [savingPrive, setSavingPrive] = useState(false);
+  const [pTitre, setPTitre] = useState('');
+  const [pDescription, setPDescription] = useState('');
+  const [pVille, setPVille] = useState('');
+  const [pAdresse, setPAdresse] = useState('');
+  const [pDate, setPDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0); return d; });
+  const [pShowDatePicker, setPShowDatePicker] = useState(false);
+  const [pShowTimePicker, setPShowTimePicker] = useState(false);
+  const [inviteModal, setInviteModal] = useState(false);
+  const [inviteEventId, setInviteEventId] = useState<string | null>(null);
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [inviteResults, setInviteResults] = useState<ProfilSearch[]>([]);
+  const [inviteSelected, setInviteSelected] = useState<ProfilSearch[]>([]);
+  const [sendingInvites, setSendingInvites] = useState(false);
+
   useEffect(() => {
     if (session?.user?.id) setMyUserId(session.user.id);
-    load();
+    if (filter === 'prives') loadPrivateEvents(); else load();
   }, [session?.user?.id, filter]);
+
+  useEffect(() => { if (session?.user?.id) loadPrivateEvents(); }, [session?.user?.id]);
 
   useEffect(() => { setModalPhotoIndex(0); }, [selectedEvent?.id]);
 
@@ -240,6 +276,120 @@ export default function EvenementsScreen() {
     }
   }
 
+  // ── Événements privés ──
+  async function loadPrivateEvents() {
+    if (!session?.user?.id) return;
+    setPrivateLoading(true);
+    const uid = session.user.id;
+    const [{ data: organized }, { data: invitations }] = await Promise.all([
+      supabase.from('evenements_prives').select('*').eq('organisateur_id', uid).eq('actif', true).order('date_heure', { ascending: true }),
+      supabase.from('evenements_invitations').select('*, evenements_prives(*)').eq('invite_id', uid),
+    ]);
+    setPrivateOrganized((organized || []) as EvenementPrive[]);
+    const invRows = ((invitations || []) as Invitation[]).filter(i => i.evenements_prives?.actif);
+    setPrivatePending(invRows.filter(i => i.statut === 'en_attente'));
+    setPrivateAccepted(invRows.filter(i => i.statut === 'accepte').map(i => i.evenements_prives));
+    setPrivateLoading(false);
+  }
+
+  function resetPriveForm() {
+    setPTitre(''); setPDescription(''); setPVille(''); setPAdresse('');
+    const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
+    setPDate(d);
+  }
+
+  async function submitPrivateEvent() {
+    if (!pTitre.trim() || !myUserId) {
+      Alert.alert('Champ requis', 'Le titre est obligatoire.');
+      return;
+    }
+    setSavingPrive(true);
+    try {
+      // Le salon est cree ici par un simple insert (protege par les policies existantes,
+      // pas de logique de securite) ; qui peut le rejoindre ensuite est decide uniquement
+      // cote serveur par le trigger sur evenements_invitations (accepter -> rejoindre).
+      const { data: conv, error: convErr } = await supabase.from('conversations')
+        .insert({ nom: '🔒 ' + pTitre.trim(), type: 'evenement_prive', created_by: myUserId, actif: true })
+        .select().single();
+      if (convErr || !conv) throw convErr || new Error('Création du salon impossible');
+      await supabase.from('conversation_members').insert({ conversation_id: conv.id, user_id: myUserId });
+
+      const { data: ev, error } = await supabase.from('evenements_prives').insert({
+        titre: pTitre.trim(), description: pDescription.trim() || null, date_heure: pDate.toISOString(),
+        adresse: pAdresse.trim() || null, ville: pVille.trim() || null,
+        organisateur_id: myUserId, conversation_id: conv.id,
+      }).select().single();
+      if (error || !ev) throw error || new Error('Création impossible');
+
+      setCreatePriveModal(false);
+      resetPriveForm();
+      openInviteModal(ev.id);
+      loadPrivateEvents();
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Réessaie.');
+    } finally {
+      setSavingPrive(false);
+    }
+  }
+
+  function openInviteModal(eventId: string) {
+    setInviteEventId(eventId);
+    setInviteSearch(''); setInviteResults([]); setInviteSelected([]);
+    setInviteModal(true);
+  }
+
+  async function searchInviteUsers(q: string) {
+    setInviteSearch(q);
+    if (q.trim().length < 2) { setInviteResults([]); return; }
+    const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url')
+      .ilike('username', `%${q.trim()}%`).neq('id', myUserId).limit(15);
+    setInviteResults((data || []).filter((p: ProfilSearch) => !inviteSelected.some(s => s.id === p.id)));
+  }
+
+  function selectInviteUser(p: ProfilSearch) {
+    if (inviteSelected.some(s => s.id === p.id)) return;
+    setInviteSelected(prev => [...prev, p]);
+    setInviteSearch(''); setInviteResults([]);
+  }
+
+  function removeInviteUser(id: string) {
+    setInviteSelected(prev => prev.filter(p => p.id !== id));
+  }
+
+  async function sendInvitations() {
+    if (!inviteEventId || !inviteSelected.length || !myUserId) { setInviteModal(false); return; }
+    setSendingInvites(true);
+    try {
+      const rows = inviteSelected.map(p => ({ evenement_id: inviteEventId, invite_id: p.id, invited_by: myUserId }));
+      const { error } = await supabase.from('evenements_invitations').insert(rows);
+      if (error) throw error;
+      const { data: profs } = await supabase.from('profils').select('id,push_token,notif_messages').in('id', inviteSelected.map(p => p.id));
+      (profs || []).forEach((pr: any) => {
+        if (pr.push_token && pr.notif_messages !== false) {
+          sendPushNotification(pr.push_token, '🔒 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
+        }
+      });
+      setInviteModal(false);
+      loadPrivateEvents();
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Réessaie.');
+    } finally {
+      setSendingInvites(false);
+    }
+  }
+
+  async function respondInvitation(invitationId: string, statut: 'accepte' | 'refuse') {
+    const { error } = await supabase.from('evenements_invitations').update({ statut }).eq('id', invitationId);
+    if (error) { Alert.alert('Erreur', error.message); return; }
+    loadPrivateEvents();
+  }
+
+  function openPrivateChat(convId: string) {
+    setSelectedPrivate(null);
+    mapNavigation.setPendingConversation(convId);
+    navigation.navigate('Tabs', { screen: 'Meute' });
+  }
+
   function resetForm() {
     setTitre(''); setDescription(''); setVille(''); setAdresse('');
     setMaxPart(''); setPayant(false); setPrix(''); setPhotoUris([]);
@@ -372,6 +522,7 @@ export default function EvenementsScreen() {
     { key: 'avenir',  label: 'À venir',       icon: 'calendar-outline' },
     { key: 'semaine', label: 'Cette semaine',  icon: 'today-outline' },
     { key: 'mesEvents',label: 'Mes events',  icon: 'checkmark-circle-outline' },
+    { key: 'prives',  label: privatePending.length ? `Privés (${privatePending.length})` : 'Privés', icon: 'lock-closed-outline' },
   ];
 
   const villesDisponibles = [...new Set(evenements.map(e => e.ville).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
@@ -400,7 +551,7 @@ export default function EvenementsScreen() {
       </View>
 
       {/* Filtres ville / race */}
-      {(villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
+      {filter !== 'prives' && (villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
         <View style={styles.dropdownFiltersRow}>
           {villesDisponibles.length > 0 && (
             <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setVilleModalOpen(true)}>
@@ -486,7 +637,63 @@ export default function EvenementsScreen() {
       </Modal>
 
       {/* Liste */}
-      {loading ? (
+      {filter === 'prives' ? (
+        privateLoading ? (
+          <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
+        ) : (
+          <ScrollView
+            contentContainerStyle={[styles.list, (privatePending.length + privateOrganized.length + privateAccepted.length) === 0 && { flex: 1 }]}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await loadPrivateEvents(); setRefreshing(false); }} tintColor={colors.terra} />}
+          >
+            {(privatePending.length + privateOrganized.length + privateAccepted.length) === 0 ? (
+              <View style={styles.empty}>
+                <Ionicons name="lock-closed-outline" size={44} color={colors.border} />
+                <Text style={styles.emptyTitle}>Aucun événement privé</Text>
+                <Text style={styles.emptyText}>Crée un événement privé avec le bouton 🔒 pour inviter tes proches.</Text>
+              </View>
+            ) : (
+              <>
+                {privatePending.length > 0 && <Text style={styles.privateSectionTitle}>Invitations en attente</Text>}
+                {privatePending.map(inv => {
+                  const e = inv.evenements_prives;
+                  const d = new Date(e.date_heure);
+                  return (
+                    <View key={inv.id} style={styles.privateCard}>
+                      <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🔒 Privé</Text></View>
+                      <Text style={styles.privateCardTitle}>{e.titre}</Text>
+                      <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
+                      {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
+                      <View style={styles.inviteActionsRow}>
+                        <TouchableOpacity style={styles.acceptBtn} onPress={() => respondInvitation(inv.id, 'accepte')}>
+                          <Text style={styles.acceptBtnText}>Accepter</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.refuseBtn} onPress={() => respondInvitation(inv.id, 'refuse')}>
+                          <Text style={styles.refuseBtnText}>Refuser</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+                {(privateOrganized.length + privateAccepted.length) > 0 && <Text style={styles.privateSectionTitle}>Mes événements privés</Text>}
+                {[
+                  ...privateOrganized.map(e => ({ ...e, _role: 'organisateur' as const })),
+                  ...privateAccepted.map(e => ({ ...e, _role: 'invite' as const })),
+                ].sort((a, b) => new Date(a.date_heure).getTime() - new Date(b.date_heure).getTime()).map(e => {
+                  const d = new Date(e.date_heure);
+                  return (
+                    <TouchableOpacity key={e.id} style={styles.privateCard} onPress={() => setSelectedPrivate(e)} activeOpacity={0.8}>
+                      <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🔒 {e._role === 'organisateur' ? 'Organisateur' : 'Invité·e'}</Text></View>
+                      <Text style={styles.privateCardTitle}>{e.titre}</Text>
+                      <Text style={styles.privateCardMeta}>{fmtDate(d)} à {fmtHeure(d)}</Text>
+                      {e.ville ? <Text style={styles.privateCardMeta}>{e.ville}{e.adresse ? ` · ${e.adresse}` : ''}</Text> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </ScrollView>
+        )
+      ) : loading ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
       ) : (
         <FlatList
@@ -580,6 +787,178 @@ export default function EvenementsScreen() {
       <TouchableOpacity style={styles.fab} onPress={() => setCreateModal(true)} activeOpacity={0.85}>
         <Ionicons name="add" size={26} color={colors.ivory} />
       </TouchableOpacity>
+      <TouchableOpacity style={styles.fabSecondary} onPress={() => { resetPriveForm(); setCreatePriveModal(true); }} activeOpacity={0.85}>
+        <Ionicons name="lock-closed" size={18} color={colors.ivory} />
+      </TouchableOpacity>
+
+      {/* ── Modal détail événement privé ── */}
+      <Modal visible={!!selectedPrivate} animationType="slide" transparent onRequestClose={() => setSelectedPrivate(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '80%' }]}>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedPrivate(null)}>
+              <Ionicons name="close" size={22} color={colors.textMid} />
+            </TouchableOpacity>
+            {selectedPrivate && (
+              <ScrollView contentContainerStyle={styles.modalContent}>
+                <View style={styles.lockBadge}><Text style={styles.lockBadgeText}>🔒 Événement privé</Text></View>
+                <Text style={[styles.modalTitle, { marginTop: 10 }]}>{selectedPrivate.titre}</Text>
+                <View style={styles.modalInfoRow}>
+                  <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
+                  <View>
+                    <Text style={styles.modalInfoMain}>{new Date(selectedPrivate.date_heure).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                    <Text style={styles.modalInfoSub}>à {fmtHeure(new Date(selectedPrivate.date_heure))}</Text>
+                  </View>
+                </View>
+                {selectedPrivate.ville ? (
+                  <View style={styles.modalInfoRow}>
+                    <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                    <View>
+                      <Text style={styles.modalInfoMain}>{selectedPrivate.ville}</Text>
+                      {selectedPrivate.adresse ? <Text style={styles.modalInfoSub}>{selectedPrivate.adresse}</Text> : null}
+                    </View>
+                  </View>
+                ) : null}
+                {selectedPrivate.description ? <Text style={styles.modalDesc}>{selectedPrivate.description}</Text> : null}
+                {selectedPrivate.conversation_id ? (
+                  <TouchableOpacity style={styles.joinBtn} onPress={() => openPrivateChat(selectedPrivate.conversation_id!)}>
+                    <Text style={styles.joinBtnText}>💬 Ouvrir la discussion</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {selectedPrivate._role === 'organisateur' ? (
+                  <TouchableOpacity
+                    style={[styles.cancelBtn, { marginTop: 10 }]}
+                    onPress={() => { const id = selectedPrivate.id; setSelectedPrivate(null); openInviteModal(id); }}
+                  >
+                    <Ionicons name="person-add-outline" size={16} color="#e65100" />
+                    <Text style={styles.cancelBtnText}>Inviter d'autres personnes</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal créer événement privé ── */}
+      <Modal visible={createPriveModal} animationType="slide" transparent onRequestClose={() => { setCreatePriveModal(false); resetPriveForm(); }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalSheet, { maxHeight: '95%' }]}>
+              <View style={styles.createHeader}>
+                <Text style={styles.createTitle}>🔒 Événement privé</Text>
+                <TouchableOpacity onPress={() => { setCreatePriveModal(false); resetPriveForm(); }}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView contentContainerStyle={styles.createForm} keyboardShouldPersistTaps="handled">
+                <Text style={styles.submitNoteText}>Visible uniquement par toi et les personnes que tu invites. Une discussion de groupe privée est créée automatiquement.</Text>
+
+                <Text style={styles.fieldLabel}>Titre *</Text>
+                <TextInput style={styles.input} value={pTitre} onChangeText={setPTitre} placeholder="Anniversaire de Rex, pique-nique entre amis…" placeholderTextColor={colors.textMuted} />
+
+                <Text style={styles.fieldLabel}>Description</Text>
+                <TextInput style={[styles.input, styles.inputMulti]} value={pDescription} onChangeText={setPDescription} placeholder="Détails, ce qu'il faut prévoir…" placeholderTextColor={colors.textMuted} multiline />
+
+                <Text style={styles.fieldLabel}>Date</Text>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => setPShowDatePicker(true)}>
+                  <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                  <Text style={styles.dateBtnText}>{pDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                </TouchableOpacity>
+                {pShowDatePicker && (
+                  <DateTimePicker
+                    value={pDate} mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    minimumDate={new Date()}
+                    onChange={(_, d) => { setPShowDatePicker(Platform.OS === 'ios'); if (d) setPDate(prev => { const n = new Date(prev); n.setFullYear(d.getFullYear(), d.getMonth(), d.getDate()); return n; }); }}
+                  />
+                )}
+
+                <Text style={styles.fieldLabel}>Heure</Text>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => setPShowTimePicker(true)}>
+                  <Ionicons name="time-outline" size={16} color={colors.bordeaux} />
+                  <Text style={styles.dateBtnText}>{fmtHeure(pDate)}</Text>
+                </TouchableOpacity>
+                {pShowTimePicker && (
+                  <DateTimePicker
+                    value={pDate} mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(_, d) => { setPShowTimePicker(Platform.OS === 'ios'); if (d) setPDate(prev => { const n = new Date(prev); n.setHours(d.getHours(), d.getMinutes()); return n; }); }}
+                  />
+                )}
+
+                <Text style={styles.fieldLabel}>Ville</Text>
+                <TextInput style={styles.input} value={pVille} onChangeText={setPVille} placeholder="Ex : Paris" placeholderTextColor={colors.textMuted} />
+
+                <Text style={styles.fieldLabel}>Adresse (optionnel)</Text>
+                <TextInput style={styles.input} value={pAdresse} onChangeText={setPAdresse} placeholder="Ex : 12 rue des Lilas" placeholderTextColor={colors.textMuted} />
+
+                <TouchableOpacity style={styles.submitBtn} onPress={submitPrivateEvent} disabled={savingPrive}>
+                  {savingPrive ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Créer et inviter</Text>}
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Modal inviter des personnes ── */}
+      <Modal visible={inviteModal} animationType="slide" transparent onRequestClose={() => setInviteModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalSheet, { maxHeight: '85%' }]}>
+              <View style={styles.createHeader}>
+                <Text style={styles.createTitle}>Inviter des personnes</Text>
+                <TouchableOpacity onPress={() => setInviteModal(false)}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.createForm}>
+                <TextInput
+                  style={styles.input} value={inviteSearch} onChangeText={searchInviteUsers}
+                  placeholder="Rechercher par pseudo…" placeholderTextColor={colors.textMuted}
+                />
+                {inviteResults.length > 0 && (
+                  <View style={{ marginTop: 8, maxHeight: 220 }}>
+                    <FlatList
+                      data={inviteResults}
+                      keyExtractor={p => p.id}
+                      renderItem={({ item: p }) => (
+                        <TouchableOpacity style={styles.inviteResultRow} onPress={() => selectInviteUser(p)}>
+                          {p.avatar_url ? <Image source={{ uri: p.avatar_url }} style={styles.inviteAvatar} /> : (
+                            <View style={[styles.inviteAvatar, styles.inviteAvatarFallback]}><Text style={styles.inviteAvatarLetter}>{(p.prenom || p.username || '?')[0]?.toUpperCase()}</Text></View>
+                          )}
+                          <View>
+                            <Text style={styles.pickerRowText}>{p.prenom || '—'}</Text>
+                            <Text style={styles.fieldSub}>@{p.username || 'sans pseudo'}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  </View>
+                )}
+                {inviteSelected.length > 0 && (
+                  <View style={styles.raceChipsWrap}>
+                    {inviteSelected.map(p => (
+                      <View key={p.id} style={styles.raceChipMulti}>
+                        <Text style={styles.raceChipMultiText}>@{p.username || p.prenom || '?'}</Text>
+                        <TouchableOpacity onPress={() => removeInviteUser(p.id)}>
+                          <Ionicons name="close" size={13} color={colors.bordeaux} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <TouchableOpacity style={[styles.submitBtn, { marginTop: 16 }]} onPress={sendInvitations} disabled={sendingInvites}>
+                  {sendingInvites ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Envoyer les invitations</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.dateBtn, { justifyContent: 'center', marginTop: 8 }]} onPress={() => setInviteModal(false)}>
+                  <Text style={styles.dateBtnText}>Passer, inviter plus tard</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* ── Modal détail événement ── */}
       <Modal visible={!!selectedEvent} animationType="slide" transparent onRequestClose={() => setSelectedEvent(null)}>
@@ -968,6 +1347,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center',
     shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
   },
+  fabSecondary: {
+    position: 'absolute', bottom: 94, right: 26,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center',
+    shadowColor: colors.terra, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 7,
+  },
+
+  // Événements privés
+  privateSectionTitle: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8, marginTop: 4 },
+  privateCard: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 },
+  privateCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.bordeaux, marginTop: 8, marginBottom: 4 },
+  privateCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginBottom: 2 },
+  lockBadge: { alignSelf: 'flex-start', backgroundColor: 'rgba(61,26,26,0.08)', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 3 },
+  lockBadgeText: { fontFamily: 'DMSans_600SemiBold', fontSize: 10, color: colors.bordeaux },
+  inviteActionsRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  acceptBtn: { flex: 1, backgroundColor: colors.bordeaux, borderRadius: 10, paddingVertical: 9, alignItems: 'center' },
+  acceptBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.ivory },
+  refuseBtn: { flex: 1, backgroundColor: colors.ivoryLight, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 9, alignItems: 'center' },
+  refuseBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  inviteResultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 4 },
+  inviteAvatar: { width: 32, height: 32, borderRadius: 16 },
+  inviteAvatarFallback: { backgroundColor: colors.ivoryLight, alignItems: 'center', justifyContent: 'center' },
+  inviteAvatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 13, color: colors.bordeaux },
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
