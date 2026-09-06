@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, ScrollView,
-  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking, Dimensions,
+  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking, Dimensions, Clipboard,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
@@ -71,6 +73,9 @@ export default function EvenementsScreen() {
   const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
   const [inscriptionLoading, setInscriptionLoading] = useState(false);
   const [modalPhotoIndex, setModalPhotoIndex] = useState(0);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [sharingImage, setSharingImage] = useState(false);
+  const shareEventCardRef = useRef<View>(null);
 
   // Création
   const [createModal, setCreateModal] = useState(false);
@@ -1359,6 +1364,10 @@ export default function EvenementsScreen() {
                   )}
                   <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>{selectedEvent.titre}</Text>
+                    <TouchableOpacity style={styles.shareEventRow} onPress={() => setShareModalVisible(true)}>
+                      <Ionicons name="share-social-outline" size={14} color={colors.terra} />
+                      <Text style={styles.shareEventRowText}>Partager cet événement</Text>
+                    </TouchableOpacity>
                     <View style={styles.modalBadges}>
                       {selectedEvent.payant
                         ? <View style={styles.paidBadge}><Text style={styles.paidText}>{selectedEvent.prix ? `${selectedEvent.prix} €` : 'Payant'}</Text></View>
@@ -1421,14 +1430,16 @@ export default function EvenementsScreen() {
                       </View>
                     ) : null}
 
+                    {/* Independant du mode d'inscription (site tiers ou native) : affiche
+                        des que renseigne, quelle que soit la branche ci-dessous. */}
+                    {selectedEvent.code_promo ? (
+                      <View style={styles.promoBox}>
+                        <Text style={styles.promoLabel}>Code promo</Text>
+                        <Text style={styles.promoCode}>{selectedEvent.code_promo}</Text>
+                      </View>
+                    ) : null}
                     {selectedEvent.site_web ? (
                       <>
-                        {selectedEvent.code_promo ? (
-                          <View style={styles.promoBox}>
-                            <Text style={styles.promoLabel}>Code promo à utiliser sur leur site</Text>
-                            <Text style={styles.promoCode}>{selectedEvent.code_promo}</Text>
-                          </View>
-                        ) : null}
                         <TouchableOpacity style={styles.joinBtn} onPress={() => Linking.openURL(selectedEvent.site_web!)}>
                           <Text style={styles.joinBtnText}>Voir le site officiel</Text>
                         </TouchableOpacity>
@@ -1459,6 +1470,96 @@ export default function EvenementsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Modal partage événement (Instagram + lien) ── */}
+      <Modal visible={shareModalVisible} transparent animationType="slide" onRequestClose={() => setShareModalVisible(false)}>
+        <TouchableOpacity style={styles.shareModalOverlay} activeOpacity={1} onPress={() => setShareModalVisible(false)} />
+        <View style={styles.shareModalSheet}>
+          <View style={styles.shareModalHandle} />
+          <Text style={styles.shareModalTitle}>Partager l'événement</Text>
+          <Text style={styles.shareModalSub}>En story Instagram, ou par lien direct</Text>
+          <TouchableOpacity
+            style={styles.shareModalBtnPrimary}
+            disabled={sharingImage}
+            onPress={async () => {
+              setSharingImage(true);
+              try {
+                if (shareEventCardRef.current) {
+                  const uri = await captureRef(shareEventCardRef, { format: 'png', quality: 1 });
+                  const canShare = await Sharing.isAvailableAsync();
+                  if (canShare) {
+                    await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager cet événement' });
+                    setShareModalVisible(false);
+                    setSharingImage(false);
+                    return;
+                  }
+                }
+              } catch {}
+              setSharingImage(false);
+            }}
+          >
+            <Ionicons name="share-social-outline" size={16} color="#fff" />
+            <Text style={styles.shareModalBtnPrimaryText}>{sharingImage ? 'Génération…' : "Partager l'image"}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.shareModalBtnSecondary}
+            onPress={() => {
+              if (!selectedEvent) return;
+              const link = `https://thepacklameute.fr/evenements.html?event=${selectedEvent.id}`;
+              Clipboard.setString(link);
+              Alert.alert('Lien copié !', link);
+              setShareModalVisible(false);
+            }}
+          >
+            <Ionicons name="link-outline" size={16} color={colors.terra} />
+            <Text style={styles.shareModalBtnSecondaryText}>Copier le lien</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ marginTop: 4, alignItems: 'center', paddingVertical: 8 }} onPress={() => setShareModalVisible(false)}>
+            <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>Annuler</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Carte hors-ecran capturee pour le partage image (story Instagram, 9:16) */}
+      {selectedEvent ? (
+        <View ref={shareEventCardRef} collapsable={false} style={styles.shareEventCard}>
+          <Text style={styles.shareEventEyebrow}>THE PACK · ÉVÉNEMENT</Text>
+          <Text style={styles.shareEventTitle} numberOfLines={3}>{selectedEvent.titre}</Text>
+          <View style={selectedEvent.payant ? styles.shareEventBadgePaid : styles.shareEventBadgeFree}>
+            <Text style={selectedEvent.payant ? styles.shareEventBadgePaidText : styles.shareEventBadgeFreeText}>
+              {selectedEvent.payant ? (selectedEvent.prix ? `${selectedEvent.prix} €` : 'PAYANT') : 'GRATUIT'}
+            </Text>
+          </View>
+          <View style={styles.shareEventLine} />
+          <View style={styles.shareEventInfoRow}>
+            <Ionicons name="calendar-outline" size={16} color="rgba(196,105,58,0.85)" />
+            <View>
+              <Text style={styles.shareEventInfoMain}>
+                {new Date(selectedEvent.date_heure).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </Text>
+              <Text style={styles.shareEventInfoSub}>à {fmtHeure(new Date(selectedEvent.date_heure))}</Text>
+            </View>
+          </View>
+          <View style={styles.shareEventInfoRow}>
+            <Ionicons name="location-outline" size={16} color="rgba(196,105,58,0.85)" />
+            <View>
+              <Text style={styles.shareEventInfoMain}>{selectedEvent.ville}</Text>
+              {selectedEvent.adresse ? <Text style={styles.shareEventInfoSub}>{selectedEvent.adresse}</Text> : null}
+            </View>
+          </View>
+          {selectedEvent.code_promo ? (
+            <View style={styles.shareEventCodeBox}>
+              <Text style={styles.shareEventCodeText}>Code : {selectedEvent.code_promo}</Text>
+            </View>
+          ) : null}
+          <View style={styles.shareEventFooter}>
+            <Text style={styles.shareEventFooterUrl}>thepacklameute.fr</Text>
+            <View style={styles.shareEventFooterBadge}>
+              <Text style={styles.shareEventFooterBadgeText}>Je participe →</Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {/* ── Modal créer événement ── */}
       <Modal visible={createModal} animationType="slide" transparent onRequestClose={() => { setCreateModal(false); resetForm(); }}>
@@ -1779,6 +1880,59 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 13, marginTop: 10,
   },
   saveBtnFullText: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.bordeaux },
+
+  shareEventRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  shareEventRowText: { fontFamily: 'DMSans_600SemiBold', fontSize: 12.5, color: colors.terra },
+
+  // ── Partage événement (modal + carte hors-ecran) ──
+  shareModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)' },
+  shareModalSheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#fff',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32,
+  },
+  shareModalHandle: { width: 36, height: 4, borderRadius: 4, backgroundColor: '#e0d6cc', alignSelf: 'center', marginBottom: 18 },
+  shareModalTitle: { fontFamily: 'DMSans_600SemiBold', fontSize: 17, color: colors.bordeaux, textAlign: 'center', marginBottom: 4 },
+  shareModalSub: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', marginBottom: 20 },
+  shareModalBtnPrimary: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.bordeaux, borderRadius: 14, padding: 15, marginBottom: 10,
+  },
+  shareModalBtnPrimaryText: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.ivory },
+  shareModalBtnSecondary: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.terra + '10', borderWidth: 1.5, borderColor: colors.terra + '4D',
+    borderRadius: 14, padding: 15,
+  },
+  shareModalBtnSecondaryText: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.terra },
+
+  shareEventCard: {
+    position: 'absolute', left: -9999, top: 0,
+    width: 360, height: 640, backgroundColor: '#2A1010',
+    paddingHorizontal: 28, paddingTop: 40, paddingBottom: 28,
+  },
+  shareEventEyebrow: { fontFamily: 'DMSans_600SemiBold', fontSize: 10, color: 'rgba(196,105,58,0.75)', letterSpacing: 2 },
+  shareEventTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontStyle: 'italic', fontSize: 26, color: '#F5EFE0', lineHeight: 32, marginTop: 14, marginBottom: 14 },
+  shareEventBadgeFree: { alignSelf: 'flex-start', backgroundColor: 'rgba(46,125,50,0.22)', borderWidth: 1, borderColor: 'rgba(129,199,132,0.32)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5 },
+  shareEventBadgeFreeText: { fontFamily: 'DMSans_600SemiBold', fontSize: 10, color: '#81c784' },
+  shareEventBadgePaid: { alignSelf: 'flex-start', backgroundColor: 'rgba(198,40,40,0.2)', borderWidth: 1, borderColor: 'rgba(239,154,154,0.28)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5 },
+  shareEventBadgePaidText: { fontFamily: 'DMSans_600SemiBold', fontSize: 10, color: '#ef9a9a' },
+  shareEventLine: { height: 1, backgroundColor: 'rgba(196,105,58,0.38)', marginVertical: 24 },
+  shareEventInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  shareEventInfoMain: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: '#F5EFE0' },
+  shareEventInfoSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.4)', marginTop: 2 },
+  shareEventCodeBox: {
+    alignSelf: 'flex-start', marginTop: 8, borderWidth: 1.5, borderColor: 'rgba(196,105,58,0.65)', borderStyle: 'dashed',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
+  },
+  shareEventCodeText: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: '#F5EFE0', letterSpacing: 1 },
+  shareEventFooter: {
+    position: 'absolute', left: 28, right: 28, bottom: 28,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(245,239,224,0.1)',
+  },
+  shareEventFooterUrl: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: 'rgba(245,239,224,0.25)', letterSpacing: 1 },
+  shareEventFooterBadge: { backgroundColor: colors.terra, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
+  shareEventFooterBadgeText: { fontFamily: 'DMSans_600SemiBold', fontSize: 11, color: '#fff' },
 
   // Create form
   createHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
