@@ -8,6 +8,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
+import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,6 +56,13 @@ function fmtDate(d: Date) {
 function fmtHeure(d: Date) {
   return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 export default function EvenementsScreen() {
   const navigation = useNavigation<any>();
@@ -68,6 +76,12 @@ export default function EvenementsScreen() {
   const [raceFilter, setRaceFilter] = useState<string>('');
   const [villeModalOpen, setVilleModalOpen] = useState(false);
   const [raceModalOpen, setRaceModalOpen] = useState(false);
+  const [prixFilter, setPrixFilter] = useState<'' | 'gratuit' | 'payant'>('');
+  const [prixModalOpen, setPrixModalOpen] = useState(false);
+  const [distanceFilter, setDistanceFilter] = useState<0 | 5 | 10 | 20>(0);
+  const [distanceModalOpen, setDistanceModalOpen] = useState(false);
+  const [distanceLoading, setDistanceLoading] = useState(false);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [selectedEvent, setSelectedEvent] = useState<Evenement | null>(null);
@@ -735,6 +749,29 @@ export default function EvenementsScreen() {
     Alert.alert('Événement soumis', 'Il sera visible après validation par l\'équipe The Pack.');
   }
 
+  // La position n'est demandee qu'au premier choix d'une distance (pas au chargement
+  // de l'ecran) et mise en cache pour les changements suivants (5km -> 10km etc.).
+  async function selectDistanceFilter(km: 0 | 5 | 10 | 20) {
+    setDistanceModalOpen(false);
+    if (km === 0) { setDistanceFilter(0); return; }
+    if (userCoords) { setDistanceFilter(km); return; }
+    setDistanceLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Position requise', 'Active ta position pour filtrer les événements par distance.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({});
+      setUserCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      setDistanceFilter(km);
+    } catch {
+      Alert.alert('Erreur', 'Impossible de récupérer ta position pour le moment.');
+    } finally {
+      setDistanceLoading(false);
+    }
+  }
+
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour voir et créer des événements dog-friendly." />;
 
@@ -748,7 +785,9 @@ export default function EvenementsScreen() {
   const racesDisponibles = [...new Set(evenements.flatMap(e => e.races || []))].sort((a, b) => a.localeCompare(b, 'fr'));
   const evenementsAffiches = evenements.filter(e =>
     (!villeFilter || e.ville === villeFilter) &&
-    (!raceFilter || !e.races?.length || e.races.includes(raceFilter))
+    (!raceFilter || !e.races?.length || e.races.includes(raceFilter)) &&
+    (!prixFilter || (prixFilter === 'gratuit' ? !e.payant : !!e.payant)) &&
+    (!distanceFilter || (!!userCoords && !!e.lat && !!e.lng && haversineKm(userCoords.lat, userCoords.lng, e.lat, e.lng) <= distanceFilter))
   );
   if (filter !== 'mesEvents') {
     evenementsAffiches.sort((a, b) => (b.mise_en_avant ? 1 : 0) - (a.mise_en_avant ? 1 : 0));
@@ -825,23 +864,67 @@ export default function EvenementsScreen() {
         ))}
       </View>
 
-      {/* Filtres ville / race */}
-      {(villesDisponibles.length > 0 || racesDisponibles.length > 0) && (
-        <View style={styles.dropdownFiltersRow}>
-          {villesDisponibles.length > 0 && (
-            <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setVilleModalOpen(true)}>
-              <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{villeFilter || 'Toutes les villes'}</Text>
-              <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
-            </TouchableOpacity>
+      {/* Filtres ville / race / prix / distance */}
+      <View style={styles.dropdownFiltersRow}>
+        {villesDisponibles.length > 0 && (
+          <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setVilleModalOpen(true)}>
+            <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{villeFilter || 'Toutes les villes'}</Text>
+            <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
+          </TouchableOpacity>
+        )}
+        {racesDisponibles.length > 0 && (
+          <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setRaceModalOpen(true)}>
+            <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{raceFilter || 'Toutes les races'}</Text>
+            <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={[styles.dropdownFilterBtn, !!prixFilter && styles.dropdownFilterBtnActive]} onPress={() => setPrixModalOpen(true)}>
+          <Text style={[styles.dropdownFilterBtnText, !!prixFilter && styles.dropdownFilterBtnTextActive]} numberOfLines={1}>
+            {prixFilter === 'gratuit' ? '🎁 Gratuit' : prixFilter === 'payant' ? 'Payant' : 'Tous les prix'}
+          </Text>
+          <Ionicons name="chevron-down" size={14} color={prixFilter ? colors.ivory : colors.bordeaux} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.dropdownFilterBtn, !!distanceFilter && styles.dropdownFilterBtnActive]} onPress={() => setDistanceModalOpen(true)} disabled={distanceLoading}>
+          {distanceLoading ? (
+            <ActivityIndicator size="small" color={colors.bordeaux} />
+          ) : (
+            <>
+              <Text style={[styles.dropdownFilterBtnText, !!distanceFilter && styles.dropdownFilterBtnTextActive]} numberOfLines={1}>
+                {distanceFilter ? `📍 ${distanceFilter} km` : 'Toutes distances'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color={distanceFilter ? colors.ivory : colors.bordeaux} />
+            </>
           )}
-          {racesDisponibles.length > 0 && (
-            <TouchableOpacity style={styles.dropdownFilterBtn} onPress={() => setRaceModalOpen(true)}>
-              <Text style={styles.dropdownFilterBtnText} numberOfLines={1}>{raceFilter || 'Toutes les races'}</Text>
-              <Ionicons name="chevron-down" size={14} color={colors.bordeaux} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={prixModalOpen} animationType="slide" transparent onRequestClose={() => setPrixModalOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setPrixModalOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>Filtrer par prix</Text>
+            {([{ v: '', label: 'Tous les prix' }, { v: 'gratuit', label: '🎁 Gratuit' }, { v: 'payant', label: 'Payant' }] as const).map(o => (
+              <TouchableOpacity key={o.v} style={styles.pickerRow} onPress={() => { setPrixFilter(o.v); setPrixModalOpen(false); }}>
+                <Text style={[styles.pickerRowText, prixFilter === o.v && styles.pickerRowTextActive]}>{o.label}</Text>
+                {prixFilter === o.v && <Ionicons name="checkmark" size={16} color={colors.bordeaux} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={distanceModalOpen} animationType="slide" transparent onRequestClose={() => setDistanceModalOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setDistanceModalOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>Filtrer par distance</Text>
+            {([{ v: 0, label: 'Toutes distances' }, { v: 5, label: '📍 5 km autour de moi' }, { v: 10, label: '📍 10 km autour de moi' }, { v: 20, label: '📍 20 km autour de moi' }] as const).map(o => (
+              <TouchableOpacity key={o.v} style={styles.pickerRow} onPress={() => selectDistanceFilter(o.v)}>
+                <Text style={[styles.pickerRowText, distanceFilter === o.v && styles.pickerRowTextActive]}>{o.label}</Text>
+                {distanceFilter === o.v && <Ionicons name="checkmark" size={16} color={colors.bordeaux} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal visible={villeModalOpen} animationType="slide" transparent onRequestClose={() => setVilleModalOpen(false)}>
         <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setVilleModalOpen(false)}>
@@ -1736,6 +1819,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, maxWidth: 220,
   },
   dropdownFilterBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  dropdownFilterBtnActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  dropdownFilterBtnTextActive: { color: colors.ivory },
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   pickerSheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '70%', padding: 20 },
   pickerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginBottom: 12 },
