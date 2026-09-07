@@ -1305,10 +1305,10 @@ export default function CarteScreen() {
       return;
     }
 
-    // +25 points
-    supabase.from('profils').select('points').eq('id', userId).single().then(({ data }) => {
-      if (data) supabase.from('profils').update({ points: (data.points || 0) + 25 }).eq('id', userId);
-    });
+    // +25 points (incrementation atomique cote DB, evite de perdre un point si une
+    // autre action a points s'execute au meme moment -- cf increment_points deja
+    // utilise cote web dans carte.html)
+    supabase.rpc('increment_points', { user_id: userId, pts: 25 });
 
     setBaladeLoading(false);
     discardBaladeTracking();
