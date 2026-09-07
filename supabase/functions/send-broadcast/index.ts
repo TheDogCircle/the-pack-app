@@ -35,12 +35,12 @@ serve(async (req) => {
   }
 
   const {
-    title, body: message, target_type, target_id, url, test_user_id,
+    title, body: message, target_type, target_id, post_id, url, test_user_id,
     ville, preview,
   } = body as {
     title?: string; body?: string;
     target_type?: 'lieu' | 'event' | 'conversation' | 'url' | 'partenaire' | 'partenaires' | 'none';
-    target_id?: string; url?: string; test_user_id?: string;
+    target_id?: string; post_id?: string; url?: string; test_user_id?: string;
     ville?: string; preview?: boolean;
   };
 
@@ -78,7 +78,7 @@ serve(async (req) => {
   else if (target_type === 'event' && target_id) { data.targetType = 'event'; data.eventId = target_id; }
   else if (target_type === 'conversation' && target_id) { data.targetType = 'conversation'; data.conversationId = target_id; }
   else if (target_type === 'url' && url) { data.targetType = 'url'; data.url = url; }
-  else if (target_type === 'partenaire' && target_id) { data.targetType = 'partenaire'; data.partenaireId = target_id; }
+  else if (target_type === 'partenaire' && target_id) { data.targetType = 'partenaire'; data.partenaireId = target_id; if (post_id) data.postId = post_id; }
   else if (target_type === 'partenaires') { data.targetType = 'partenaires'; }
 
   if (!users || users.length === 0) {

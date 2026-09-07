@@ -315,7 +315,7 @@ export default function Navigation() {
       } else if (data.targetType === 'url' && data.url) {
         Linking.openURL(data.url);
       } else if (data.targetType === 'partenaire' && data.partenaireId) {
-        mapNavigation.setPendingPartenaire(data.partenaireId);
+        mapNavigation.setPendingPartenaire(data.partenaireId, data.postId);
         navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
       } else if (data.targetType === 'partenaires') {
         navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);

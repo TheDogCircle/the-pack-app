@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   Image, Linking, ActivityIndicator, RefreshControl,
@@ -185,17 +185,37 @@ function CandidatureMarqueModal({ visible, onClose }: { visible: boolean; onClos
 // ── Brand detail modal ──────────────────────────────────────────────────────
 
 function BrandModal({
-  partenaire, posts, visible, onClose,
+  partenaire, posts, visible, highlightPostId, onClose,
 }: {
-  partenaire: Partenaire | null; posts: Post[]; visible: boolean; onClose: () => void;
+  partenaire: Partenaire | null; posts: Post[]; visible: boolean; highlightPostId?: string | null; onClose: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const scrollRef = useRef<ScrollView>(null);
+  const postNodeRefs = useRef<Record<string, View | null>>({});
 
   useEffect(() => { if (!visible) setRevealed({}); }, [visible]);
   useEffect(() => {
     if (visible && partenaire) trackEvent('page_view', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id });
   }, [visible, partenaire]);
+
+  // Arrivee via une notification "au clic, ouvrir -> une publication precise" :
+  // scrolle jusqu'a la publication visee des que son noeud est mesurable (le
+  // premier layout d'une ScrollView de longueur variable n'est pas immediat).
+  useEffect(() => {
+    if (!visible || !highlightPostId) return;
+    const timer = setTimeout(() => {
+      const node = postNodeRefs.current[highlightPostId];
+      if (node && scrollRef.current) {
+        node.measureLayout(
+          scrollRef.current.getInnerViewNode(),
+          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true }),
+          () => {},
+        );
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [visible, highlightPostId, posts]);
 
   if (!partenaire) return null;
 
@@ -219,7 +239,7 @@ function BrandModal({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <StatusBar barStyle="light-content" />
-      <ScrollView style={s.modalContainer} contentContainerStyle={s.modalContent} bounces>
+      <ScrollView ref={scrollRef} style={s.modalContainer} contentContainerStyle={s.modalContent} bounces>
 
         {/* Hero */}
         <View style={s.hero}>
@@ -303,8 +323,13 @@ function BrandModal({
               {otherPosts.map(post => {
                 const periode = buildPeriode(post);
                 const isRevealed = revealed[post.id];
+                const isHighlighted = post.id === highlightPostId;
                 return (
-                  <View key={post.id} style={s.postItem}>
+                  <View
+                    key={post.id}
+                    ref={node => { postNodeRefs.current[post.id] = node; }}
+                    style={[s.postItem, isHighlighted && s.postItemHighlighted]}
+                  >
                     {post.image_url
                       ? <Image source={{ uri: post.image_url }} style={s.postItemImg} resizeMode="cover" />
                       : null}
@@ -344,8 +369,13 @@ function BrandModal({
               </View>
               {offerPosts.map(post => {
                 const periode = buildPeriode(post);
+                const isHighlighted = post.id === highlightPostId;
                 return (
-                  <View key={post.id} style={s.offerCard}>
+                  <View
+                    key={post.id}
+                    ref={node => { postNodeRefs.current[post.id] = node; }}
+                    style={[s.offerCard, isHighlighted && s.offerCardHighlighted]}
+                  >
                     {post.image_url
                       ? <Image source={{ uri: post.image_url }} style={s.offerCardImg} resizeMode="cover" />
                       : null}
@@ -498,6 +528,7 @@ export default function PartenairesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Partenaire | null>(null);
+  const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
   const [showCandidature, setShowCandidature] = useState(false);
 
   useEffect(() => { init(); }, [session?.user?.id]);
@@ -506,17 +537,17 @@ export default function PartenairesScreen() {
   // (diffusion "au clic, ouvrir -> une marque partenaire precise"). Meme mecanisme
   // que openEventById dans EvenementsScreen.tsx : set/consume + abonnement direct,
   // pour couvrir a la fois le premier montage et un ecran deja monte.
-  const openPartenaireById = useCallback((pendingId: string) => {
+  const openPartenaireById = useCallback((pending: { partenaireId: string; postId?: string }) => {
     setPartenaires(current => {
-      const found = current.find(p => p.id === pendingId);
-      if (found) setSelectedBrand(found);
+      const found = current.find(p => p.id === pending.partenaireId);
+      if (found) { setSelectedBrand(found); setHighlightPostId(pending.postId || null); }
       return current;
     });
   }, []);
 
   useEffect(() => {
-    const pendingId = mapNavigation.consumePartenaire();
-    if (pendingId) openPartenaireById(pendingId);
+    const pending = mapNavigation.consumePartenaire();
+    if (pending) openPartenaireById(pending);
   }, [partenaires, openPartenaireById]);
 
   useEffect(() => {
@@ -668,7 +699,8 @@ export default function PartenairesScreen() {
         partenaire={selectedBrand}
         posts={selectedBrand ? postsFor(selectedBrand.id) : []}
         visible={!!selectedBrand}
-        onClose={() => setSelectedBrand(null)}
+        highlightPostId={highlightPostId}
+        onClose={() => { setSelectedBrand(null); setHighlightPostId(null); }}
       />
 
       <CandidatureMarqueModal
@@ -833,11 +865,18 @@ const s = StyleSheet.create({
   offerCardImg: { width: '100%', height: 180 },
   offerCardBody: { padding: 16, gap: 6 },
   offerCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux, lineHeight: 24 },
+  offerCardHighlighted: {
+    borderWidth: 2.5, borderColor: colors.bordeaux,
+    shadowOpacity: 0.28, shadowRadius: 12,
+  },
 
   // Post item
   postItem: {
     backgroundColor: colors.white, borderRadius: 14, overflow: 'hidden',
     borderWidth: 1, borderColor: colors.border, marginBottom: 12,
+  },
+  postItemHighlighted: {
+    borderWidth: 2.5, borderColor: colors.terra,
   },
   postItemImg: { width: '100%', height: 140 },
   photoStrip: { marginTop: 6 },
