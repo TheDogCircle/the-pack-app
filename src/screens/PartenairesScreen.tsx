@@ -540,7 +540,12 @@ export default function PartenairesScreen() {
   const openPartenaireById = useCallback((pending: { partenaireId: string; postId?: string }) => {
     setPartenaires(current => {
       const found = current.find(p => p.id === pending.partenaireId);
-      if (found) { setSelectedBrand(found); setHighlightPostId(pending.postId || null); }
+      if (found) { setSelectedBrand(found); setHighlightPostId(pending.postId || null); return current; }
+      // Pas encore dans la liste chargee (notif tapee avant que l'onglet Services ait
+      // jamais ete monte : `partenaires` est encore vide a ce stade) : on va la chercher
+      // directement, meme pattern de secours que openEventById dans EvenementsScreen.tsx.
+      supabase.from('partenaires').select('*').eq('id', pending.partenaireId).maybeSingle()
+        .then(({ data }) => { if (data) { setSelectedBrand(data as Partenaire); setHighlightPostId(pending.postId || null); } });
       return current;
     });
   }, []);
