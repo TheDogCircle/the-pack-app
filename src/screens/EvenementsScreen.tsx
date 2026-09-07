@@ -1412,7 +1412,12 @@ export default function EvenementsScreen() {
       </Modal>
 
       {/* ── Modal détail événement ── */}
-      <Modal visible={!!selectedEvent} animationType="slide" transparent onRequestClose={() => setSelectedEvent(null)}>
+      <Modal
+        visible={!!selectedEvent}
+        animationType="slide"
+        transparent
+        onRequestClose={() => (shareModalVisible ? setShareModalVisible(false) : setSelectedEvent(null))}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedEvent(null)}>
@@ -1561,10 +1566,14 @@ export default function EvenementsScreen() {
             })()}
           </View>
         </View>
-      </Modal>
 
-      {/* ── Modal partage événement (Instagram + lien) ── */}
-      <Modal visible={shareModalVisible} transparent animationType="slide" onRequestClose={() => setShareModalVisible(false)}>
+        {/* ── Partage événement (Instagram + lien) : overlay dans la MEME Modal que
+            le detail, pas une deuxieme <Modal> empilee -- iOS ne presente pas de
+            facon fiable un deuxieme UIModalPresentationController pendant qu'un
+            premier est deja affiche (le bouton "Partager" semblait ne rien faire :
+            le state changeait bien, mais rien ne s'affichait). ── */}
+        {shareModalVisible && (
+        <View style={StyleSheet.absoluteFillObject}>
         <TouchableOpacity style={styles.shareModalOverlay} activeOpacity={1} onPress={() => setShareModalVisible(false)} />
         <View style={styles.shareModalSheet}>
           <View style={styles.shareModalHandle} />
@@ -1624,6 +1633,8 @@ export default function EvenementsScreen() {
             <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>Annuler</Text>
           </TouchableOpacity>
         </View>
+        </View>
+        )}
       </Modal>
 
       {/* Carte hors-ecran capturee pour le partage image (story Instagram, 9:16) */}
