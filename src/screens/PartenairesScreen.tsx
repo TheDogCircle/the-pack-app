@@ -12,6 +12,7 @@ import { supabase, trackEvent } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
+import { mapNavigation } from '../lib/mapNavigation';
 
 const TYPE_LABEL: Record<string, string> = {
   offre: 'Offre exclusive',
@@ -500,6 +501,28 @@ export default function PartenairesScreen() {
   const [showCandidature, setShowCandidature] = useState(false);
 
   useEffect(() => { init(); }, [session?.user?.id]);
+
+  // Ouvre directement la fiche d'une marque quand on arrive via une notification
+  // (diffusion "au clic, ouvrir -> une marque partenaire precise"). Meme mecanisme
+  // que openEventById dans EvenementsScreen.tsx : set/consume + abonnement direct,
+  // pour couvrir a la fois le premier montage et un ecran deja monte.
+  const openPartenaireById = useCallback((pendingId: string) => {
+    setPartenaires(current => {
+      const found = current.find(p => p.id === pendingId);
+      if (found) setSelectedBrand(found);
+      return current;
+    });
+  }, []);
+
+  useEffect(() => {
+    const pendingId = mapNavigation.consumePartenaire();
+    if (pendingId) openPartenaireById(pendingId);
+  }, [partenaires, openPartenaireById]);
+
+  useEffect(() => {
+    mapNavigation.onPartenairePending(openPartenaireById);
+    return () => mapNavigation.onPartenairePending(null);
+  }, [openPartenaireById]);
 
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();

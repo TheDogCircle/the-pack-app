@@ -314,6 +314,11 @@ export default function Navigation() {
         navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
       } else if (data.targetType === 'url' && data.url) {
         Linking.openURL(data.url);
+      } else if (data.targetType === 'partenaire' && data.partenaireId) {
+        mapNavigation.setPendingPartenaire(data.partenaireId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
+      } else if (data.targetType === 'partenaires') {
+        navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
       }
     }
   }
@@ -325,6 +330,18 @@ export default function Navigation() {
       detail: JSON.stringify({ data, navReady: navigationRef.isReady() }),
     }).then(() => {}, () => {});
     if (!data) return;
+    // Taux de clic par campagne (cf notifications_log / _shared/pushTracking.ts cote
+    // edge functions) : notifLogId n'est present que sur les notifications envoyees via
+    // le helper partage, les anciennes/non-instrumentees sont simplement ignorees ici.
+    if (data.notifLogId) {
+      supabase.auth.getSession().then(({ data: sess }) => {
+        supabase.from('notification_opens').insert({
+          notification_log_id: data.notifLogId,
+          notification_type: data.type || null,
+          user_id: sess?.session?.user?.id ?? null,
+        }).then(() => {}, () => {});
+      });
+    }
     if (navigationRef.isReady()) applyNotificationData(data);
     else setPendingNotifData(data);
   }

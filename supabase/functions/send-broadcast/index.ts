@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
 const ADMIN_IDS = ['28f8c781-f384-4fcd-89a2-6347e7ca352a', '69a4bea8-8e26-4c07-8fae-b7ab6b6f39ed'];
 
@@ -38,7 +39,7 @@ serve(async (req) => {
     ville, preview,
   } = body as {
     title?: string; body?: string;
-    target_type?: 'lieu' | 'event' | 'conversation' | 'url' | 'none';
+    target_type?: 'lieu' | 'event' | 'conversation' | 'url' | 'partenaire' | 'partenaires' | 'none';
     target_id?: string; url?: string; test_user_id?: string;
     ville?: string; preview?: boolean;
   };
@@ -77,31 +78,28 @@ serve(async (req) => {
   else if (target_type === 'event' && target_id) { data.targetType = 'event'; data.eventId = target_id; }
   else if (target_type === 'conversation' && target_id) { data.targetType = 'conversation'; data.conversationId = target_id; }
   else if (target_type === 'url' && url) { data.targetType = 'url'; data.url = url; }
+  else if (target_type === 'partenaire' && target_id) { data.targetType = 'partenaire'; data.partenaireId = target_id; }
+  else if (target_type === 'partenaires') { data.targetType = 'partenaires'; }
 
   if (!users || users.length === 0) {
     return new Response(JSON.stringify({ sent: 0, reason: 'no matching users' }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 
-  const messages = users.map((u: any) => ({
+  // Un envoi de test (test_user_id, un seul destinataire pour verifier le rendu avant
+  // diffusion reelle) n'est pas journalise comme une campagne.
+  const logId = test_user_id ? null : await createNotifLog(supabase, { type: 'broadcast', lieuId: target_type === 'lieu' ? target_id ?? null : null, targetId: target_id ?? null, title, body: message });
+  const messages: PushMessage[] = users.map((u: any) => ({
     to: u.push_token,
     title,
     body: message,
-    data,
+    data: logId ? { ...data, notifLogId: logId } : data,
     sound: 'default',
     badge: 1,
   }));
 
-  let sent = 0;
-  for (let i = 0; i < messages.length; i += 100) {
-    const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(messages.slice(i, i + 100)),
-    });
-    if (expoRes.ok) sent += Math.min(100, messages.length - i);
-    const expoJson = await expoRes.json().catch(() => null);
-    console.log('[send-broadcast] batch', Math.floor(i / 100), JSON.stringify(expoJson).slice(0, 300));
-  }
+  const tickets = await sendPushBatch(messages);
+  if (logId) await finalizeNotifLog(supabase, logId, messages.length, tickets);
+  const sent = tickets.filter(t => t.status === 'ok').length;
 
   return new Response(JSON.stringify({ sent, total: messages.length }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } });
 });
