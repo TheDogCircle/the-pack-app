@@ -34,6 +34,7 @@ const conversationPending = createPending<string>();
 const eventPending = createPending<string>();
 const postPending = createPending<string>();
 const partenairePending = createPending<{ partenaireId: string; postId?: string }>();
+const eventsFilterPending = createPending<string>();
 
 let _returnCallback: (() => void) | null = null;
 
@@ -72,4 +73,8 @@ export const mapNavigation = {
   setPendingPartenaire(partenaireId: string, postId?: string) { partenairePending.set({ partenaireId, postId }); },
   consumePartenaire(): { partenaireId: string; postId?: string } | null { return partenairePending.consume(); },
   onPartenairePending(cb: ((v: { partenaireId: string; postId?: string }) => void) | null) { partenairePending.subscribe(cb); },
+
+  setPendingEventsFilter(filter: string) { eventsFilterPending.set(filter); },
+  consumeEventsFilter(): string | null { return eventsFilterPending.consume(); },
+  onEventsFilterPending(cb: ((filter: string) => void) | null) { eventsFilterPending.subscribe(cb); },
 };

@@ -279,6 +279,13 @@ export default function Navigation() {
     } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today') {
       if (data.eventId) mapNavigation.setPendingEvent(data.eventId);
       navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+    } else if (data.type === 'private_event_invite') {
+      // N'a jamais eu de branche ici depuis l'ajout de ce type de notif : le tap ne
+      // faisait litteralement rien. L'invitation elle-meme n'a pas d'id dans le payload
+      // (seulement le type), donc on ouvre l'onglet "Mes events" ou elle apparait --
+      // pas de fiche precise possible sans modifier aussi l'emetteur.
+      mapNavigation.setPendingEventsFilter('mesEvents');
+      navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
     } else if (data.type === 'follow' || data.type === 'follow_accepted') {
       if (data.userId) {
         navigationRef.navigate('ProfilPublic', { userId: data.userId, prenom: '' });

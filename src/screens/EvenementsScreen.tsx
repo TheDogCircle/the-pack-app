@@ -193,6 +193,18 @@ export default function EvenementsScreen() {
     return () => mapNavigation.onEventPending(null);
   }, [openEventById]);
 
+  // Notif "invitation a un event prive" tapee : bascule sur l'onglet "Mes events"
+  // (ancien type de notif sans aucune branche de navigation -- le tap ne faisait rien).
+  useEffect(() => {
+    const pendingFilter = mapNavigation.consumeEventsFilter();
+    if (pendingFilter === 'mesEvents') setFilter('mesEvents');
+  }, []);
+
+  useEffect(() => {
+    mapNavigation.onEventsFilterPending((f) => { if (f === 'mesEvents') setFilter('mesEvents'); });
+    return () => mapNavigation.onEventsFilterPending(null);
+  }, []);
+
   async function load() {
     setLoading(true);
     try {
@@ -596,7 +608,7 @@ export default function EvenementsScreen() {
       const { data: profs } = await supabase.from('profils').select('id,push_token,notif_messages').in('id', inviteSelected.map(p => p.id));
       (profs || []).forEach((pr: any) => {
         if (pr.push_token && pr.notif_messages !== false) {
-          sendPushNotification(pr.push_token, '🐾 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite' });
+          sendPushNotification(pr.push_token, '🐾 Invitation à un événement privé', "Tu es invité·e à un événement privé sur The Pack La Meute", { type: 'private_event_invite', evenementPriveId: inviteEventId });
         }
       });
       setInviteModal(false);
