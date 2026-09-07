@@ -540,12 +540,26 @@ export default function PartenairesScreen() {
   const openPartenaireById = useCallback((pending: { partenaireId: string; postId?: string }) => {
     setPartenaires(current => {
       const found = current.find(p => p.id === pending.partenaireId);
-      if (found) { setSelectedBrand(found); setHighlightPostId(pending.postId || null); return current; }
+      if (found) {
+        setSelectedBrand(found);
+        setHighlightPostId(pending.postId || null);
+        supabase.from('push_debug_logs').insert({
+          to_token: 'PARTENAIRE_OPEN', title: 'openPartenaireById: trouve dans la liste chargee',
+          detail: JSON.stringify({ ...pending, partenairesCount: current.length }),
+        }).then(() => {}, () => {});
+        return current;
+      }
       // Pas encore dans la liste chargee (notif tapee avant que l'onglet Services ait
       // jamais ete monte : `partenaires` est encore vide a ce stade) : on va la chercher
       // directement, meme pattern de secours que openEventById dans EvenementsScreen.tsx.
       supabase.from('partenaires').select('*').eq('id', pending.partenaireId).maybeSingle()
-        .then(({ data }) => { if (data) { setSelectedBrand(data as Partenaire); setHighlightPostId(pending.postId || null); } });
+        .then(({ data, error }) => {
+          supabase.from('push_debug_logs').insert({
+            to_token: 'PARTENAIRE_FALLBACK', title: 'openPartenaireById: fetch direct',
+            detail: JSON.stringify({ ...pending, found: !!data, error: error?.message || null, partenairesCountAtCallTime: current.length }),
+          }).then(() => {}, () => {});
+          if (data) { setSelectedBrand(data as Partenaire); setHighlightPostId(pending.postId || null); }
+        });
       return current;
     });
   }, []);

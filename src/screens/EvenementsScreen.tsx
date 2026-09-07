@@ -1542,7 +1542,16 @@ export default function EvenementsScreen() {
                       <Ionicons name={selectedEvent.est_enregistre ? 'bookmark' : 'bookmark-outline'} size={16} color={colors.bordeaux} />
                       <Text style={styles.saveBtnFullText}>{selectedEvent.est_enregistre ? 'Enregistré' : 'Enregistrer pour plus tard'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.shareEventRow} onPress={() => setShareModalVisible(true)}>
+                    <TouchableOpacity
+                      style={styles.shareEventRow}
+                      onPress={() => {
+                        supabase.from('push_debug_logs').insert({
+                          to_token: 'SHARE_EVENT_TAP', title: 'shareEventRow onPress',
+                          detail: JSON.stringify({ eventId: selectedEvent?.id, titre: selectedEvent?.titre }),
+                        }).then(() => {}, () => {});
+                        setShareModalVisible(true);
+                      }}
+                    >
                       <Ionicons name="share-social-outline" size={16} color={colors.terra} />
                       <Text style={styles.shareEventRowText}>Partager cet événement</Text>
                     </TouchableOpacity>
@@ -1570,14 +1579,28 @@ export default function EvenementsScreen() {
                 if (shareEventCardRef.current) {
                   const uri = await captureRef(shareEventCardRef, { format: 'png', quality: 1 });
                   const canShare = await Sharing.isAvailableAsync();
+                  supabase.from('push_debug_logs').insert({
+                    to_token: 'SHARE_EVENT_CAPTURE', title: 'captureRef + isAvailableAsync ok',
+                    detail: JSON.stringify({ eventId: selectedEvent?.id, hasUri: !!uri, canShare }),
+                  }).then(() => {}, () => {});
                   if (canShare) {
                     await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager cet événement' });
                     setShareModalVisible(false);
                     setSharingImage(false);
                     return;
                   }
+                } else {
+                  supabase.from('push_debug_logs').insert({
+                    to_token: 'SHARE_EVENT_NOREF', title: 'shareEventCardRef.current est null',
+                    detail: JSON.stringify({ eventId: selectedEvent?.id }),
+                  }).then(() => {}, () => {});
                 }
-              } catch {}
+              } catch (e: any) {
+                supabase.from('push_debug_logs').insert({
+                  to_token: 'SHARE_EVENT_ERR', title: 'Erreur capture/partage image',
+                  detail: String(e?.message || e),
+                }).then(() => {}, () => {});
+              }
               setSharingImage(false);
             }}
           >

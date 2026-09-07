@@ -450,6 +450,10 @@ export default function Navigation() {
   return (
     <>
     <NavigationContainer ref={navigationRef} onReady={() => {
+        supabase.from('push_debug_logs').insert({
+          to_token: 'NAV_READY', title: 'NavigationContainer onReady',
+          detail: JSON.stringify({ hasPendingNotifData: !!pendingNotifData, pendingNotifData }),
+        }).then(() => {}, () => {});
         if (pendingProfilId) {
           navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
           setPendingProfilId(null);
