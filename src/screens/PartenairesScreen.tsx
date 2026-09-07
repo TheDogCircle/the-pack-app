@@ -516,8 +516,16 @@ export default function PartenairesScreen() {
     if (!parts?.length) { setPartenaires([]); setAllPosts([]); setLoading(false); return; }
     const ids = parts.map((p: any) => p.id);
     const { data: posts } = await supabase.from('partenaire_posts').select('*').in('partenaire_id', ids).eq('actif', true).order('created_at', { ascending: false });
+    // Meme filtrage cote client que sur le web (partenaires.html) : date_debut/date_expiration
+    // permettent de programmer une offre a une heure precise, pas seulement "actif=true".
+    const now = new Date();
+    const visiblePosts = (posts || []).filter(p => {
+      if (p.date_debut && new Date(p.date_debut) > now) return false;
+      if (p.date_expiration && new Date(p.date_expiration) < now) return false;
+      return true;
+    });
     setPartenaires(parts);
-    setAllPosts(posts || []);
+    setAllPosts(visiblePosts);
     setLoading(false);
   }
 
