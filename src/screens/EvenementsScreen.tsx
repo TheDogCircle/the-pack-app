@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, Image, ScrollView,
-  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking, Dimensions, Clipboard,
+  Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView, Linking, Dimensions, Clipboard, Share,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { captureRef } from 'react-native-view-shot';
@@ -1630,6 +1631,22 @@ export default function EvenementsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.shareModalBtnSecondary}
+            onPress={async () => {
+              if (!selectedEvent) return;
+              const link = `https://thepacklameute.fr/evenements.html?event=${selectedEvent.id}`;
+              try {
+                // Ouvre le partage natif (WhatsApp, Messages, Instagram, etc.), plutot
+                // que de se limiter a copier le lien dans le presse-papier.
+                await Share.share({ message: `${selectedEvent.titre} — ${link}`, url: link });
+              } catch {}
+              setShareModalVisible(false);
+            }}
+          >
+            <Ionicons name="share-outline" size={16} color={colors.terra} />
+            <Text style={styles.shareModalBtnSecondaryText}>Partager le lien</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ marginTop: 4, alignItems: 'center', paddingVertical: 8 }}
             onPress={() => {
               if (!selectedEvent) return;
               const link = `https://thepacklameute.fr/evenements.html?event=${selectedEvent.id}`;
@@ -1638,8 +1655,7 @@ export default function EvenementsScreen() {
               setShareModalVisible(false);
             }}
           >
-            <Ionicons name="link-outline" size={16} color={colors.terra} />
-            <Text style={styles.shareModalBtnSecondaryText}>Copier le lien</Text>
+            <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>Ou copier le lien</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ marginTop: 4, alignItems: 'center', paddingVertical: 8 }} onPress={() => setShareModalVisible(false)}>
             <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted }}>Annuler</Text>
@@ -1652,6 +1668,16 @@ export default function EvenementsScreen() {
       {/* Carte hors-ecran capturee pour le partage image (story Instagram, 9:16) */}
       {selectedEvent ? (
         <View ref={shareEventCardRef} collapsable={false} style={styles.shareEventCard}>
+          {selectedEvent.image_url ? (
+            <>
+              <Image source={{ uri: selectedEvent.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+              <LinearGradient
+                colors={['rgba(0,0,0,0.35)', 'rgba(42,16,16,0.55)', 'rgba(42,16,16,0.97)']}
+                locations={[0, 0.45, 0.85]}
+                style={StyleSheet.absoluteFillObject}
+              />
+            </>
+          ) : null}
           <Text style={styles.shareEventEyebrow}>THE PACK · ÉVÉNEMENT</Text>
           <Text style={styles.shareEventTitle} numberOfLines={3}>{selectedEvent.titre}</Text>
           <View style={selectedEvent.payant ? styles.shareEventBadgePaid : styles.shareEventBadgeFree}>
