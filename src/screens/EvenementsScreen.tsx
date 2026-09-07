@@ -1447,10 +1447,6 @@ export default function EvenementsScreen() {
                   )}
                   <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>{selectedEvent.titre}</Text>
-                    <TouchableOpacity style={styles.shareEventRow} onPress={() => setShareModalVisible(true)}>
-                      <Ionicons name="share-social-outline" size={14} color={colors.terra} />
-                      <Text style={styles.shareEventRowText}>Partager cet événement</Text>
-                    </TouchableOpacity>
                     <View style={styles.modalBadges}>
                       {selectedEvent.payant
                         ? <View style={styles.paidBadge}><Text style={styles.paidText}>{selectedEvent.prix ? `${selectedEvent.prix} €` : 'Payant'}</Text></View>
@@ -1545,6 +1541,10 @@ export default function EvenementsScreen() {
                     <TouchableOpacity style={styles.saveBtnFull} onPress={() => toggleFavori(selectedEvent.id, !selectedEvent.est_enregistre)}>
                       <Ionicons name={selectedEvent.est_enregistre ? 'bookmark' : 'bookmark-outline'} size={16} color={colors.bordeaux} />
                       <Text style={styles.saveBtnFullText}>{selectedEvent.est_enregistre ? 'Enregistré' : 'Enregistrer pour plus tard'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.shareEventRow} onPress={() => setShareModalVisible(true)}>
+                      <Ionicons name="share-social-outline" size={16} color={colors.terra} />
+                      <Text style={styles.shareEventRowText}>Partager cet événement</Text>
                     </TouchableOpacity>
                   </View>
                 </ScrollView>
@@ -1966,8 +1966,12 @@ const styles = StyleSheet.create({
   },
   saveBtnFullText: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.bordeaux },
 
-  shareEventRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  shareEventRowText: { fontFamily: 'DMSans_600SemiBold', fontSize: 12.5, color: colors.terra },
+  shareEventRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: 'rgba(196,105,58,0.08)', borderWidth: 1.5, borderColor: 'rgba(196,105,58,0.3)',
+    borderRadius: 14, padding: 13, marginTop: 10,
+  },
+  shareEventRowText: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.terra },
 
   // ── Partage événement (modal + carte hors-ecran) ──
   shareModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)' },
