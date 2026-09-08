@@ -13,7 +13,7 @@ import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, uploadToR2 } from '../lib/supabase';
+import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
@@ -91,6 +91,13 @@ export default function EvenementsScreen() {
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [sharingImage, setSharingImage] = useState(false);
   const shareEventCardRef = useRef<View>(null);
+
+  // Meme pattern que CarteScreen/PartenairesScreen : jusqu'ici cet ecran n'envoyait
+  // rien a analytics_events, rendant l'activite Evenements invisible cote mobile dans
+  // les Statistiques admin (seule la version web remontait).
+  useEffect(() => {
+    if (selectedEvent) trackEvent('page_view', 'evenements', { target_type: 'event', target_id: selectedEvent.id });
+  }, [selectedEvent?.id]);
 
   // Création
   const [createModal, setCreateModal] = useState(false);
@@ -1537,7 +1544,7 @@ export default function EvenementsScreen() {
                     ) : null}
                     {selectedEvent.site_web ? (
                       <>
-                        <TouchableOpacity style={styles.joinBtn} onPress={() => Linking.openURL(selectedEvent.site_web!)}>
+                        <TouchableOpacity style={styles.joinBtn} onPress={() => { trackEvent('click', 'evenements', { target_type: 'event', target_id: selectedEvent.id, action: 'website' }); Linking.openURL(selectedEvent.site_web!); }}>
                           <Text style={styles.joinBtnText}>Voir le site officiel</Text>
                         </TouchableOpacity>
                         <Text style={styles.externalNote}>Inscription non disponible sur l'app — organisé par un tiers</Text>
@@ -1550,7 +1557,7 @@ export default function EvenementsScreen() {
                         <Text style={styles.cancelBtnText}>Inscrit · Annuler mon inscription</Text>
                       </TouchableOpacity>
                     ) : (
-                      <TouchableOpacity style={styles.joinBtn} onPress={() => toggleInscription(selectedEvent.id, true)} disabled={inscriptionLoading}>
+                      <TouchableOpacity style={styles.joinBtn} onPress={() => { trackEvent('click', 'evenements', { target_type: 'event', target_id: selectedEvent.id, action: 'inscription' }); toggleInscription(selectedEvent.id, true); }} disabled={inscriptionLoading}>
                         <Text style={styles.joinBtnText}>
                           S'inscrire{selectedEvent.payant && selectedEvent.prix ? ` — ${selectedEvent.prix} €` : ''}
                         </Text>
@@ -1567,6 +1574,7 @@ export default function EvenementsScreen() {
                           to_token: 'SHARE_EVENT_TAP', title: 'shareEventRow onPress',
                           detail: JSON.stringify({ eventId: selectedEvent?.id, titre: selectedEvent?.titre }),
                         }).then(() => {}, () => {});
+                        trackEvent('click', 'evenements', { target_type: 'event', target_id: selectedEvent.id, action: 'share_open' });
                         setShareModalVisible(true);
                       }}
                     >
@@ -1605,6 +1613,7 @@ export default function EvenementsScreen() {
                     to_token: 'SHARE_EVENT_CAPTURE', title: 'captureRef + isAvailableAsync ok',
                     detail: JSON.stringify({ eventId: selectedEvent?.id, hasUri: !!uri, canShare }),
                   }).then(() => {}, () => {});
+                  if (canShare && selectedEvent) trackEvent('click', 'evenements', { target_type: 'event', target_id: selectedEvent.id, action: 'share_image' });
                   if (canShare) {
                     await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager cet événement' });
                     setShareModalVisible(false);
@@ -1634,6 +1643,7 @@ export default function EvenementsScreen() {
             onPress={async () => {
               if (!selectedEvent) return;
               const link = `https://thepacklameute.fr/evenements.html?event=${selectedEvent.id}`;
+              trackEvent('click', 'evenements', { target_type: 'event', target_id: selectedEvent.id, action: 'share_link' });
               try {
                 // Ouvre le partage natif (WhatsApp, Messages, Instagram, etc.), plutot
                 // que de se limiter a copier le lien dans le presse-papier.
