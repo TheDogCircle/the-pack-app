@@ -5,6 +5,7 @@ import {
   Modal, FlatList, Image, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
@@ -53,6 +54,8 @@ export default function OnboardingScreen() {
   const [step, setStep] = useState<1 | 2>(1);
 
   // Step 1 — owner
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [prenom, setPrenom] = useState('');
   const [nom, setNom] = useState('');
   const [email, setEmail] = useState('');
@@ -140,6 +143,32 @@ export default function OnboardingScreen() {
     }, 500);
     return () => clearTimeout(t);
   }, [username]);
+
+  async function pickAvatar() {
+    if (!session) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const uri = result.assets[0].uri;
+    setAvatarUri(uri);
+    setAvatarUploading(true);
+    try {
+      const ext = uri.split('.').pop() || 'jpg';
+      const path = `avatars/${session.user.id}.${ext}`;
+      const formData = new FormData();
+      formData.append('file', { uri, name: path, type: `image/${ext}` } as any);
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
+      if (upErr) { Alert.alert('Erreur upload', upErr.message); return; }
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+      await supabase.from('profils').upsert({ id: session.user.id, avatar_url: urlData.publicUrl });
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
 
   function formatDate(text: string, prev: string): string {
     const digits = text.replace(/\D/g, '').slice(0, 8);
@@ -307,6 +336,19 @@ export default function OnboardingScreen() {
             <Text style={styles.paw}>🐾</Text>
             <Text style={styles.title}>Bienvenue dans{'\n'}The Pack La Meute !</Text>
             <Text style={styles.sub}>Quelques infos pour personnaliser ton expérience.</Text>
+
+            <TouchableOpacity style={styles.avatarPicker} onPress={pickAvatar} disabled={avatarUploading}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarPlaceholderIcon}>📷</Text>
+                </View>
+              )}
+              {avatarUploading
+                ? <ActivityIndicator size="small" color={colors.terraPale} style={{ marginTop: 8 }} />
+                : <Text style={styles.avatarLabel}>{avatarUri ? 'Changer la photo' : 'Ajouter une photo (optionnel)'}</Text>}
+            </TouchableOpacity>
 
             <View style={styles.card}>
               <Text style={styles.label}>Prénom *</Text>
@@ -965,6 +1007,17 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_300Light', fontSize: 15,
     color: 'rgba(245,239,224,0.6)', textAlign: 'center', lineHeight: 22, marginBottom: 32,
   },
+
+  avatarPicker: { alignItems: 'center', marginBottom: 20 },
+  avatarImg: { width: 84, height: 84, borderRadius: 42 },
+  avatarPlaceholder: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: 'rgba(245,239,224,0.08)',
+    borderWidth: 1.5, borderColor: 'rgba(245,239,224,0.25)', borderStyle: 'dashed',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarPlaceholderIcon: { fontSize: 26 },
+  avatarLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terraPale, marginTop: 8 },
 
   card: { backgroundColor: colors.ivoryPale, borderRadius: 18, padding: 20, marginBottom: 20 },
   label: {
