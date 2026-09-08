@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
 serve(async (_req) => {
   const supabase = createClient(
@@ -31,7 +32,11 @@ serve(async (_req) => {
 
   console.log('[birthday-notifications] dogs with birthday today:', todaysDogs.length);
 
-  const notifications: any[] = [];
+  const notifications: PushMessage[] = [];
+  // Un seul log pour toute la diffusion du jour (granularite par chien peu utile
+  // business-wise -- "combien de gens ont ouvert une notif anniversaire aujourd'hui"
+  // suffit comme metrique).
+  const logId = todaysDogs.length > 0 ? await createNotifLog(supabase, { type: 'dog_birthday', title: '🎂 Anniversaire !', body: `${todaysDogs.length} anniversaire(s) aujourd'hui` }) : null;
 
   for (const dog of todaysDogs) {
     const { data: owner } = await supabase
@@ -66,7 +71,7 @@ serve(async (_req) => {
         to: f.push_token,
         title: '🎂 Anniversaire !',
         body: `C'est l'anniversaire de ${dog.nom} (chez ${owner?.prenom || 'un copain'}) !`,
-        data: { type: 'dog_birthday', chienId: dog.id, ownerId: dog.user_id },
+        data: { type: 'dog_birthday', chienId: dog.id, ownerId: dog.user_id, notifLogId: logId },
         sound: 'default',
         badge: 1,
       });
@@ -75,14 +80,9 @@ serve(async (_req) => {
 
   console.log('[birthday-notifications] notifications to send:', notifications.length);
 
-  for (let i = 0; i < notifications.length; i += 100) {
-    const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(notifications.slice(i, i + 100)),
-    });
-    const expoJson = await expoRes.json();
-    console.log('[birthday-notifications] expo response batch', Math.floor(i / 100), ':', JSON.stringify(expoJson).slice(0, 500));
+  if (logId && notifications.length > 0) {
+    const tickets = await sendPushBatch(notifications);
+    await finalizeNotifLog(supabase, logId, notifications.length, tickets);
   }
 
   return new Response(JSON.stringify({ dogsToday: todaysDogs.length, sent: notifications.length }), { status: 200 });

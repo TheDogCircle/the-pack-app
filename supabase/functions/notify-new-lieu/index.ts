@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendTrackedPush, createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -76,10 +77,11 @@ serve(async (req) => {
     console.log('[notify-new-lieu] no submitted_by — feed post skipped');
   }
 
-  const messages: object[] = [];
   const notifiedIds = new Set<string>();
+  let totalSent = 0;
 
-  // 1. Notify the submitter: "ta suggestion a été validée"
+  // 1. Notify the submitter: "ta suggestion a été validée" — envoi individuel, pas de
+  // suivi de campagne (un seul destinataire, aucune valeur en tant que metrique de portee).
   if (record.submitted_by) {
     const { data: submitter } = await supabase
       .from('profils')
@@ -91,15 +93,20 @@ serve(async (req) => {
     console.log('[notify-new-lieu] submitter token:', submitter?.push_token ? 'found' : 'null/missing');
 
     if (submitter?.push_token) {
-      messages.push({
-        to: submitter.push_token,
-        title: 'Ta suggestion a été validée',
-        body: `"${record.nom}" est maintenant visible sur la carte !`,
-        data: { type: 'suggestion_validee', lieuId: record.id },
-        sound: 'default',
-        badge: 1,
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify([{
+          to: submitter.push_token,
+          title: 'Ta suggestion a été validée',
+          body: `"${record.nom}" est maintenant visible sur la carte !`,
+          data: { type: 'suggestion_validee', lieuId: record.id },
+          sound: 'default',
+          badge: 1,
+        }]),
       });
       notifiedIds.add(submitter.id);
+      totalSent++;
     }
   }
 
@@ -125,17 +132,16 @@ serve(async (req) => {
         .or('notif_friend_lieu.is.null,notif_friend_lieu.eq.true')
         .not('push_token', 'is', null);
 
-      for (const f of followers || []) {
-        messages.push({
-          to: f.push_token,
-          title: 'Nouveau lieu ajouté',
-          body: `${submitterPrenom} a ajouté "${record.nom}" sur The Pack !`,
-          data: { type: 'friend_lieu', lieuId: record.id },
-          sound: 'default',
-          badge: 1,
-        });
-        notifiedIds.add(f.id);
-      }
+      const { sent } = await sendTrackedPush(supabase, {
+        type: 'friend_lieu',
+        lieuId: record.id,
+        title: 'Nouveau lieu ajouté',
+        body: `${submitterPrenom} a ajouté "${record.nom}" sur The Pack !`,
+        recipients: (followers || []).map((f: any) => ({ push_token: f.push_token })),
+        extraData: { lieuId: record.id },
+      });
+      (followers || []).forEach((f: any) => notifiedIds.add(f.id));
+      totalSent += sent;
       console.log('[notify-new-lieu] followers notified:', (followers || []).length);
     }
   }
@@ -155,6 +161,13 @@ serve(async (req) => {
     const lieuVille = (record.ville || '').toLowerCase().trim();
 
     let matchedByDist = 0, matchedByVille = 0, skippedNoData = 0, skippedTooFar = 0;
+    const nearbyMessages: PushMessage[] = [];
+    const title = 'Nouveau lieu dog-friendly près de toi !';
+
+    // Chaque destinataire a sa propre distance dans le corps du message -- on garde donc
+    // ce groupe en dehors de sendTrackedPush (qui suppose un titre/corps uniques pour
+    // toute la campagne) et on cree/finalise le log manuellement autour de la boucle.
+    const logId = users.length ? await createNotifLog(supabase, { type: 'new_lieu', lieuId: record.id, title, body: record.nom }) : null;
 
     for (const u of users) {
       if (notifiedIds.has(u.id)) continue;
@@ -180,35 +193,26 @@ serve(async (req) => {
       if (!isNearby) continue;
 
       const distLabel = distKm !== null ? ` à ${distKm} km de toi` : (lieuVille ? ` à ${record.ville}` : '');
-      messages.push({
+      nearbyMessages.push({
         to: u.push_token,
-        title: 'Nouveau lieu dog-friendly près de toi !',
+        title,
         body: `"${record.nom}"${distLabel} vient d'être ajouté sur The Pack !`,
-        data: { type: 'new_lieu', lieuId: record.id },
+        data: { type: 'new_lieu', lieuId: record.id, notifLogId: logId },
         sound: 'default',
         badge: 1,
       });
     }
 
     console.log('[notify-new-lieu] match stats — byDist:', matchedByDist, '| byVille:', matchedByVille, '| tooFar:', skippedTooFar, '| noData:', skippedNoData);
+
+    if (logId && nearbyMessages.length > 0) {
+      const tickets = await sendPushBatch(nearbyMessages);
+      await finalizeNotifLog(supabase, logId, nearbyMessages.length, tickets);
+      totalSent += nearbyMessages.length;
+    }
   }
 
-  console.log('[notify-new-lieu] total messages to send:', messages.length);
+  console.log('[notify-new-lieu] total messages sent:', totalSent);
 
-  if (messages.length === 0) {
-    return new Response(JSON.stringify({ sent: 0, reason: 'no matching users' }), { status: 200 });
-  }
-
-  // Send in batches of 100 (Expo push API limit)
-  for (let i = 0; i < messages.length; i += 100) {
-    const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(messages.slice(i, i + 100)),
-    });
-    const expoJson = await expoRes.json();
-    console.log('[notify-new-lieu] expo response batch', Math.floor(i / 100), ':', JSON.stringify(expoJson).slice(0, 500));
-  }
-
-  return new Response(JSON.stringify({ sent: messages.length }), { status: 200 });
+  return new Response(JSON.stringify({ sent: totalSent }), { status: 200 });
 });

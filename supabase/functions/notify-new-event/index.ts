@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendTrackedPush } from '../_shared/pushTracking.ts';
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -63,23 +64,14 @@ serve(async (req) => {
 
   if (targets.length === 0) return new Response('no nearby users', { status: 200 });
 
-  const messages = targets.map((u: any) => ({
-    to: u.push_token,
+  const { sent } = await sendTrackedPush(supabase, {
+    type: 'new_event',
+    targetId: record.id,
     title: 'Événement près de chez vous !',
     body: `"${record.titre}" — ${dateStr} à ${heureStr}${record.ville ? ` · ${record.ville}` : ''}`,
-    data: { type: 'new_event', eventId: record.id },
-    sound: 'default',
-    badge: 1,
-  }));
+    recipients: targets.map((u: any) => ({ push_token: u.push_token })),
+    extraData: { eventId: record.id },
+  });
 
-  // Send in batches of 100 (Expo limit)
-  for (let i = 0; i < messages.length; i += 100) {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(messages.slice(i, i + 100)),
-    });
-  }
-
-  return new Response(JSON.stringify({ sent: messages.length }), { status: 200 });
+  return new Response(JSON.stringify({ sent }), { status: 200 });
 });

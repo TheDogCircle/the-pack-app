@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -57,12 +58,13 @@ serve(async (_req) => {
       .or('notif_event_reminder.is.null,notif_event_reminder.eq.true')
       .not('push_token', 'is', null);
 
-    const messages: object[] = [];
     const eventLat = event.lat ? parseFloat(event.lat as any) : null;
     const eventLng = event.lng ? parseFloat(event.lng as any) : null;
     const eventVille = (event.ville || '').toLowerCase().trim();
     const joursLabel = Math.round(joursAvant);
+    const title = `${event.titre} — dans ${joursLabel} jour${joursLabel > 1 ? 's' : ''}`;
 
+    const candidates: { push_token: string; distLabel: string }[] = [];
     for (const u of (users || [])) {
       let isNearby = false;
       let distKm: number | null = null;
@@ -77,29 +79,28 @@ serve(async (_req) => {
       if (!isNearby) continue;
 
       const distLabel = distKm !== null ? ` à ${distKm} km de toi` : (eventVille ? ` à ${event.ville}` : '');
-      messages.push({
-        to: u.push_token,
-        title: `${event.titre} — dans ${joursLabel} jour${joursLabel > 1 ? 's' : ''}`,
-        body: `Un événement à ne pas manquer${distLabel} !`,
-        data: { type: 'event_reminder', eventId: event.id },
-        sound: 'default',
-        badge: 1,
-      });
+      candidates.push({ push_token: u.push_token, distLabel });
     }
 
-    console.log('[event-proximity-reminders] event:', event.titre, '| joursAvant:', joursLabel, '| cadence:', cadenceJours, '| messages:', messages.length);
+    console.log('[event-proximity-reminders] event:', event.titre, '| joursAvant:', joursLabel, '| cadence:', cadenceJours, '| messages:', candidates.length);
 
-    for (let i = 0; i < messages.length; i += 100) {
-      await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(messages.slice(i, i + 100)),
-      });
+    if (candidates.length > 0) {
+      const logId = await createNotifLog(supabase, { type: 'event_reminder', targetId: event.id, title, body: `Un événement à ne pas manquer !` });
+      const messages: PushMessage[] = candidates.map(c => ({
+        to: c.push_token,
+        title,
+        body: `Un événement à ne pas manquer${c.distLabel} !`,
+        data: { type: 'event_reminder', eventId: event.id, notifLogId: logId },
+        sound: 'default',
+        badge: 1,
+      }));
+      const tickets = await sendPushBatch(messages);
+      await finalizeNotifLog(supabase, logId, messages.length, tickets);
+      totalSent += messages.length;
     }
 
     await supabase.from('evenements').update({ derniere_notif_proximite_at: now.toISOString() }).eq('id', event.id);
     eventsNotified++;
-    totalSent += messages.length;
   }
 
   return new Response(JSON.stringify({ eventsChecked: events.length, eventsNotified, sent: totalSent }), { status: 200 });

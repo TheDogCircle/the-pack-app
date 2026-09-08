@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
 serve(async (_req) => {
   const supabase = createClient(
@@ -13,7 +14,7 @@ serve(async (_req) => {
   const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
   const tomorrowEnd   = new Date(todayEnd);   tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
 
-  const notifications: any[] = [];
+  let totalSent = 0;
 
   // ── J-1 reminders ──
   const { data: j1Events } = await supabase
@@ -32,18 +33,20 @@ serve(async (_req) => {
 
     const date = new Date(event.date_heure);
     const heureStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const title = `Rappel — ${event.titre}`;
+    const body = `Demain à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`;
 
-    for (const p of (parts || [])) {
-      const token = (p as any).profils?.push_token;
-      if (!token) continue;
-      notifications.push({
-        to: token,
-        title: `Rappel — ${event.titre}`,
-        body: `Demain à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`,
-        data: { type: 'event_reminder', eventId: event.id },
-        sound: 'default',
-        badge: 1,
-      });
+    const tokens = (parts || []).map((p: any) => p.profils?.push_token).filter(Boolean);
+    if (tokens.length > 0) {
+      const logId = await createNotifLog(supabase, { type: 'event_reminder', targetId: event.id, title, body });
+      const messages: PushMessage[] = tokens.map((token: string) => ({
+        to: token, title, body,
+        data: { type: 'event_reminder', eventId: event.id, notifLogId: logId },
+        sound: 'default', badge: 1,
+      }));
+      const tickets = await sendPushBatch(messages);
+      await finalizeNotifLog(supabase, logId, messages.length, tickets);
+      totalSent += messages.length;
     }
 
     await supabase.from('evenements').update({ rappel_j1_envoye: true }).eq('id', event.id);
@@ -66,31 +69,24 @@ serve(async (_req) => {
 
     const date = new Date(event.date_heure);
     const heureStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const title = `C'est aujourd'hui ! ${event.titre}`;
+    const body = `Rendez-vous à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`;
 
-    for (const p of (parts || [])) {
-      const token = (p as any).profils?.push_token;
-      if (!token) continue;
-      notifications.push({
-        to: token,
-        title: `C'est aujourd'hui ! ${event.titre}`,
-        body: `Rendez-vous à ${heureStr}${event.adresse ? ` · ${event.adresse}` : ''}${event.ville ? `, ${event.ville}` : ''}`,
-        data: { type: 'event_reminder_today', eventId: event.id },
-        sound: 'default',
-        badge: 1,
-      });
+    const tokens = (parts || []).map((p: any) => p.profils?.push_token).filter(Boolean);
+    if (tokens.length > 0) {
+      const logId = await createNotifLog(supabase, { type: 'event_reminder_today', targetId: event.id, title, body });
+      const messages: PushMessage[] = tokens.map((token: string) => ({
+        to: token, title, body,
+        data: { type: 'event_reminder_today', eventId: event.id, notifLogId: logId },
+        sound: 'default', badge: 1,
+      }));
+      const tickets = await sendPushBatch(messages);
+      await finalizeNotifLog(supabase, logId, messages.length, tickets);
+      totalSent += messages.length;
     }
 
     await supabase.from('evenements').update({ rappel_j0_envoye: true }).eq('id', event.id);
   }
 
-  // Send all notifications in batches of 100
-  for (let i = 0; i < notifications.length; i += 100) {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(notifications.slice(i, i + 100)),
-    });
-  }
-
-  return new Response(JSON.stringify({ j1: j1Events?.length || 0, j0: j0Events?.length || 0, sent: notifications.length }), { status: 200 });
+  return new Response(JSON.stringify({ j1: j1Events?.length || 0, j0: j0Events?.length || 0, sent: totalSent }), { status: 200 });
 });

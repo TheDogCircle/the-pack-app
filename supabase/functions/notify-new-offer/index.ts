@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendTrackedPush } from '../_shared/pushTracking.ts';
 
 serve(async (req) => {
   const payload = await req.json();
@@ -35,64 +36,46 @@ serve(async (req) => {
   }
 
   // Garde-fou : les lieux geres par un compte de test ne notifient jamais le
-  // grand public, seulement l'appareil de test dedie.
+  // grand public, seulement l'appareil de test dedie -- et ces envois de test ne sont
+  // pas journalises dans notifications_log (pas de vraie "campagne" a mesurer).
   const testUserIds = (Deno.env.get('TEST_USER_IDS') ?? '').split(',').filter(Boolean);
   const testPushToken = Deno.env.get('TEST_PUSH_TOKEN');
   const isTestLieu = !!lieu?.manager_user_id && testUserIds.includes(lieu.manager_user_id);
 
-  let messages: object[];
+  const title = 'Nouvelle offre';
+  const body = `${lieuNom} propose "${record.nom}" !`;
 
   if (isTestLieu) {
     console.log('[notify-new-offer] lieu gere par un compte de test — notification limitee a TEST_PUSH_TOKEN');
-    messages = testPushToken
-      ? [{
-          to: testPushToken,
-          title: '[TEST] Nouvelle offre',
-          body: `${lieuNom} propose "${record.nom}" !`,
-          data: { type: 'new_offer', lieuId: record.lieu_id },
-          sound: 'default',
-          badge: 1,
-        }]
-      : [];
-  } else {
-    const { data: users, error: usersError } = await supabase
-      .from('profils')
-      .select('id, push_token')
-      .or('notif_offer.is.null,notif_offer.eq.true')
-      .not('push_token', 'is', null);
-
-    console.log('[notify-new-offer] users query error:', usersError?.message ?? 'none', '| users found:', users?.length ?? 0);
-
-    messages = (users || []).map((u: any) => ({
-      to: u.push_token,
-      title: 'Nouvelle offre',
-      body: `${lieuNom} propose "${record.nom}" !`,
-      data: { type: 'new_offer', lieuId: record.lieu_id },
-      sound: 'default',
-      badge: 1,
-    }));
+    if (testPushToken) {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify([{ to: testPushToken, title: '[TEST] ' + title, body, data: { type: 'new_offer', lieuId: record.lieu_id }, sound: 'default', badge: 1 }]),
+      });
+    }
+    return new Response(JSON.stringify({ sent: testPushToken ? 1 : 0, test: true }), { status: 200 });
   }
 
-  if (messages.length === 0) {
-    return new Response(JSON.stringify({ sent: 0, reason: 'no matching users' }), { status: 200 });
-  }
+  const { data: users, error: usersError } = await supabase
+    .from('profils')
+    .select('id, push_token')
+    .or('notif_offer.is.null,notif_offer.eq.true')
+    .not('push_token', 'is', null);
 
-  for (let i = 0; i < messages.length; i += 100) {
-    const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(messages.slice(i, i + 100)),
-    });
-    const expoJson = await expoRes.json();
-    console.log('[notify-new-offer] expo response batch', Math.floor(i / 100), ':', JSON.stringify(expoJson).slice(0, 500));
-  }
+  console.log('[notify-new-offer] users query error:', usersError?.message ?? 'none', '| users found:', users?.length ?? 0);
 
-  // Le cooldown ne concerne que les vraies diffusions publiques -- un envoi de test
-  // (isTestLieu) reste isole a l'appareil de test dedie et ne doit pas bloquer la
-  // prochaine vraie annonce pour ce lieu.
-  if (!isTestLieu) {
+  const { sent } = await sendTrackedPush(supabase, {
+    type: 'new_offer',
+    lieuId: record.lieu_id,
+    title, body,
+    recipients: (users || []).map((u: any) => ({ push_token: u.push_token })),
+    extraData: { lieuId: record.lieu_id },
+  });
+
+  if (sent > 0) {
     await supabase.from('lieux').update({ last_offer_notif_at: new Date().toISOString() }).eq('id', record.lieu_id);
   }
 
-  return new Response(JSON.stringify({ sent: messages.length }), { status: 200 });
+  return new Response(JSON.stringify({ sent }), { status: 200 });
 });
