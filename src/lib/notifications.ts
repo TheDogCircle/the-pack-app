@@ -54,6 +54,13 @@ export async function savePushToken(userId: string): Promise<void> {
   try {
     const token = await registerForPushNotifications();
     if (!token) return;
+    // Un token de push identifie un appareil precis, pas un compte : si un autre profil
+    // (ex : session precedente sur ce meme telephone) a encore ce token enregistre, on le
+    // retire de ce profil-la avant de l'attribuer ici. Sans ca, deux comptes utilises sur
+    // le meme telephone (cas frequent : compte marque + compte perso) partagent le meme
+    // token -- chacun recoit alors les notifs de l'autre, y compris pour ses propres
+    // messages des qu'il envoie dans une conversation ou l'autre compte est membre.
+    await supabase.from('profils').update({ push_token: null }).eq('push_token', token).neq('id', userId);
     await supabase.from('profils').update({ push_token: token }).eq('id', userId);
   } catch {}
 }
