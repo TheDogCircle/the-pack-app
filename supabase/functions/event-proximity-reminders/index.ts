@@ -11,12 +11,23 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Tourne une fois par jour (cron). Pour chaque evenement mis en avant et pas
-// encore passe, decide si c'est le jour d'envoyer une notif de proximite :
-// une fois par semaine tant que l'evenement est a plus de 14 jours, puis tous
-// les 5 jours en dessous de ce seuil. derniere_notif_proximite_at (sur
-// l'evenement) sert de curseur — pas de table de log separee necessaire, un
-// cron quotidien ne peut jamais renvoyer deux fois la meme notif le meme jour.
+// Paliers en jours avant l'evenement, du plus loin au plus proche.
+const PALIERS = [14, 7, 3, 1, 0];
+const LABELS: Record<number, string> = {
+  14: 'dans 2 semaines',
+  7: 'dans 1 semaine',
+  3: 'dans 3 jours',
+  1: 'demain',
+  0: "aujourd'hui",
+};
+
+// Tourne une fois par jour (cron, 8h UTC). Pour chaque evenement mis en avant
+// et pas encore passe, envoie une notif de proximite a chaque palier atteint
+// (14j, 7j, 3j, veille, jour meme), une seule fois par palier et par
+// evenement -- trace via notif_paliers_envoyes (int[] sur l'evenement). Le
+// .find sur PALIERS (du plus grand au plus petit) gere aussi le rattrapage :
+// si le cron a manque un jour, il envoie au prochain passage le palier le
+// plus proche encore du plutot que de le sauter silencieusement.
 serve(async (_req) => {
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -27,7 +38,7 @@ serve(async (_req) => {
 
   const { data: events, error: eventsError } = await supabase
     .from('evenements')
-    .select('id, titre, ville, adresse, lat, lng, date_heure, derniere_notif_proximite_at')
+    .select('id, titre, ville, adresse, lat, lng, date_heure, notif_paliers_envoyes')
     .eq('mise_en_avant', true).eq('valide', true).eq('actif', true)
     .gt('date_heure', now.toISOString());
 
@@ -41,14 +52,12 @@ serve(async (_req) => {
   let totalSent = 0;
 
   for (const event of events) {
-    const joursAvant = (new Date(event.date_heure).getTime() - now.getTime()) / (24 * 3600 * 1000);
-    const cadenceJours = joursAvant > 14 ? 7 : 5;
+    const joursAvant = Math.floor((new Date(event.date_heure).getTime() - now.getTime()) / (24 * 3600 * 1000));
+    const sentPaliers: number[] = event.notif_paliers_envoyes || [];
+    const duePalier = PALIERS.find(p => joursAvant <= p && !sentPaliers.includes(p));
 
-    const derniere = event.derniere_notif_proximite_at ? new Date(event.derniere_notif_proximite_at) : null;
-    const due = !derniere || (now.getTime() - derniere.getTime()) >= cadenceJours * 24 * 3600 * 1000;
-
-    if (!due) {
-      console.log('[event-proximity-reminders] skip (pas encore due):', event.titre, '| cadence:', cadenceJours, 'j | derniere:', event.derniere_notif_proximite_at ?? 'jamais');
+    if (duePalier === undefined) {
+      console.log('[event-proximity-reminders] skip (aucun palier du):', event.titre, '| joursAvant:', joursAvant, '| deja envoyes:', sentPaliers);
       continue;
     }
 
@@ -61,8 +70,7 @@ serve(async (_req) => {
     const eventLat = event.lat ? parseFloat(event.lat as any) : null;
     const eventLng = event.lng ? parseFloat(event.lng as any) : null;
     const eventVille = (event.ville || '').toLowerCase().trim();
-    const joursLabel = Math.round(joursAvant);
-    const title = `${event.titre} — dans ${joursLabel} jour${joursLabel > 1 ? 's' : ''}`;
+    const title = `${event.titre} — ${LABELS[duePalier]}`;
 
     const candidates: { push_token: string; distLabel: string }[] = [];
     for (const u of (users || [])) {
@@ -71,7 +79,7 @@ serve(async (_req) => {
 
       if (eventLat && eventLng && u.lat && u.lng) {
         distKm = Math.round(haversineKm(u.lat, u.lng, eventLat, eventLng) * 10) / 10;
-        isNearby = distKm <= (u.rayon_km ?? 20);
+        isNearby = distKm <= Math.min(u.rayon_km ?? 20, 20);
       } else if (eventVille && u.ville) {
         const userVille = u.ville.toLowerCase().trim();
         isNearby = userVille.includes(eventVille) || eventVille.includes(userVille);
@@ -82,7 +90,7 @@ serve(async (_req) => {
       candidates.push({ push_token: u.push_token, distLabel });
     }
 
-    console.log('[event-proximity-reminders] event:', event.titre, '| joursAvant:', joursLabel, '| cadence:', cadenceJours, '| messages:', candidates.length);
+    console.log('[event-proximity-reminders] event:', event.titre, '| palier:', duePalier, 'j | joursAvant:', joursAvant, '| messages:', candidates.length);
 
     if (candidates.length > 0) {
       const logId = await createNotifLog(supabase, { type: 'event_reminder', targetId: event.id, title, body: `Un événement à ne pas manquer !` });
@@ -99,7 +107,7 @@ serve(async (_req) => {
       totalSent += messages.length;
     }
 
-    await supabase.from('evenements').update({ derniere_notif_proximite_at: now.toISOString() }).eq('id', event.id);
+    await supabase.from('evenements').update({ notif_paliers_envoyes: [...sentPaliers, duePalier] }).eq('id', event.id);
     eventsNotified++;
   }
 
