@@ -299,7 +299,7 @@ export default function Navigation() {
     } else if (data.type === 'new_reservation') {
       // Pas d'ecran de gestion des reservations cote pro dans l'app mobile :
       // la gestion se fait sur l'espace pro web.
-      Linking.openURL('https://thepackclub.fr/espace-pro.html');
+      Linking.openURL('https://thepacklameute.fr/espace-pro.html');
     } else if (data.type === 'message' || (!data.type && data.conversationId)) {
       // Le "|| (!data.type && data.conversationId)" gere les anciennes notifications
       // envoyees avant l'ajout du champ type, qui ne portaient que conversationId.

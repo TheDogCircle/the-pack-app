@@ -1197,7 +1197,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
     : filteredInviteCandidates;
 
   async function inviteContact(contact: { name: string; phone: string }) {
-    const message = "Salut ! Je t'invite à rejoindre The Pack La Meute 🐾 la carte et la communauté des amoureux de chiens. Télécharge l'appli ici : https://thepackclub.fr";
+    const message = "Salut ! Je t'invite à rejoindre The Pack La Meute 🐾 la carte et la communauté des amoureux de chiens. Télécharge l'appli ici : https://thepacklameute.fr";
     const digits = contact.phone.replace(/[^\d+]/g, '');
     const smsUrl = `sms:${digits}${Platform.OS === 'ios' ? '&' : '?'}body=${encodeURIComponent(message)}`;
     try {

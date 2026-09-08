@@ -721,7 +721,7 @@ export default function EvenementsScreen() {
       const q = [adresse.trim(), ville.trim()].filter(Boolean).join(', ');
       const geoResp = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
-        { headers: { 'User-Agent': 'ThePackApp/1.0 (thepackclub.fr)' } }
+        { headers: { 'User-Agent': 'ThePackApp/1.0 (thepacklameute.fr)' } }
       );
       const geoData = await geoResp.json();
       if (geoData?.[0]) { eventLat = parseFloat(geoData[0].lat); eventLng = parseFloat(geoData[0].lon); }

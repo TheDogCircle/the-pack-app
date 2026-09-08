@@ -2131,13 +2131,13 @@ export default function CarteScreen() {
     } catch {}
     await Share.share({
       message: `🐾 ${selectedLieu.nom} (${selectedLieu.ville}) — Lieu dog-friendly sur The Pack`,
-      url: `https://thepackclub.fr/carte.html?lieu=${selectedLieu.id}`,
+      url: `https://thepacklameute.fr/carte.html?lieu=${selectedLieu.id}`,
     });
   }
 
   async function shareLieuWhatsapp() {
     if (!selectedLieu) return;
-    const text = `🐾 ${selectedLieu.nom} (${selectedLieu.ville}) — Lieu dog-friendly sur The Pack\nhttps://thepackclub.fr/carte.html?lieu=${selectedLieu.id}`;
+    const text = `🐾 ${selectedLieu.nom} (${selectedLieu.ville}) — Lieu dog-friendly sur The Pack\nhttps://thepacklameute.fr/carte.html?lieu=${selectedLieu.id}`;
     const waUrl = `whatsapp://send?text=${encodeURIComponent(text)}`;
     try {
       const supported = await Linking.canOpenURL(waUrl);
@@ -4023,7 +4023,7 @@ export default function CarteScreen() {
             <Text style={styles.shareLieuDogBadgeText}>🐾 Lieu dog-friendly</Text>
           </View>
           <View style={[styles.shareLieuLine, { opacity: 0.25, marginTop: 18 }]} />
-          <Text style={styles.shareLieuUrl}>thepackclub.fr</Text>
+          <Text style={styles.shareLieuUrl}>thepacklameute.fr</Text>
         </View>
       </View>
     </View>

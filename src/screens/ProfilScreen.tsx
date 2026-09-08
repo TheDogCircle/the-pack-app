@@ -368,7 +368,7 @@ export default function ProfilScreen() {
     } catch {
       await Share.share({
         message: 'Retrouve mon profil sur The Pack 🐾',
-        url: `https://thepackclub.fr/profil-public.html?id=${profil.id}`,
+        url: `https://thepacklameute.fr/profil-public.html?id=${profil.id}`,
       });
     }
   }
@@ -376,7 +376,7 @@ export default function ProfilScreen() {
   async function shareLink() {
     if (!profil?.id) return;
     const name = profil.prenom || 'moi';
-    const webUrl = `https://thepackclub.fr/profil-public.html?id=${profil.id}`;
+    const webUrl = `https://thepacklameute.fr/profil-public.html?id=${profil.id}`;
     try {
       await Share.share({ message: `Suis ${name} sur The Pack 🐾\n${webUrl}`, url: webUrl });
     } catch {}
@@ -852,7 +852,7 @@ export default function ProfilScreen() {
         <View style={styles.shareCardFlex} />
         <View style={[styles.shareCardLine, { opacity: 0.3, marginBottom: 18 }]} />
         <Text style={styles.shareCardCta}>Rejoins-moi sur The Pack !</Text>
-        <Text style={styles.shareCardUrl}>thepackclub.fr</Text>
+        <Text style={styles.shareCardUrl}>thepacklameute.fr</Text>
         {profil?.username ? <Text style={styles.shareCardUrlUser}>@{profil.username}</Text> : null}
         <View style={{ height: 36 }} />
       </View>
