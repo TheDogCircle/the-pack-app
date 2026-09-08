@@ -11,6 +11,15 @@ import { colors } from '../lib/theme';
 
 type ChienInfo = {
   id: string; nom: string; race: string | null; photo_url: string | null;
+};
+
+// Table separee de `chiens` (fix audit securite) : `chiens` a une policy SELECT
+// permissive pour les abonnes (anniversaires / bougie du feed) -- RLS etant par ligne
+// et non par colonne, des champs sensibles poses directement sur `chiens` seraient
+// lisibles par n'importe quel abonne du proprietaire. chien_infos_privees a sa propre
+// policy strictement owner-only (meme pattern que chien_carnet_entries).
+type PrivateInfo = {
+  chien_id: string;
   puce_identification: string | null;
   veterinaire_nom: string | null; veterinaire_telephone: string | null; veterinaire_adresse: string | null;
   sterilise: boolean; date_sterilisation: string | null;
@@ -76,6 +85,7 @@ export default function CarnetSanteScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [chien, setChien] = useState<ChienInfo | null>(null);
+  const [privateInfo, setPrivateInfo] = useState<PrivateInfo | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -103,10 +113,13 @@ export default function CarnetSanteScreen() {
   const [addingQuestion, setAddingQuestion] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data: chienData }, { data: entriesData }, { data: questionsData }] = await Promise.all([
+    const [{ data: chienData }, { data: privateData }, { data: entriesData }, { data: questionsData }] = await Promise.all([
       supabase.from('chiens')
-        .select('id, nom, race, photo_url, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, sterilise, date_sterilisation')
+        .select('id, nom, race, photo_url')
         .eq('id', chienId).single(),
+      supabase.from('chien_infos_privees')
+        .select('chien_id, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, sterilise, date_sterilisation')
+        .eq('chien_id', chienId).maybeSingle(),
       supabase.from('chien_carnet_entries')
         .select('id, type, titre, date, date_rappel, poids_kg, taille_cm, notes')
         .eq('chien_id', chienId).order('date', { ascending: false }),
@@ -115,6 +128,7 @@ export default function CarnetSanteScreen() {
         .eq('chien_id', chienId).order('created_at', { ascending: false }),
     ]);
     if (chienData) setChien(chienData as ChienInfo);
+    setPrivateInfo((privateData as PrivateInfo | null) || null);
     setEntries((entriesData || []) as Entry[]);
     setQuestions((questionsData || []) as Question[]);
     setLoading(false);
@@ -132,7 +146,10 @@ export default function CarnetSanteScreen() {
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     const ext = asset.uri.split('.').pop() || 'jpg';
-    const path = `chiens/${chienId}.${ext}`;
+    // chienId en segment de dossier (pas dans le nom de fichier) : requis par la
+    // policy de stockage chiens_photo_owner_only_insert/update, qui verifie la
+    // propriete via storage.foldername(name)[2].
+    const path = `chiens/${chienId}/photo.${ext}`;
     const formData = new FormData();
     formData.append('file', { uri: asset.uri, name: `photo.${ext}`, type: `image/${ext}` } as any);
     setUploadingPhoto(true);
@@ -146,13 +163,12 @@ export default function CarnetSanteScreen() {
   }
 
   function openInfoModal() {
-    if (!chien) return;
-    setVetNom(chien.veterinaire_nom || '');
-    setVetTel(chien.veterinaire_telephone || '');
-    setVetAdresse(chien.veterinaire_adresse || '');
-    setPuce(chien.puce_identification || '');
-    setSterilise(chien.sterilise);
-    setDateSterilisation(chien.date_sterilisation ? isoToFrDate(chien.date_sterilisation) : '');
+    setVetNom(privateInfo?.veterinaire_nom || '');
+    setVetTel(privateInfo?.veterinaire_telephone || '');
+    setVetAdresse(privateInfo?.veterinaire_adresse || '');
+    setPuce(privateInfo?.puce_identification || '');
+    setSterilise(privateInfo?.sterilise || false);
+    setDateSterilisation(privateInfo?.date_sterilisation ? isoToFrDate(privateInfo.date_sterilisation) : '');
     setInfoModal(true);
   }
 
@@ -163,6 +179,7 @@ export default function CarnetSanteScreen() {
     }
     setSavingInfo(true);
     const update = {
+      chien_id: chienId,
       veterinaire_nom: vetNom.trim() || null,
       veterinaire_telephone: vetTel.trim() || null,
       veterinaire_adresse: vetAdresse.trim() || null,
@@ -170,10 +187,10 @@ export default function CarnetSanteScreen() {
       sterilise,
       date_sterilisation: sterilise ? parseFrDateToIso(dateSterilisation) : null,
     };
-    const { error } = await supabase.from('chiens').update(update).eq('id', chienId);
+    const { error } = await supabase.from('chien_infos_privees').upsert(update);
     setSavingInfo(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
-    setChien(c => (c ? { ...c, ...update } : c));
+    setPrivateInfo(update);
     setInfoModal(false);
   }
 
@@ -276,7 +293,7 @@ export default function CarnetSanteScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.dogName}>{chien?.nom || chienNomParam}</Text>
             <Text style={styles.dogMeta}>
-              {[chien?.race, chien?.sterilise ? 'Stérilisé(e)' : null].filter(Boolean).join(' · ') || 'Aucune info renseignée'}
+              {[chien?.race, privateInfo?.sterilise ? 'Stérilisé(e)' : null].filter(Boolean).join(' · ') || 'Aucune info renseignée'}
             </Text>
             <TouchableOpacity onPress={openInfoModal} style={styles.infoLink}>
               <Ionicons name="create-outline" size={13} color={colors.terra} />
@@ -293,8 +310,8 @@ export default function CarnetSanteScreen() {
           </View>
           <View style={styles.quickCard}>
             <Text style={styles.quickLabel}>Vétérinaire</Text>
-            <Text style={styles.quickValue} numberOfLines={1}>{chien?.veterinaire_nom || '—'}</Text>
-            {chien?.veterinaire_telephone ? <Text style={styles.quickSub}>{chien.veterinaire_telephone}</Text> : null}
+            <Text style={styles.quickValue} numberOfLines={1}>{privateInfo?.veterinaire_nom || '—'}</Text>
+            {privateInfo?.veterinaire_telephone ? <Text style={styles.quickSub}>{privateInfo.veterinaire_telephone}</Text> : null}
           </View>
         </View>
 
