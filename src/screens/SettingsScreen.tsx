@@ -579,7 +579,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity style={styles.addDogBtn} onPress={() => openDogModal(null)}>
           <Ionicons name="paw-outline" size={16} color={colors.terra} />
-          <Text style={styles.addDogBtnText}>Ajouter un passeport</Text>
+          <Text style={styles.addDogBtnText}>Ajouter un chien</Text>
         </TouchableOpacity>
       </View>
 
@@ -783,7 +783,7 @@ export default function SettingsScreen() {
       <KeyboardAvoidingView style={styles.dogModalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.dogModalCard}>
           <View style={styles.dogModalHeader}>
-            <Text style={styles.dogModalTitle}>{editingDog ? 'Modifier le passeport' : 'Nouveau passeport'}</Text>
+            <Text style={styles.dogModalTitle}>{editingDog ? `Modifier ${editingDog.nom || 'ce chien'}` : 'Ajouter un chien'}</Text>
             <TouchableOpacity onPress={() => setDogModal(false)}>
               <Ionicons name="close" size={22} color={colors.textMuted} />
             </TouchableOpacity>
@@ -927,7 +927,7 @@ export default function SettingsScreen() {
             <TouchableOpacity style={styles.saveBtn} onPress={saveDog} disabled={savingDog}>
               {savingDog
                 ? <ActivityIndicator color={colors.ivory} size="small" />
-                : <Text style={styles.saveBtnText}>Enregistrer le passeport</Text>}
+                : <Text style={styles.saveBtnText}>Enregistrer</Text>}
             </TouchableOpacity>
           </ScrollView>
         </View>

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Image,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
@@ -22,6 +23,7 @@ export default function AuthScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   useEffect(() => {
     if (session && navigation.canGoBack()) navigation.goBack();
@@ -32,6 +34,17 @@ export default function AuthScreen() {
       AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => {});
     }
   }, []);
+
+  async function pickAvatar() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    setAvatarUri(result.assets[0].uri);
+  }
 
   async function handleSubmit() {
     if (!email || !password) {
@@ -44,9 +57,27 @@ export default function AuthScreen() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) Alert.alert('Erreur', error.message);
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) Alert.alert('Erreur', error.message);
-        else Alert.alert('Vérifie ta boîte mail', "Un lien de confirmation t'a été envoyé.");
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) { Alert.alert('Erreur', error.message); return; }
+        // L'upload ne peut se faire que si l'inscription renvoie une session immediate
+        // (pas de confirmation par email requise) : sans session, il n'y a pas de token
+        // a presenter au storage authentifie. Si une confirmation est requise, la photo
+        // est simplement ignoree -- l'utilisateur pourra toujours l'ajouter depuis son
+        // profil apres sa premiere connexion.
+        if (data.session && avatarUri) {
+          try {
+            const ext = avatarUri.split('.').pop() || 'jpg';
+            const path = `avatars/${data.session.user.id}.${ext}`;
+            const formData = new FormData();
+            formData.append('file', { uri: avatarUri, name: path, type: `image/${ext}` } as any);
+            const { error: upErr } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
+            if (!upErr) {
+              const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+              await supabase.from('profils').update({ avatar_url: urlData.publicUrl }).eq('id', data.session.user.id);
+            }
+          } catch (e) { /* photo optionnelle : ne bloque jamais la creation de compte */ }
+        }
+        if (!data.session) Alert.alert('Vérifie ta boîte mail', "Un lien de confirmation t'a été envoyé.");
       }
     } finally {
       setLoading(false);
@@ -133,6 +164,17 @@ export default function AuthScreen() {
               <Text style={[styles.tabText, mode === 'signup' && styles.tabTextActive]}>Inscription</Text>
             </TouchableOpacity>
           </View>
+
+          {mode === 'signup' && (
+            <TouchableOpacity style={styles.avatarPicker} onPress={pickAvatar}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+              ) : (
+                <Text style={styles.avatarPlaceholder}>📷</Text>
+              )}
+              <Text style={styles.avatarLabel}>{avatarUri ? 'Changer la photo' : 'Ajouter une photo (optionnel)'}</Text>
+            </TouchableOpacity>
+          )}
 
           {appleAvailable && (
             <TouchableOpacity
@@ -246,6 +288,14 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: colors.bordeaux },
   tabText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.textMuted },
   tabTextActive: { color: colors.ivory },
+  avatarPicker: { alignItems: 'center', marginBottom: 4 },
+  avatarImg: { width: 76, height: 76, borderRadius: 38 },
+  avatarPlaceholder: {
+    width: 76, height: 76, borderRadius: 38, backgroundColor: colors.ivoryLight,
+    borderWidth: 1.5, borderColor: colors.border, borderStyle: 'dashed',
+    textAlign: 'center', textAlignVertical: 'center', fontSize: 24, lineHeight: 76,
+  },
+  avatarLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginTop: 8 },
   btnApple: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#000', borderRadius: 12, padding: 14, gap: 10, height: 50,
