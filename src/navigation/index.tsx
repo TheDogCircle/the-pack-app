@@ -24,6 +24,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import BookingScreen from '../screens/BookingScreen';
 import MesReservationsScreen from '../screens/MesReservationsScreen';
 import AnniversairesScreen from '../screens/AnniversairesScreen';
+import CarnetSanteScreen from '../screens/CarnetSanteScreen';
 import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   MesReservations: undefined;
   Anniversaires: undefined;
   Activite: undefined;
+  CarnetSante: { chienId: string; chienNom: string };
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -538,6 +540,18 @@ export default function Navigation() {
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}
+        />
+        <Stack.Screen
+          name="CarnetSante"
+          component={CarnetSanteScreen}
+          options={({ route }) => ({
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: (route.params as any)?.chienNom ? `Carnet de ${(route.params as any).chienNom}` : 'Carnet de santé',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          })}
         />
         <Stack.Screen
           name="Activite"

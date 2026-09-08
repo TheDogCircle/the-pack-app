@@ -569,6 +569,9 @@ export default function SettingsScreen() {
                 )}
               </View>
               <View style={styles.dogCardActions}>
+                <TouchableOpacity onPress={() => navigation.navigate('CarnetSante', { chienId: dog.id, chienNom: dog.nom })} style={styles.dogCardBtn}>
+                  <Ionicons name="medkit-outline" size={18} color={colors.terra} />
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => openDogModal(dog)} style={styles.dogCardBtn}>
                   <Ionicons name="create-outline" size={18} color={colors.bordeaux} />
                 </TouchableOpacity>
