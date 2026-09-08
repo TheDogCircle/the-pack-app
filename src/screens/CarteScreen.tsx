@@ -29,15 +29,26 @@ const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
 const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 
+// Coupe-circuit : la Places API (New) de Google peut se retrouver bloquee au niveau du
+// projet Cloud (facturation, API non activee...) -- dans ce cas CHAQUE appel echoue avec
+// le meme 403, sur les ~1300 lieux qui ont un google_photo_url en cache. Sans ce
+// coupe-circuit, chaque marqueur/carte/fiche affichee retente un appel voue a l'echec
+// (perte de temps reseau, spam d'une API deja en erreur). Des la premiere reponse 403
+// detectee, on arrete d'essayer pour le reste de la session -- fallback direct sur
+// l'icone de categorie, sans attendre un nouvel echec a chaque image.
+let googlePlacesApiBlocked = false;
+
 // Les references photo Google mises en cache dans lieux.google_photo_url peuvent expirer :
 // cette fonction en redemande une fraiche et met a jour le cache en base.
 async function fetchAndCacheGooglePhoto(lieuData: { id: string; nom: string; ville: string }): Promise<string | null> {
+  if (googlePlacesApiBlocked) return null;
   try {
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
       body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
     });
+    if (res.status === 403) { googlePlacesApiBlocked = true; return null; }
     const json = await res.json();
     const photoName = json.places?.[0]?.photos?.[0]?.name;
     if (!photoName) return null;
@@ -562,12 +573,14 @@ async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string
 }
 
 async function fetchGooglePhotoFor(lieu: { id: string; nom: string; ville: string }): Promise<string | null> {
+  if (googlePlacesApiBlocked) return null;
   try {
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
       body: JSON.stringify({ textQuery: `${lieu.nom} ${lieu.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
     });
+    if (res.status === 403) { googlePlacesApiBlocked = true; return null; }
     const json = await res.json();
     const photoName = json.places?.[0]?.photos?.[0]?.name;
     if (!photoName) return null;
