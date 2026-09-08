@@ -250,6 +250,8 @@ export default function ProfilScreen() {
   const [lieuxOpen, setLieuxOpen] = useState(false);
   const [myBalades, setMyBalades] = useState<{ id: string; nom: string; distance_km: number | null; duree_secondes: number | null; created_at: string }[]>([]);
   const [baladesOpen, setBaladesOpen] = useState(false);
+  const [chiens, setChiens] = useState<{ id: string; nom: string }[]>([]);
+  const [dogPicker, setDogPicker] = useState(false);
   const cardRef = useRef<View>(null);
 
   const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
@@ -268,7 +270,7 @@ export default function ProfilScreen() {
 
     savePushToken(session.user.id);
 
-    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }, { data: mesLieux }, { data: mesBalades }] = await Promise.all([
+    const [{ data: p }, { data: favsRaw }, { data: avisRaw }, { data: photosList }, followersRes, followingRes, { data: expData }, { data: pendingFollows }, { data: mesLieux }, { data: mesBalades }, { data: mesChiens }] = await Promise.all([
       supabase.from('profils').select('*').eq('id', session.user.id).single(),
       supabase.from('favoris').select('id,lieu_id,liste').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(50),
       supabase.from('avis').select('id,note,commentaire,created_at,lieu_id').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
@@ -279,7 +281,9 @@ export default function ProfilScreen() {
       supabase.from('follows').select('id,follower_id').eq('following_id', session.user.id).eq('statut', 'en_attente'),
       supabase.from('lieux').select('id,nom,cat,ville,actif').eq('submitted_by', session.user.id).order('created_at', { ascending: false }).limit(30),
       supabase.from('balades').select('id,nom,distance_km,duree_secondes,created_at').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(30),
+      supabase.from('chiens').select('id,nom').eq('user_id', session.user.id).order('created_at', { ascending: true }),
     ]);
+    setChiens((mesChiens || []) as { id: string; nom: string }[]);
     setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
     setFollowingCount(followingRes.count ?? 0);
@@ -376,6 +380,21 @@ export default function ProfilScreen() {
     try {
       await Share.share({ message: `Suis ${name} sur The Pack 🐾\n${webUrl}`, url: webUrl });
     } catch {}
+  }
+
+  function goToCarnetSante() {
+    if (chiens.length === 0) {
+      Alert.alert('Aucun chien renseigné', "Ajoute d'abord un chien dans Réglages pour créer son carnet de santé.", [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Aller aux réglages', onPress: () => navigation.navigate('Settings') },
+      ]);
+      return;
+    }
+    if (chiens.length === 1) {
+      navigation.navigate('CarnetSante', { chienId: chiens[0].id, chienNom: chiens[0].nom });
+      return;
+    }
+    setDogPicker(true);
   }
 
   async function openFollowModal(type: 'followers' | 'following') {
@@ -498,6 +517,13 @@ export default function ProfilScreen() {
       <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.8}>
         <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
         <Text style={styles.resaBannerText}>Mes rendez-vous</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </TouchableOpacity>
+
+      {/* Carnet de santé */}
+      <TouchableOpacity style={styles.resaBannerRow} onPress={goToCarnetSante} activeOpacity={0.8}>
+        <Ionicons name="medkit-outline" size={16} color={colors.bordeaux} />
+        <Text style={styles.resaBannerText}>Carnet de santé</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </TouchableOpacity>
 
@@ -874,6 +900,37 @@ export default function ProfilScreen() {
                 )}
               />
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Choix du chien avant d'ouvrir le carnet de sante (seulement s'il y en a plusieurs) */}
+      <Modal visible={dogPicker} animationType="slide" transparent onRequestClose={() => setDogPicker(false)}>
+        <View style={styles.followOverlay}>
+          <View style={styles.followCard}>
+            <View style={styles.followCardHeader}>
+              <Text style={styles.followCardTitle}>Quel chien ?</Text>
+              <TouchableOpacity onPress={() => setDogPicker(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={chiens}
+              keyExtractor={item => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.followRow}
+                  activeOpacity={0.7}
+                  onPress={() => { setDogPicker(false); navigation.navigate('CarnetSante', { chienId: item.id, chienNom: item.nom }); }}
+                >
+                  <View style={styles.followAvatarFallback}><Ionicons name="paw" size={16} color={colors.bordeaux} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.followNom}>{item.nom}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            />
           </View>
         </View>
       </Modal>
