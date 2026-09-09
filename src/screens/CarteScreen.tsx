@@ -728,6 +728,11 @@ export default function CarteScreen() {
   const proposeSessionToken = useRef<string | null>(null);
   const skipNextFetchRef = useRef(false);
   const lastFetchedRegionRef = useRef<Region | null>(null);
+  // true des que la localisation GPS a pris la main sur la camera (au montage) --
+  // evite que le fallback onMapReady (qui peut se declencher apres, sur un appareil
+  // ou l'initialisation de la carte est lente) n'ecrase le zoom sur la position reelle
+  // par la region par defaut.
+  const gpsCameraHandledRef = useRef(false);
   const sheetAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetPanY = useRef(new Animated.Value(0)).current;
   const sheetPanResponder = useRef(
@@ -867,6 +872,7 @@ export default function CarteScreen() {
         setUserLat(loc.coords.latitude);
         setUserLng(loc.coords.longitude);
         const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+        gpsCameraHandledRef.current = true;
         mapRef.current?.animateToRegion(r, 600);
         // region (et donc les clusters affichés) n'est mis à jour qu'une fois l'animation
         // reellement terminee, via onRegionChangeComplete — sinon les clusters se recalculent
@@ -2877,6 +2883,10 @@ export default function CarteScreen() {
           // est reellement prete, avec duree 0 (pas d'animation visible) : si la camera
           // etait deja correcte, c'est un no-op ; sinon ca declenche onRegionChangeComplete
           // et donc le recalcul des clusters sur la region reellement affichee.
+          // Si le GPS a deja pris la main (cas normal : onMapReady se declenche presque
+          // toujours avant que la permission + le fix GPS ne resolvent), on ne touche a
+          // rien pour ne pas interrompre/ecraser le zoom sur la position reelle en cours.
+          if (gpsCameraHandledRef.current) return;
           mapRef.current?.animateToRegion(region, 0);
         }}
         onRegionChangeComplete={r => {
@@ -3355,8 +3365,18 @@ export default function CarteScreen() {
 
       <TouchableOpacity style={styles.locBtn} onPress={async () => {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        if (status !== 'granted') {
+          Alert.alert('Localisation désactivée', "Autorise l'accès à ta position dans les réglages pour te centrer sur la carte.");
+          return;
+        }
         const loc = await Location.getCurrentPositionAsync({});
+        // Aligne sur l'effet GPS du montage : sans ca, un utilisateur qui avait refuse
+        // la permission au demarrage puis l'accorde ici voit la carte se centrer sur lui
+        // mais garde userLat/userLng a null, cassant silencieusement le filtre distance
+        // et les sections "Pres de toi".
+        setUserLat(loc.coords.latitude);
+        setUserLng(loc.coords.longitude);
+        gpsCameraHandledRef.current = true;
         const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 };
         mapRef.current?.animateToRegion(r, 600);
       }}>
