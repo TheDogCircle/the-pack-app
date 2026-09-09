@@ -22,8 +22,11 @@ type PrivateInfo = {
   chien_id: string;
   puce_identification: string | null;
   veterinaire_nom: string | null; veterinaire_telephone: string | null; veterinaire_adresse: string | null;
+  veterinaire_lieu_id: string | null;
   sterilise: boolean; date_sterilisation: string | null;
 };
+
+type VetLieu = { id: string; nom: string; ville: string | null; adresse: string | null; tel: string | null };
 
 type EntryType = 'vaccin' | 'vermifuge' | 'antiparasitaire' | 'rdv_veto' | 'pesee' | 'note';
 
@@ -104,10 +107,16 @@ export default function CarnetSanteScreen() {
   const [vetNom, setVetNom] = useState('');
   const [vetTel, setVetTel] = useState('');
   const [vetAdresse, setVetAdresse] = useState('');
+  const [vetLieuId, setVetLieuId] = useState<string | null>(null);
   const [puce, setPuce] = useState('');
   const [sterilise, setSterilise] = useState(false);
   const [dateSterilisation, setDateSterilisation] = useState('');
   const [savingInfo, setSavingInfo] = useState(false);
+
+  const [vetPickerModal, setVetPickerModal] = useState(false);
+  const [vetSearch, setVetSearch] = useState('');
+  const [vetResults, setVetResults] = useState<VetLieu[]>([]);
+  const [vetSearchLoading, setVetSearchLoading] = useState(false);
 
   const [newQuestion, setNewQuestion] = useState('');
   const [addingQuestion, setAddingQuestion] = useState(false);
@@ -118,7 +127,7 @@ export default function CarnetSanteScreen() {
         .select('id, nom, race, photo_url')
         .eq('id', chienId).single(),
       supabase.from('chien_infos_privees')
-        .select('chien_id, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, sterilise, date_sterilisation')
+        .select('chien_id, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, veterinaire_lieu_id, sterilise, date_sterilisation')
         .eq('chien_id', chienId).maybeSingle(),
       supabase.from('chien_carnet_entries')
         .select('id, type, titre, date, date_rappel, poids_kg, taille_cm, notes')
@@ -166,10 +175,43 @@ export default function CarnetSanteScreen() {
     setVetNom(privateInfo?.veterinaire_nom || '');
     setVetTel(privateInfo?.veterinaire_telephone || '');
     setVetAdresse(privateInfo?.veterinaire_adresse || '');
+    setVetLieuId(privateInfo?.veterinaire_lieu_id || null);
     setPuce(privateInfo?.puce_identification || '');
     setSterilise(privateInfo?.sterilise || false);
     setDateSterilisation(privateInfo?.date_sterilisation ? isoToFrDate(privateInfo.date_sterilisation) : '');
     setInfoModal(true);
+  }
+
+  function openVetPicker() {
+    setVetSearch('');
+    setVetResults([]);
+    setVetPickerModal(true);
+  }
+
+  async function searchVets(q: string) {
+    setVetSearch(q);
+    if (q.trim().length < 2) { setVetResults([]); return; }
+    setVetSearchLoading(true);
+    const { data } = await supabase.from('lieux')
+      .select('id, nom, ville, adresse, tel')
+      .eq('cat', 'veto').eq('actif', true)
+      .ilike('nom', `%${q.trim()}%`)
+      .order('nom', { ascending: true })
+      .limit(30);
+    setVetResults((data || []) as VetLieu[]);
+    setVetSearchLoading(false);
+  }
+
+  function selectVetLieu(vet: VetLieu) {
+    setVetNom(vet.nom);
+    setVetTel(vet.tel || '');
+    setVetAdresse([vet.adresse, vet.ville].filter(Boolean).join(', '));
+    setVetLieuId(vet.id);
+    setVetPickerModal(false);
+  }
+
+  function unlinkVetLieu() {
+    setVetLieuId(null);
   }
 
   async function saveInfo() {
@@ -183,6 +225,7 @@ export default function CarnetSanteScreen() {
       veterinaire_nom: vetNom.trim() || null,
       veterinaire_telephone: vetTel.trim() || null,
       veterinaire_adresse: vetAdresse.trim() || null,
+      veterinaire_lieu_id: vetLieuId,
       puce_identification: puce.trim() || null,
       sterilise,
       date_sterilisation: sterilise ? parseFrDateToIso(dateSterilisation) : null,
@@ -472,14 +515,29 @@ export default function CarnetSanteScreen() {
               <Text style={styles.fieldLabel}>Puce d'identification</Text>
               <TextInput style={styles.fieldInput} value={puce} onChangeText={setPuce} placeholder="N° de puce" placeholderTextColor={colors.textMuted} />
 
-              <Text style={styles.fieldLabel}>Nom du vétérinaire</Text>
-              <TextInput style={styles.fieldInput} value={vetNom} onChangeText={setVetNom} placeholder="Dr…" placeholderTextColor={colors.textMuted} />
+              <View style={styles.vetFieldHeader}>
+                <Text style={[styles.fieldLabel, { marginTop: 0 }]}>Vétérinaire</Text>
+                <TouchableOpacity onPress={openVetPicker} style={styles.vetPickLink}>
+                  <Ionicons name="map-outline" size={13} color={colors.terra} />
+                  <Text style={styles.vetPickLinkText}>Choisir sur la carte</Text>
+                </TouchableOpacity>
+              </View>
+
+              {vetLieuId ? (
+                <View style={styles.vetLinkedBadge}>
+                  <Ionicons name="link" size={12} color={colors.sage} />
+                  <Text style={styles.vetLinkedBadgeText}>Lié à une fiche de la carte</Text>
+                  <TouchableOpacity onPress={unlinkVetLieu}><Text style={styles.vetUnlinkText}>Dissocier</Text></TouchableOpacity>
+                </View>
+              ) : null}
+
+              <TextInput style={styles.fieldInput} value={vetNom} onChangeText={t => { setVetNom(t); setVetLieuId(null); }} placeholder="Dr…" placeholderTextColor={colors.textMuted} />
 
               <Text style={styles.fieldLabel}>Téléphone</Text>
-              <TextInput style={styles.fieldInput} value={vetTel} onChangeText={setVetTel} placeholder="06…" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
+              <TextInput style={styles.fieldInput} value={vetTel} onChangeText={t => { setVetTel(t); setVetLieuId(null); }} placeholder="06…" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
 
               <Text style={styles.fieldLabel}>Adresse</Text>
-              <TextInput style={styles.fieldInput} value={vetAdresse} onChangeText={setVetAdresse} placeholder="Adresse du cabinet" placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.fieldInput} value={vetAdresse} onChangeText={t => { setVetAdresse(t); setVetLieuId(null); }} placeholder="Adresse du cabinet" placeholderTextColor={colors.textMuted} />
 
               <TouchableOpacity style={styles.checkboxRow} onPress={() => setSterilise(!sterilise)}>
                 <Ionicons name={sterilise ? 'checkbox' : 'square-outline'} size={20} color={sterilise ? colors.sage : colors.textMuted} />
@@ -496,6 +554,48 @@ export default function CarnetSanteScreen() {
               <TouchableOpacity style={styles.saveBtn} onPress={saveInfo} disabled={savingInfo}>
                 {savingInfo ? <ActivityIndicator color={colors.ivory} size="small" /> : <Text style={styles.saveBtnText}>Enregistrer</Text>}
               </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={vetPickerModal} animationType="slide" transparent onRequestClose={() => setVetPickerModal(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Choisir un vétérinaire</Text>
+              <TouchableOpacity onPress={() => setVetPickerModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.vetSearchWrap}>
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput
+                style={styles.vetSearchInput}
+                value={vetSearch}
+                onChangeText={searchVets}
+                placeholder="Nom du cabinet vétérinaire…"
+                placeholderTextColor={colors.textMuted}
+                autoFocus
+              />
+            </View>
+            <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+              {vetSearchLoading ? (
+                <ActivityIndicator style={{ padding: 24 }} color={colors.terra} />
+              ) : vetSearch.trim().length < 2 ? (
+                <Text style={styles.emptyMini} numberOfLines={2}>{'\n'}Tape au moins 2 lettres pour chercher parmi les fiches vétérinaires de la carte.</Text>
+              ) : vetResults.length === 0 ? (
+                <Text style={styles.emptyMini}>{'\n'}Aucun vétérinaire trouvé sur la carte pour cette recherche.</Text>
+              ) : vetResults.map(v => (
+                <TouchableOpacity key={v.id} style={styles.vetResultRow} onPress={() => selectVetLieu(v)}>
+                  <View style={styles.vetResultIcon}><Ionicons name="medkit-outline" size={16} color={colors.terra} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.vetResultNom}>{v.nom}</Text>
+                    {v.ville ? <Text style={styles.vetResultVille}>{v.ville}</Text> : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -610,4 +710,32 @@ const styles = StyleSheet.create({
 
   saveBtn: { backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
   saveBtnText: { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.ivory },
+
+  vetFieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  vetPickLink: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  vetPickLinkText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
+  vetLinkedBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8,
+    backgroundColor: 'rgba(46,125,107,0.08)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+  },
+  vetLinkedBadgeText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.sage },
+  vetUnlinkText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textDecorationLine: 'underline' },
+
+  vetSearchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.white, marginHorizontal: 16, marginVertical: 12,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  vetSearchInput: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
+  vetResultRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  vetResultIcon: {
+    width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(196,105,58,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vetResultNom: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  vetResultVille: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 1 },
 });

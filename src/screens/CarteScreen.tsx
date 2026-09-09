@@ -807,6 +807,36 @@ export default function CarteScreen() {
     action();
   }
 
+  // Rattache cette fiche veto comme "veto referent" au carnet de sante d'un chien --
+  // ecrit dans chien_infos_privees (table dediee, hors de `chiens` pour ne pas exposer
+  // ces donnees aux abonnes, cf securite carnet). Upsert partiel : n'envoie que les
+  // champs veterinaire_*, donc n'ecrase jamais puce/sterilisation deja renseignees.
+  async function attachAsVeteReferent(lieu: LieuFull) {
+    if (!userId) { showLoginPrompt(); return; }
+    const { data: dogs } = await supabase.from('chiens').select('id, nom').eq('user_id', userId);
+    if (!dogs || dogs.length === 0) {
+      Alert.alert('Aucun chien renseigné', "Ajoute d'abord un chien dans Réglages pour lui associer un vétérinaire référent.");
+      return;
+    }
+    const assign = async (chienId: string, chienNom: string) => {
+      const { error } = await supabase.from('chien_infos_privees').upsert({
+        chien_id: chienId,
+        veterinaire_nom: lieu.nom,
+        veterinaire_telephone: lieu.tel || null,
+        veterinaire_adresse: [lieu.adresse, lieu.ville].filter(Boolean).join(', ') || null,
+        veterinaire_lieu_id: lieu.id,
+      });
+      if (error) { Alert.alert('Erreur', error.message); return; }
+      Alert.alert('Vétérinaire référent enregistré', `"${lieu.nom}" est maintenant le vétérinaire référent de ${chienNom}.`);
+    };
+    if (dogs.length === 1) { assign(dogs[0].id, dogs[0].nom); return; }
+    Alert.alert(
+      'Pour quel chien ?',
+      undefined,
+      [...dogs.map(d => ({ text: d.nom, onPress: () => assign(d.id, d.nom) })), { text: 'Annuler', style: 'cancel' as const }],
+    );
+  }
+
   const openLieuById = useCallback((lieuId: string) => {
     supabase.from('lieux').select('id,nom,lat,lng,cat,ville,adresse,note_moyenne,nb_avis')
       .eq('id', lieuId).single()
@@ -2714,6 +2744,15 @@ export default function CarteScreen() {
                     >
                       <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
                       <Text style={styles.actionSecondaryText} numberOfLines={1}>Réserver</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {selectedLieu.cat === 'veto' ? (
+                    <TouchableOpacity
+                      style={styles.actionSecondary}
+                      onPress={() => attachAsVeteReferent(selectedLieu)}
+                    >
+                      <Ionicons name="medkit-outline" size={16} color={colors.ivory} />
+                      <Text style={styles.actionSecondaryText} numberOfLines={1}>Mon véto référent</Text>
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity
