@@ -2866,6 +2866,19 @@ export default function CarteScreen() {
         ref={mapRef}
         style={styles.map}
         initialRegion={region}
+        onMapReady={() => {
+          // `initialRegion` est non controle : sur certains appareils (surtout Android),
+          // la camera native ne se cale pas de facon fiable dessus au montage, et
+          // onRegionChangeComplete peut ne jamais se declencher automatiquement --
+          // `region` (qui pilote les clusters affiches) reste alors bloque sur sa valeur
+          // par defaut sans que la camera visible ne corresponde forcement a un
+          // affichage utile, jusqu'a ce qu'un vrai mouvement de carte (dont "localiser")
+          // provoque enfin l'evenement. On force ici la synchronisation des que la carte
+          // est reellement prete, avec duree 0 (pas d'animation visible) : si la camera
+          // etait deja correcte, c'est un no-op ; sinon ca declenche onRegionChangeComplete
+          // et donc le recalcul des clusters sur la region reellement affichee.
+          mapRef.current?.animateToRegion(region, 0);
+        }}
         onRegionChangeComplete={r => {
           // onRegionChangeComplete se declenche plusieurs fois pendant un seul geste de
           // pincement continu (pas uniquement une fois le geste termine) -- react-native-maps
