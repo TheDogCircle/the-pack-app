@@ -3,6 +3,7 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Image, Linking, AppState, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -73,6 +74,7 @@ function renderMeuteHeartButton(navigation: any, activityBadge: boolean, setActi
 
 function MainTabs() {
   const { session } = useSession();
+  const insets = useSafeAreaInsets();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [meuteBadge, setMeuteBadge] = useState(false);
   const [partBadge, setPartBadge] = useState(false);
@@ -180,7 +182,15 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: colors.bordeaux,
           borderTopColor: 'rgba(245,239,224,0.08)',
-          paddingBottom: 8, paddingTop: 4, height: 74,
+          // Hauteur fixe en dur : des qu'on personnalise `height`, @react-navigation/
+          // bottom-tabs arrete d'ajouter automatiquement l'inset de securite du bas.
+          // Depuis Expo SDK 54 / Android 15, l'edge-to-edge est impose par defaut --
+          // l'app dessine derriere la barre systeme (3 boutons ou geste), donc sans
+          // ce rattrapage manuel la barre d'onglets se retrouvait partiellement
+          // recouverte par la barre systeme. insets.bottom vaut 0 sur les appareils
+          // ou l'inset ne s'applique pas (dont iOS sans encoche), donc ce calcul ne
+          // change rien la ou ca fonctionnait deja.
+          paddingBottom: Math.max(insets.bottom, 8), paddingTop: 4, height: 58 + insets.bottom,
         },
         tabBarActiveTintColor: colors.terraPale,
         tabBarInactiveTintColor: 'rgba(245,239,224,0.45)',

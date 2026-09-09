@@ -704,6 +704,17 @@ export default function CarteScreen() {
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Aucun de ces 3 timers n'etait nettoye au demontage -- si l'ecran se demonte pendant
+  // qu'un debounce est en vol (recherche tapee, pincement de zoom juste avant de quitter
+  // l'onglet), le timer se declenchait quand meme et appelait setState sur un composant
+  // deja demonte (perte de temps reseau/CPU inutile, sans crash mais pas propre).
+  useEffect(() => {
+    return () => {
+      if (markerResetTimer.current) clearTimeout(markerResetTimer.current);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      if (regionTimer.current) clearTimeout(regionTimer.current);
+    };
+  }, []);
   // ── Balades ──
   const [balades, setBalades] = useState<Balade[]>([]);
   const [selectedBalade, setSelectedBalade] = useState<Balade | null>(null);
@@ -940,7 +951,16 @@ export default function CarteScreen() {
         .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
         .limit(3000);
       if (cat) query = (query as any).eq('cat', cat);
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) {
+        // Ne jamais vider la carte a cause d'un raté réseau ponctuel : on garde les
+        // lieux déjà affichés plutôt que de remplacer par une liste vide, et on
+        // annule le curseur de dernière region chargée pour qu'un prochain
+        // mouvement de carte retente au lieu de considérer la zone déjà a jour.
+        console.warn('[CarteScreen] fetchLieux error:', error.message);
+        lastFetchedRegionRef.current = last;
+        return;
+      }
       const newPlaces = data || [];
       if (reset) {
         setLieux(newPlaces);
@@ -951,6 +971,9 @@ export default function CarteScreen() {
           return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
         });
       }
+    } catch (e: any) {
+      console.warn('[CarteScreen] fetchLieux exception:', e?.message || e);
+      lastFetchedRegionRef.current = last;
     } finally {
       setLoading(false);
     }
