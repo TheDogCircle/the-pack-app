@@ -177,6 +177,14 @@ function fmtAllure(totalSec: number, km: number): string {
   return `${m}'${String(s).padStart(2, '0')}/km`;
 }
 
+function timeAgoBalade(date: string): string {
+  const j = Math.floor((Date.now() - new Date(date).getTime()) / 86_400_000);
+  if (j < 1) return "Aujourd'hui";
+  if (j === 1) return 'Hier';
+  if (j < 30) return `Il y a ${j} j`;
+  return new Date(date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 const FAV_FILTER_OPTS: { key: string; label: string; icon: IoniconsName; color: string }[] = [
   { key: 'favori',      label: 'Favoris',    icon: 'heart',            color: '#E05070' },
   { key: 'a_tester',   label: 'À tester',   icon: 'bookmark',         color: colors.bordeaux },
@@ -315,7 +323,7 @@ type EventMarker = {
 };
 type Balade = {
   id: string; user_id: string; nom: string; description: string | null;
-  depart_lat: number; depart_lng: number; depart_label: string | null;
+  depart_lat: number | null; depart_lng: number | null; depart_label: string | null;
   arrivee_texte: string | null; arrivee_lat: number | null; arrivee_lng: number | null;
   distance_km: number | null; created_at: string;
   ombragee: boolean; eau_chemin: boolean; fontaine_eau: boolean;
@@ -718,6 +726,8 @@ export default function CarteScreen() {
   // ── Balades ──
   const [balades, setBalades] = useState<Balade[]>([]);
   const [selectedBalade, setSelectedBalade] = useState<Balade | null>(null);
+  const [baladePost, setBaladePost] = useState<{ id: string; images: string[] | null; image_url: string | null } | null>(null);
+  const [baladePostLoading, setBaladePostLoading] = useState(false);
   const [baladeNom, setBaladeNom] = useState('');
   const [baladeDesc, setBaladeDesc] = useState('');
   const [baladeLoading, setBaladeLoading] = useState(false);
@@ -844,25 +854,28 @@ export default function CarteScreen() {
   }, []);
 
   const openBaladeById = useCallback((baladeId: string) => {
-    supabase.from('balades')
-      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
-      .eq('id', baladeId)
-      .single()
+    // balade_by_id() (et non une lecture directe de `balades`) applique la meme
+    // redaction de confidentialite que la carte : un lien partage vers une balade
+    // dont l'auteur a active "Masquer mon point de depart" ne doit pas reveler ses
+    // coordonnees exactes.
+    supabase.rpc('balade_by_id', { p_id: baladeId })
       .then(({ data, error }) => {
-        if (data && !error) {
+        const row = data && data.length ? data[0] : null;
+        if (row && !error) {
+          const balade = { ...row, profils: row.prenom ? { prenom: row.prenom } : null } as Balade;
           setListView(false);
           setShowBalades(true);
-          setSelectedBalade(data as Balade);
-          const trace = (data as any).trace as { latitude: number; longitude: number }[] | null;
+          setSelectedBalade(balade);
+          const trace = (row as any).trace as { latitude: number; longitude: number }[] | null;
           if (trace && trace.length > 1) {
             mapRef.current?.fitToCoordinates(trace, {
               edgePadding: { top: 80, right: 60, bottom: 340, left: 60 },
               animated: true,
             });
-          } else {
+          } else if (row.depart_lat != null && row.depart_lng != null) {
             mapRef.current?.animateToRegion({
-              latitude: data.depart_lat,
-              longitude: data.depart_lng,
+              latitude: row.depart_lat,
+              longitude: row.depart_lng,
               latitudeDelta: 0.05,
               longitudeDelta: 0.05,
             }, 800);
@@ -875,6 +888,23 @@ export default function CarteScreen() {
     setProposeNom(name);
     setProposeModal(true);
   }, []);
+
+  // Une balade publiee via submitBalade() cree aussi un community_posts lie (balade_id) avec
+  // la capture de trace + les photos -- la fiche balade seule n'affichait jusqu'ici ni photos
+  // ni lien vers ce post, alors que le contenu existe deja. On va le chercher a chaque
+  // ouverture de fiche pour proposer "Voir dans le fil".
+  useEffect(() => {
+    if (!selectedBalade) { setBaladePost(null); return; }
+    setBaladePostLoading(true);
+    supabase.from('community_posts')
+      .select('id, images, image_url')
+      .eq('balade_id', selectedBalade.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setBaladePost(data as any);
+        setBaladePostLoading(false);
+      });
+  }, [selectedBalade?.id]);
 
   // navigate('Tabs', { screen: 'Carte' }) est un no-op silencieux si Carte est deja
   // l'onglet actif -- aucun focus ne se redeclenche alors, donc ce useFocusEffect seul
@@ -3045,7 +3075,8 @@ export default function CarteScreen() {
             lineCap="round"
             lineJoin="round"
           />
-        ) : selectedBalade?.arrivee_lat != null && selectedBalade?.arrivee_lng != null && (
+        ) : selectedBalade?.depart_lat != null && selectedBalade?.depart_lng != null
+          && selectedBalade?.arrivee_lat != null && selectedBalade?.arrivee_lng != null && (
           <Polyline
             coordinates={[
               { latitude: selectedBalade.depart_lat, longitude: selectedBalade.depart_lng },
@@ -4137,32 +4168,52 @@ export default function CarteScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.baladeSheetNom}>{selectedBalade.nom}</Text>
-              <Text style={styles.baladeSheetAuthor}>
-                Par {selectedBalade.profils?.prenom || 'un membre'}
-                {selectedBalade.distance_km ? ` · ${selectedBalade.distance_km} km` : ''}
-                {(selectedBalade as any).duree_secondes ? ` · ${fmtDuree((selectedBalade as any).duree_secondes)}` : ''}
-                {(selectedBalade as any).duree_secondes && selectedBalade.distance_km
-                  ? ` · ${fmtAllure((selectedBalade as any).duree_secondes, selectedBalade.distance_km)}`
-                  : ''}
-              </Text>
+              <TouchableOpacity
+                disabled={!selectedBalade.user_id}
+                onPress={() => {
+                  const userId = selectedBalade.user_id;
+                  const prenom = selectedBalade.profils?.prenom || '';
+                  setSelectedBalade(null);
+                  navigation.navigate('ProfilPublic', { userId, prenom });
+                }}
+              >
+                <Text style={styles.baladeSheetAuthor}>
+                  Par {selectedBalade.profils?.prenom || 'un membre'} · {timeAgoBalade(selectedBalade.created_at)}
+                  {selectedBalade.distance_km ? ` · ${selectedBalade.distance_km} km` : ''}
+                  {(selectedBalade as any).duree_secondes ? ` · ${fmtDuree((selectedBalade as any).duree_secondes)}` : ''}
+                  {(selectedBalade as any).duree_secondes && selectedBalade.distance_km
+                    ? ` · ${fmtAllure((selectedBalade as any).duree_secondes, selectedBalade.distance_km)}`
+                    : ''}
+                </Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => setSelectedBalade(null)}>
               <Ionicons name="close" size={22} color={colors.bordeaux} />
             </TouchableOpacity>
           </View>
-          <View style={styles.baladeRoute}>
-            <View style={styles.baladeRouteDot} />
-            <Text style={styles.baladeRouteLabel} numberOfLines={2}>
-              {selectedBalade.depart_label || 'Point de départ'}
-            </Text>
-          </View>
-          <View style={styles.baladeRouteLine} />
-          <View style={styles.baladeRoute}>
-            <Ionicons name="flag-outline" size={14} color='#2E7D6B' />
-            <Text style={styles.baladeRouteLabel} numberOfLines={2}>
-              {selectedBalade.arrivee_texte || (selectedBalade.arrivee_lat ? 'Point marqué sur la carte' : '—')}
-            </Text>
-          </View>
+
+          {/* depart_label/arrivee_texte restent vides sur la quasi-totalite des balades
+              existantes (jamais renseignes cote formulaire) -- afficher la section
+              seulement quand il y a un vrai contenu, plutot que deux lignes placeholder
+              systematiques ("Point de départ" / "—") qui ne servaient a rien. */}
+          {(selectedBalade.depart_label || selectedBalade.arrivee_texte) ? (
+            <>
+              <View style={styles.baladeRoute}>
+                <View style={styles.baladeRouteDot} />
+                <Text style={styles.baladeRouteLabel} numberOfLines={2}>
+                  {selectedBalade.depart_label || 'Point de départ'}
+                </Text>
+              </View>
+              <View style={styles.baladeRouteLine} />
+              <View style={styles.baladeRoute}>
+                <Ionicons name="flag-outline" size={14} color='#2E7D6B' />
+                <Text style={styles.baladeRouteLabel} numberOfLines={2}>
+                  {selectedBalade.arrivee_texte || 'Point marqué sur la carte'}
+                </Text>
+              </View>
+            </>
+          ) : null}
+
           {selectedBalade.description ? (
             <Text style={styles.baladeSheetDesc}>{selectedBalade.description}</Text>
           ) : null}
@@ -4176,6 +4227,45 @@ export default function CarteScreen() {
               ))}
             </View>
           )}
+
+          {baladePostLoading ? (
+            <ActivityIndicator color={colors.bordeaux} style={{ marginTop: 14 }} />
+          ) : null}
+          {baladePost && ((baladePost.images && baladePost.images.length > 0) || baladePost.image_url) ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 14 }}>
+              {(baladePost.images && baladePost.images.length ? baladePost.images : [baladePost.image_url as string]).map((uri, idx) => (
+                <Image key={idx} source={{ uri }} style={styles.baladeSheetPhoto} resizeMode="cover" />
+              ))}
+            </ScrollView>
+          ) : null}
+
+          <View style={[styles.actions, { marginTop: 16 }]}>
+            {baladePost ? (
+              <TouchableOpacity
+                style={styles.actionPrimary}
+                onPress={() => {
+                  mapNavigation.setPendingPost(baladePost.id);
+                  setSelectedBalade(null);
+                  navigation.navigate('Tabs', { screen: 'Meute' });
+                }}
+              >
+                <Ionicons name="chatbubble-outline" size={16} color={colors.ivory} />
+                <Text style={styles.actionPrimaryText}>Voir dans le fil</Text>
+              </TouchableOpacity>
+            ) : null}
+            {selectedBalade.depart_lat != null && selectedBalade.depart_lng != null ? (
+              <TouchableOpacity
+                style={baladePost ? styles.actionSecondary : styles.actionPrimary}
+                onPress={() => {
+                  const url = `maps://?daddr=${selectedBalade.depart_lat},${selectedBalade.depart_lng}`;
+                  Linking.openURL(url).catch(() => Linking.openURL(`https://maps.google.com/?q=${selectedBalade.depart_lat},${selectedBalade.depart_lng}`));
+                }}
+              >
+                <Ionicons name="navigate" size={16} color={colors.ivory} />
+                <Text style={baladePost ? styles.actionSecondaryText : styles.actionPrimaryText}>Itinéraire</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
       </Modal>
     )}
@@ -4519,6 +4609,7 @@ const styles = StyleSheet.create({
   baladeRouteLabel: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux },
   baladeRouteLine: { width: 2, height: 16, backgroundColor: colors.border, marginLeft: 4, marginVertical: 2 },
   baladeSheetDesc: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, marginTop: 12, lineHeight: 20 },
+  baladeSheetPhoto: { width: 120, height: 120, borderRadius: 12, backgroundColor: colors.border },
   baladeForm: { padding: 20, paddingBottom: 60 },
   baladeFormHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 8 },
   baladeFormTitle: { flex: 1, fontFamily: 'DMSans_600SemiBold', fontSize: 17, color: colors.bordeaux, textAlign: 'center' },
