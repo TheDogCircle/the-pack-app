@@ -1175,18 +1175,17 @@ export default function CarteScreen() {
   async function fetchBalades(r: Region) {
     const latD = r.latitudeDelta * 0.6;
     const lngD = r.longitudeDelta * 0.6;
-    const { data } = await supabase
-      .from('balades')
-      .select('id, user_id, nom, description, depart_lat, depart_lng, depart_label, arrivee_texte, arrivee_lat, arrivee_lng, distance_km, duree_secondes, trace, ombragee, eau_chemin, fontaine_eau, sans_laisse, evite_routes, sol_naturel, created_at')
-      .eq('validee', true)
-      .gte('depart_lat', r.latitude - latD).lte('depart_lat', r.latitude + latD)
-      .gte('depart_lng', r.longitude - lngD).lte('depart_lng', r.longitude + lngD)
-      .order('created_at', { ascending: false }).limit(50);
+    // Passe par la fonction balades_carte (RPC) plutot qu'un select direct sur la
+    // table : elle floute depart/arrivee + tronque le trace sur 200m pour les
+    // auteurs ayant active "Masquer mon point de depart" (vie privee, cf zones de
+    // confidentialite Strava), en clair uniquement pour ses propres balades. Le
+    // prenom de l'auteur est deja joint cote serveur, plus besoin d'une 2e requete.
+    const { data, error } = await supabase.rpc('balades_carte', {
+      p_lat: r.latitude, p_lng: r.longitude, p_lat_delta: latD, p_lng_delta: lngD,
+    });
+    if (error) { console.warn('[CarteScreen] fetchBalades error:', error.message); return; }
     if (!data || !data.length) { setBalades([]); return; }
-    const userIds = [...new Set(data.map((b: any) => b.user_id))] as string[];
-    const { data: profiles } = await supabase.from('profils').select('id, prenom').in('id', userIds);
-    const pm = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
-    setBalades(data.map((b: any) => ({ ...b, profils: pm[b.user_id] || null })));
+    setBalades(data.map((b: any) => ({ ...b, profils: b.prenom ? { prenom: b.prenom } : null })));
   }
 
   // ── Suivi live d'une balade (façon Strava), y compris en arriere-plan ──
@@ -3028,13 +3027,15 @@ export default function CarteScreen() {
           />
         ))}
         {showBalades && !showEvents && filteredBalades.map(b => (
-          <BaladePin
-            key={`bal-${b.id}`}
-            latitude={b.depart_lat}
-            longitude={b.depart_lng}
-            isSelected={selectedBalade?.id === b.id}
-            onPress={() => { setFabOpen(false); setSelectedBalade(b); }}
-          />
+          b.depart_lat != null && b.depart_lng != null ? (
+            <BaladePin
+              key={`bal-${b.id}`}
+              latitude={b.depart_lat}
+              longitude={b.depart_lng}
+              isSelected={selectedBalade?.id === b.id}
+              onPress={() => { setFabOpen(false); setSelectedBalade(b); }}
+            />
+          ) : null
         ))}
         {selectedBalade && (selectedBalade as any).trace?.length > 1 ? (
           <Polyline
@@ -4276,7 +4277,7 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 );
               })}
-              <Text style={styles.baladeVisibiliteNote}>Le tracé reste visible sur la carte comme suggestion de balade pour tout le monde, quel que soit ton choix.</Text>
+              <Text style={styles.baladeVisibiliteNote}>Le tracé reste visible sur la carte comme suggestion de balade pour tout le monde, quel que soit ton choix. Pour flouter ton point de départ/arrivée, active "Masquer mon point de départ" dans Réglages → Confidentialité.</Text>
             </View>
 
             <Text style={styles.baladeFormLabel}>Caractéristiques (optionnel)</Text>

@@ -83,6 +83,7 @@ export default function SettingsScreen() {
   const [notifNewPost, setNotifNewPost] = useState(true);
   const [notifBirthday, setNotifBirthday] = useState(true);
   const [notifEventReminder, setNotifEventReminder] = useState(true);
+  const [masquerDepartBalade, setMasquerDepartBalade] = useState(false);
   const [rayonKm, setRayonKm] = useState(20);
   const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
@@ -155,7 +156,7 @@ export default function SettingsScreen() {
 
     const [{ data }, { data: chiensData }] = await Promise.all([
       supabase.from('profils')
-        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,notif_birthday,notif_event_reminder,rayon_km,prenom,ville,pays,genre,telephone,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
+        .select('username,notif_follow,notif_lieu_nearby,notif_messages,notif_suggestion_validee,notif_photo_like,notif_friend_lieu,notif_partner,notif_offer,notif_broadcast,notif_new_post,notif_birthday,notif_event_reminder,masquer_depart_balade,rayon_km,prenom,ville,pays,genre,telephone,bio,instagram_url,tiktok_url,nom_chien,race_chien,genre_chien,tranche_age_chien,statut_amoureux_chien,date_naissance_humain,date_naissance_chien')
         .eq('id', session.user.id).single(),
       supabase.from('chiens')
         .select('id,nom,race,genre,tranche_age,statut_amoureux,date_naissance')
@@ -177,6 +178,7 @@ export default function SettingsScreen() {
       setNotifNewPost(data.notif_new_post ?? true);
       setNotifBirthday(data.notif_birthday ?? true);
       setNotifEventReminder(data.notif_event_reminder ?? true);
+      setMasquerDepartBalade(data.masquer_depart_balade ?? false);
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
       setVille(data.ville || '');
@@ -235,6 +237,12 @@ export default function SettingsScreen() {
     if (!userId) return;
     setRayonKm(km);
     await supabase.from('profils').update({ rayon_km: km }).eq('id', userId);
+  }
+
+  async function toggleMasquerDepartBalade(value: boolean) {
+    if (!userId) return;
+    setMasquerDepartBalade(value);
+    await supabase.from('profils').update({ masquer_depart_balade: value }).eq('id', userId);
   }
 
   async function saveUsername() {
@@ -743,6 +751,19 @@ export default function SettingsScreen() {
             <Text style={styles.toggleSub}>Rappels avant un événement mis en avant près de toi (2 sem., 1 sem., 3j, veille, jour J)</Text>
           </View>
           <Switch value={notifEventReminder} onValueChange={v => toggleNotif('notif_event_reminder', v)}
+            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
+        </View>
+      </View>
+
+      {/* Confidentialité */}
+      <View style={styles.section}>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Confidentialité</Text></View>
+        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Masquer mon point de départ</Text>
+            <Text style={styles.toggleSub}>Sur tes balades visibles par les autres, floute un rayon de 200 m autour de ton point de départ et d'arrivée (comme la zone de confidentialité Strava) — évite de révéler l'adresse de départ habituelle, souvent ton domicile. S'applique à toutes tes balades, passées et à venir.</Text>
+          </View>
+          <Switch value={masquerDepartBalade} onValueChange={toggleMasquerDepartBalade}
             trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
         </View>
       </View>

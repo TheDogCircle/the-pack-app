@@ -2,8 +2,6 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createNotifLog, sendPushBatch, finalizeNotifLog, type PushMessage } from '../_shared/pushTracking.ts';
 
-const ADMIN_IDS = ['28f8c781-f384-4fcd-89a2-6347e7ca352a', '69a4bea8-8e26-4c07-8fae-b7ab6b6f39ed'];
-
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -23,9 +21,16 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Verifie que l'appelant est bien un admin connu
+  // Verifie que l'appelant est bien un admin -- source unique de verite : le flag
+  // is_admin en base (meme critere que partout ailleurs, cf is_admin_user() utilise
+  // par les policies RLS). Une liste d'IDs codee en dur s'etait desynchronisee du
+  // vrai compte admin de Marine, bloquant silencieusement ses propres tests.
   const { data: { user }, error: userErr } = await supabase.auth.getUser(jwt);
-  if (userErr || !user || !ADMIN_IDS.includes(user.id)) {
+  if (userErr || !user) {
+    return new Response(JSON.stringify({ error: 'Non autorise' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } });
+  }
+  const { data: callerProfil } = await supabase.from('profils').select('is_admin').eq('id', user.id).maybeSingle();
+  if (!callerProfil?.is_admin) {
     return new Response(JSON.stringify({ error: 'Non autorise' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 
