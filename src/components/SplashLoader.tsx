@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Animated, StyleSheet, Easing } from 'react-native';
+import { View, Animated, StyleSheet, Easing, Dimensions } from 'react-native';
 import { colors } from '../lib/theme';
+
+const LOGO_SIZE = Math.min(Dimensions.get('window').width * 0.5, 260);
 
 export default function SplashLoader() {
   const pulse = useRef(new Animated.Value(0)).current;
@@ -32,5 +34,5 @@ export default function SplashLoader() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center' },
-  logo: { width: 96, height: 96, borderRadius: 48 },
+  logo: { width: LOGO_SIZE, height: LOGO_SIZE, borderRadius: LOGO_SIZE / 2 },
 });
