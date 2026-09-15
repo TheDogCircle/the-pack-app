@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl,
-  TouchableOpacity, TextInput, Modal, KeyboardAvoidingView, Platform, Alert,
+  TouchableOpacity, TextInput, Modal, KeyboardAvoidingView, Platform, Alert, Keyboard,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useRoute, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -94,6 +95,9 @@ export default function CarnetSanteScreen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [entryModal, setEntryModal] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [entryFilter, setEntryFilter] = useState<EntryType | 'all'>('all');
+  const [filterModal, setFilterModal] = useState(false);
   const [entryType, setEntryType] = useState<EntryType>('vaccin');
   const [entryTitre, setEntryTitre] = useState('');
   const [entryDate, setEntryDate] = useState(new Date());
@@ -117,6 +121,8 @@ export default function CarnetSanteScreen() {
   const [dateSterilisation, setDateSterilisation] = useState<Date | null>(null);
   const [showSterilisationPicker, setShowSterilisationPicker] = useState(false);
   const [savingInfo, setSavingInfo] = useState(false);
+
+  const swipeRefs = useRef<Record<string, Swipeable | null>>({});
 
   const [vetPickerModal, setVetPickerModal] = useState(false);
   const [vetSearch, setVetSearch] = useState('');
@@ -239,6 +245,7 @@ export default function CarnetSanteScreen() {
   }
 
   function openEntryModal() {
+    setEditingEntryId(null);
     setEntryType('vaccin');
     setEntryTitre('');
     setEntryDate(new Date());
@@ -251,6 +258,24 @@ export default function CarnetSanteScreen() {
     setEntryModal(true);
   }
 
+  function openEditEntryModal(entry: Entry) {
+    setEditingEntryId(entry.id);
+    setEntryType(entry.type);
+    setEntryTitre(entry.titre || '');
+    setEntryDate(isoToDate(entry.date));
+    setEntryHasRappel(!!entry.date_rappel);
+    // La date_rappel stockee est deja le resultat (echeance - delai) : sans
+    // reconstituer l'echeance d'origine (non conservee separement), on la
+    // reaffiche telle quelle avec un delai "jour meme" -- si l'utilisateur ne
+    // touche pas a cette section, la date de rappel enregistree ne change pas.
+    setEntryEcheance(entry.date_rappel ? isoToDate(entry.date_rappel) : new Date());
+    setEntryRappelOffset(0);
+    setEntryPoids(entry.poids_kg != null ? String(entry.poids_kg) : '');
+    setEntryTaille(entry.taille_cm != null ? String(entry.taille_cm) : '');
+    setEntryNotes(entry.notes || '');
+    setEntryModal(true);
+  }
+
   async function saveEntry() {
     setSavingEntry(true);
     let dateRappel: string | null = null;
@@ -259,6 +284,11 @@ export default function CarnetSanteScreen() {
       rappel.setDate(rappel.getDate() - entryRappelOffset);
       dateRappel = dateToIso(rappel);
     }
+    // Si la date de rappel change au fil d'une edition, il faut rouvrir la porte a un
+    // nouvel envoi -- sinon un rappel deja envoye (rappel_envoye=true) resterait bloque
+    // meme si l'utilisateur repousse la date a plus tard.
+    const original = editingEntryId ? entries.find(e => e.id === editingEntryId) : null;
+    const rappelChanged = original ? original.date_rappel !== dateRappel : false;
     const payload = {
       chien_id: chienId,
       type: entryType,
@@ -268,8 +298,11 @@ export default function CarnetSanteScreen() {
       poids_kg: entryType === 'pesee' && entryPoids ? parseFloat(entryPoids.replace(',', '.')) : null,
       taille_cm: entryType === 'pesee' && entryTaille ? parseFloat(entryTaille.replace(',', '.')) : null,
       notes: entryNotes.trim() || null,
+      ...(rappelChanged ? { rappel_envoye: false } : {}),
     };
-    const { error } = await supabase.from('chien_carnet_entries').insert(payload);
+    const { error } = editingEntryId
+      ? await supabase.from('chien_carnet_entries').update(payload).eq('id', editingEntryId)
+      : await supabase.from('chien_carnet_entries').insert(payload);
     setSavingEntry(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
     setEntryModal(false);
@@ -320,12 +353,14 @@ export default function CarnetSanteScreen() {
 
   const latestPesee = entries.find(e => e.type === 'pesee' && e.poids_kg != null);
   const upcoming = [...entries].filter(e => e.date_rappel).sort((a, b) => (a.date_rappel! < b.date_rappel! ? -1 : 1));
+  const filteredEntries = entryFilter === 'all' ? entries : entries.filter(e => e.type === entryFilter);
 
   return (
     <>
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.terra} />}
       >
         <View style={styles.headerCard}>
@@ -418,42 +453,99 @@ export default function CarnetSanteScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Carnet</Text>
-            <TouchableOpacity onPress={openEntryModal} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="add-circle-outline" size={22} color={colors.terra} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterModal(true)}>
+                <Text style={styles.filterBtnText}>{entryFilter === 'all' ? 'Tout' : TYPE_META[entryFilter].label}</Text>
+                <Ionicons name="chevron-down" size={13} color={colors.terra} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={openEntryModal} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="add-circle-outline" size={22} color={colors.terra} />
+              </TouchableOpacity>
+            </View>
           </View>
-          {entries.length === 0 ? (
-            <Text style={styles.emptyMini}>Aucune entrée pour l'instant. Ajoute un vaccin, une pesée, un rendez-vous…</Text>
-          ) : entries.map(e => (
-            <TouchableOpacity key={e.id} onLongPress={() => deleteEntry(e)} style={styles.entryRow} activeOpacity={0.8}>
-              <View style={[styles.entryIcon, { backgroundColor: `${TYPE_META[e.type].color}1A` }]}>
-                <Ionicons name={TYPE_META[e.type].icon} size={16} color={TYPE_META[e.type].color} />
+          {filteredEntries.length === 0 ? (
+            <Text style={styles.emptyMini}>
+              {entries.length === 0 ? "Aucune entrée pour l'instant. Ajoute un vaccin, une pesée, un rendez-vous…" : 'Aucune entrée de ce type.'}
+            </Text>
+          ) : filteredEntries.map(e => (
+            <Swipeable
+              key={e.id}
+              ref={ref => { swipeRefs.current[e.id] = ref; }}
+              overshootRight={false}
+              renderRightActions={() => (
+                <View style={styles.entrySwipeActions}>
+                  <TouchableOpacity
+                    style={[styles.entrySwipeBtn, { backgroundColor: colors.sage }]}
+                    onPress={() => { swipeRefs.current[e.id]?.close(); openEditEntryModal(e); }}
+                  >
+                    <Ionicons name="pencil" size={18} color={colors.ivory} />
+                    <Text style={styles.entrySwipeBtnText}>Modifier</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.entrySwipeBtn, { backgroundColor: colors.terra }]}
+                    onPress={() => { swipeRefs.current[e.id]?.close(); deleteEntry(e); }}
+                  >
+                    <Ionicons name="trash" size={18} color={colors.ivory} />
+                    <Text style={styles.entrySwipeBtnText}>Supprimer</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            >
+              <View style={styles.entryRow}>
+                <View style={[styles.entryIcon, { backgroundColor: `${TYPE_META[e.type].color}1A` }]}>
+                  <Ionicons name={TYPE_META[e.type].icon} size={16} color={TYPE_META[e.type].color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.entryTitle}>{e.titre || TYPE_META[e.type].label}</Text>
+                  <Text style={styles.entrySub}>
+                    {formatDateFr(e.date)}
+                    {e.type === 'pesee' && e.poids_kg != null ? ` · ${e.poids_kg} kg${e.taille_cm ? ` · ${e.taille_cm} cm` : ''}` : ''}
+                    {e.date_rappel ? ` · rappel le ${formatDateFr(e.date_rappel)}` : ''}
+                  </Text>
+                  {e.notes ? <Text style={styles.entryNotes}>{e.notes}</Text> : null}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.entryTitle}>{e.titre || TYPE_META[e.type].label}</Text>
-                <Text style={styles.entrySub}>
-                  {formatDateFr(e.date)}
-                  {e.type === 'pesee' && e.poids_kg != null ? ` · ${e.poids_kg} kg${e.taille_cm ? ` · ${e.taille_cm} cm` : ''}` : ''}
-                  {e.date_rappel ? ` · rappel le ${formatDateFr(e.date_rappel)}` : ''}
-                </Text>
-                {e.notes ? <Text style={styles.entryNotes}>{e.notes}</Text> : null}
-              </View>
-            </TouchableOpacity>
+            </Swipeable>
           ))}
-          {entries.length > 0 && <Text style={styles.entryHint}>Appui long pour supprimer une entrée.</Text>}
+          {entries.length > 0 && <Text style={styles.entryHint}>Glisse une entrée vers la gauche pour la modifier ou la supprimer.</Text>}
         </View>
       </ScrollView>
+
+      <Modal visible={filterModal} animationType="fade" transparent onRequestClose={() => setFilterModal(false)}>
+        <TouchableOpacity style={styles.filterOverlay} activeOpacity={1} onPress={() => setFilterModal(false)}>
+          <View style={styles.filterCard}>
+            <TouchableOpacity
+              style={styles.filterOption}
+              onPress={() => { setEntryFilter('all'); setFilterModal(false); }}
+            >
+              <Text style={[styles.filterOptionText, entryFilter === 'all' && styles.filterOptionTextActive]}>Tout</Text>
+              {entryFilter === 'all' && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+            </TouchableOpacity>
+            {TYPE_ORDER.map(t => (
+              <TouchableOpacity
+                key={t}
+                style={styles.filterOption}
+                onPress={() => { setEntryFilter(t); setFilterModal(false); }}
+              >
+                <Ionicons name={TYPE_META[t].icon} size={15} color={TYPE_META[t].color} />
+                <Text style={[styles.filterOptionText, entryFilter === t && styles.filterOptionTextActive]}>{TYPE_META[t].label}</Text>
+                {entryFilter === t && <Ionicons name="checkmark" size={16} color={colors.terra} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal visible={entryModal} animationType="slide" transparent onRequestClose={() => setEntryModal(false)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Ajouter au carnet</Text>
+              <Text style={styles.modalTitle}>{editingEntryId ? "Modifier l'entrée" : 'Ajouter au carnet'}</Text>
               <TouchableOpacity onPress={() => setEntryModal(false)}>
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
               <Text style={styles.fieldLabel}>Type</Text>
               <View style={styles.typeGrid}>
                 {TYPE_ORDER.map(t => {
@@ -472,7 +564,7 @@ export default function CarnetSanteScreen() {
               </View>
 
               <Text style={styles.fieldLabel}>Titre (optionnel)</Text>
-              <TextInput style={styles.fieldInput} value={entryTitre} onChangeText={setEntryTitre} placeholder={`Ex : ${TYPE_META[entryType].label}`} placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.fieldInput} value={entryTitre} onChangeText={setEntryTitre} placeholder={`Ex : ${TYPE_META[entryType].label}`} placeholderTextColor={colors.textMuted} returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
               <Text style={styles.fieldLabel}>Date</Text>
               <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEntryDatePicker(true)}>
@@ -491,12 +583,15 @@ export default function CarnetSanteScreen() {
                 <>
                   <TouchableOpacity style={styles.checkboxRow} onPress={() => setEntryHasRappel(v => !v)}>
                     <Ionicons name={entryHasRappel ? 'checkbox' : 'square-outline'} size={20} color={entryHasRappel ? colors.sage : colors.textMuted} />
-                    <Text style={styles.checkboxLabel}>Programmer un rappel</Text>
+                    <Text style={styles.checkboxLabel}>Me rappeler de refaire ça</Text>
                   </TouchableOpacity>
+                  {!entryHasRappel && (
+                    <Text style={styles.rappelHint}>Utile pour un vaccin, un vermifuge… qu'il faudra refaire dans quelques semaines ou mois.</Text>
+                  )}
 
                   {entryHasRappel && (
                     <>
-                      <Text style={styles.fieldLabel}>Échéance (prochaine date prévue)</Text>
+                      <Text style={styles.fieldLabel}>Prochain {TYPE_META[entryType].label.toLowerCase()} prévu le</Text>
                       <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEcheancePicker(true)}>
                         <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
                         <Text style={styles.dateBtnText}>{entryEcheance.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
@@ -510,7 +605,7 @@ export default function CarnetSanteScreen() {
                         />
                       )}
 
-                      <Text style={styles.fieldLabel}>Me le rappeler</Text>
+                      <Text style={styles.fieldLabel}>Me prévenir</Text>
                       <View style={styles.typeGrid}>
                         {RAPPEL_OFFSETS.map(o => {
                           const active = entryRappelOffset === o.days;
@@ -550,7 +645,7 @@ export default function CarnetSanteScreen() {
               <TextInput style={[styles.fieldInput, styles.fieldTextarea]} value={entryNotes} onChangeText={setEntryNotes} placeholder="Détails, dosage, observations…" placeholderTextColor={colors.textMuted} multiline />
 
               <TouchableOpacity style={styles.saveBtn} onPress={saveEntry} disabled={savingEntry}>
-                {savingEntry ? <ActivityIndicator color={colors.ivory} size="small" /> : <Text style={styles.saveBtnText}>Ajouter</Text>}
+                {savingEntry ? <ActivityIndicator color={colors.ivory} size="small" /> : <Text style={styles.saveBtnText}>{editingEntryId ? 'Enregistrer' : 'Ajouter'}</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -566,9 +661,9 @@ export default function CarnetSanteScreen() {
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
               <Text style={styles.fieldLabel}>Puce d'identification</Text>
-              <TextInput style={styles.fieldInput} value={puce} onChangeText={setPuce} placeholder="N° de puce" placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.fieldInput} value={puce} onChangeText={setPuce} placeholder="N° de puce" placeholderTextColor={colors.textMuted} returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
               <View style={styles.vetFieldHeader}>
                 <Text style={[styles.fieldLabel, { marginTop: 0 }]}>Vétérinaire</Text>
@@ -586,13 +681,13 @@ export default function CarnetSanteScreen() {
                 </View>
               ) : null}
 
-              <TextInput style={styles.fieldInput} value={vetNom} onChangeText={t => { setVetNom(t); setVetLieuId(null); }} placeholder="Dr…" placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.fieldInput} value={vetNom} onChangeText={t => { setVetNom(t); setVetLieuId(null); }} placeholder="Dr…" placeholderTextColor={colors.textMuted} returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
               <Text style={styles.fieldLabel}>Téléphone</Text>
-              <TextInput style={styles.fieldInput} value={vetTel} onChangeText={t => { setVetTel(t); setVetLieuId(null); }} placeholder="06…" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
+              <TextInput style={styles.fieldInput} value={vetTel} onChangeText={t => { setVetTel(t); setVetLieuId(null); }} placeholder="06…" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
               <Text style={styles.fieldLabel}>Adresse</Text>
-              <TextInput style={styles.fieldInput} value={vetAdresse} onChangeText={t => { setVetAdresse(t); setVetLieuId(null); }} placeholder="Adresse du cabinet" placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.fieldInput} value={vetAdresse} onChangeText={t => { setVetAdresse(t); setVetLieuId(null); }} placeholder="Adresse du cabinet" placeholderTextColor={colors.textMuted} returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
               <TouchableOpacity style={styles.checkboxRow} onPress={() => setSterilise(!sterilise)}>
                 <Ionicons name={sterilise ? 'checkbox' : 'square-outline'} size={20} color={sterilise ? colors.sage : colors.textMuted} />
@@ -746,6 +841,20 @@ const styles = StyleSheet.create({
   entrySub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
   entryNotes: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, marginTop: 4, fontStyle: 'italic' },
   entryHint: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 8, textAlign: 'center' },
+
+  filterBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  filterBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  filterOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'flex-end', paddingTop: 140, paddingRight: 16 },
+  filterCard: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, paddingVertical: 6, minWidth: 190, elevation: 4, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  filterOption: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 11 },
+  filterOptionText: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid },
+  filterOptionTextActive: { fontFamily: 'DMSans_500Medium', color: colors.bordeaux },
+
+  entrySwipeActions: { flexDirection: 'row', alignItems: 'stretch' },
+  entrySwipeBtn: { width: 72, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  entrySwipeBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.ivory },
+
+  rappelHint: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: -4, marginBottom: 4 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%', overflow: 'hidden' },

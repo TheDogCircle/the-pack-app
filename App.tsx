@@ -17,6 +17,7 @@ import {
 import * as Updates from 'expo-updates';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
 import { STRIPE_PUBLISHABLE_KEY } from './src/lib/stripeConfig';
@@ -73,11 +74,13 @@ export default function App() {
   if (!fontsLoaded) return <SplashLoader />;
 
   return (
-    <SafeAreaProvider>
-      <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
-        <StatusBar style="light" />
-        <Navigation />
-      </StripeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
+          <StatusBar style="light" />
+          <Navigation />
+        </StripeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
