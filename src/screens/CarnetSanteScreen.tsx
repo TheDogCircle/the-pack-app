@@ -34,7 +34,7 @@ type EntryType = 'vaccin' | 'vermifuge' | 'antiparasitaire' | 'rdv_veto' | 'pese
 
 type Entry = {
   id: string; type: EntryType; titre: string | null; date: string; date_rappel: string | null;
-  date_echeance: string | null;
+  date_echeance: string | null; heure_rdv: string | null;
   poids_kg: number | null; taille_cm: number | null; notes: string | null;
 };
 
@@ -129,6 +129,8 @@ export default function CarnetSanteScreen() {
   const [entryTitre, setEntryTitre] = useState('');
   const [entryDate, setEntryDate] = useState(new Date());
   const [showEntryDatePicker, setShowEntryDatePicker] = useState(false);
+  const [entryHeureRdv, setEntryHeureRdv] = useState<Date | null>(null);
+  const [showHeureRdvPicker, setShowHeureRdvPicker] = useState(false);
   const [entryHasRappel, setEntryHasRappel] = useState(false);
   const [entryEcheance, setEntryEcheance] = useState(new Date());
   const [showEcheancePicker, setShowEcheancePicker] = useState(false);
@@ -168,7 +170,7 @@ export default function CarnetSanteScreen() {
         .select('chien_id, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, veterinaire_lieu_id, sterilise, date_sterilisation')
         .eq('chien_id', chienId).maybeSingle(),
       supabase.from('chien_carnet_entries')
-        .select('id, type, titre, date, date_rappel, date_echeance, poids_kg, taille_cm, notes')
+        .select('id, type, titre, date, date_rappel, date_echeance, heure_rdv, poids_kg, taille_cm, notes')
         .eq('chien_id', chienId).order('date', { ascending: false }),
       supabase.from('chien_questions_veto')
         .select('id, question, posee')
@@ -279,6 +281,7 @@ export default function CarnetSanteScreen() {
     setEntryHasRappel(false);
     setEntryEcheance(new Date());
     setEntryRappelOffset(3);
+    setEntryHeureRdv(null);
     setEntryPoids('');
     setEntryTaille('');
     setEntryNotes('');
@@ -302,6 +305,9 @@ export default function CarnetSanteScreen() {
     } else {
       setEntryRappelOffset(0);
     }
+    // heure_rdv vient de Postgres au format "HH:MM:SS" -- reconstruit en Date pour le
+    // picker (la date elle-meme n'a pas d'importance, seule l'heure sera lue au save).
+    setEntryHeureRdv(entry.heure_rdv ? new Date(`2000-01-01T${entry.heure_rdv}`) : null);
     setEntryPoids(entry.poids_kg != null ? String(entry.poids_kg) : '');
     setEntryTaille(entry.taille_cm != null ? String(entry.taille_cm) : '');
     setEntryNotes(entry.notes || '');
@@ -333,6 +339,9 @@ export default function CarnetSanteScreen() {
       date: dateToIso(entryDate),
       date_rappel: dateRappel,
       date_echeance: dateEcheance,
+      heure_rdv: entryType === 'rdv_veto' && entryHeureRdv
+        ? `${String(entryHeureRdv.getHours()).padStart(2, '0')}:${String(entryHeureRdv.getMinutes()).padStart(2, '0')}`
+        : null,
       poids_kg: entryType === 'pesee' && entryPoids ? parseFloat(entryPoids.replace(',', '.')) : null,
       taille_cm: entryType === 'pesee' && entryTaille ? parseFloat(entryTaille.replace(',', '.')) : null,
       notes: entryNotes.trim() || null,
@@ -390,7 +399,9 @@ export default function CarnetSanteScreen() {
   }
 
   const latestPesee = entries.find(e => e.type === 'pesee' && e.poids_kg != null);
-  const upcoming = [...entries].filter(e => e.date_rappel).sort((a, b) => (a.date_rappel! < b.date_rappel! ? -1 : 1));
+  // rdv_veto a son propre encadre (voir ProfilScreen, "Prochain RDV veto") -- ne pas le
+  // dupliquer ici, la liste "A venir" ne concerne plus que les soins periodiques.
+  const upcoming = [...entries].filter(e => e.date_rappel && e.type !== 'rdv_veto').sort((a, b) => (a.date_rappel! < b.date_rappel! ? -1 : 1));
   const filteredEntries = entryFilter === 'all' ? entries : entries.filter(e => e.type === entryFilter);
 
   return (
@@ -619,6 +630,25 @@ export default function CarnetSanteScreen() {
                   display={Platform.OS === 'ios' ? 'inline' : 'default'}
                   onChange={(_, d) => { setShowEntryDatePicker(Platform.OS === 'ios'); if (d) setEntryDate(d); }}
                 />
+              )}
+
+              {entryType === 'rdv_veto' && (
+                <>
+                  <Text style={styles.fieldLabel}>Heure (optionnel)</Text>
+                  <TouchableOpacity style={styles.dateBtn} onPress={() => setShowHeureRdvPicker(true)}>
+                    <Ionicons name="time-outline" size={16} color={colors.bordeaux} />
+                    <Text style={styles.dateBtnText}>
+                      {entryHeureRdv ? entryHeureRdv.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Non précisée'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showHeureRdvPicker && (
+                    <DateTimePicker
+                      value={entryHeureRdv || new Date()} mode="time"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(_, d) => { setShowHeureRdvPicker(Platform.OS === 'ios'); if (d) setEntryHeureRdv(d); }}
+                    />
+                  )}
+                </>
               )}
 
               {REMINDER_TYPES.includes(entryType) && (() => {
