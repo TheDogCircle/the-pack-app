@@ -34,6 +34,7 @@ type EntryType = 'vaccin' | 'vermifuge' | 'antiparasitaire' | 'rdv_veto' | 'pese
 
 type Entry = {
   id: string; type: EntryType; titre: string | null; date: string; date_rappel: string | null;
+  date_echeance: string | null;
   poids_kg: number | null; taille_cm: number | null; notes: string | null;
 };
 
@@ -58,10 +59,24 @@ const REMINDER_TYPES: EntryType[] = ['vaccin', 'vermifuge', 'antiparasitaire', '
 const RAPPEL_OFFSETS: { label: string; days: number }[] = [
   { label: 'Le jour même', days: 0 },
   { label: 'La veille', days: 1 },
+  { label: '2 jours avant', days: 2 },
   { label: '3 jours avant', days: 3 },
+  { label: '4 jours avant', days: 4 },
   { label: '5 jours avant', days: 5 },
   { label: '1 semaine avant', days: 7 },
 ];
+
+// Libelle du champ "Date" contextualise par type -- "Date" seul ne disait pas si on
+// enregistre un evenement passe (vaccin fait, derniere prise de vermifuge) ou a venir
+// (rendez-vous).
+const DATE_FIELD_LABEL: Record<EntryType, string> = {
+  vaccin: 'Fait le',
+  vermifuge: 'Dernière prise le',
+  antiparasitaire: 'Dernière prise le',
+  rdv_veto: 'Prochain rdv véto le',
+  pesee: 'Date',
+  note: 'Date',
+};
 
 // Alternative rapide au calendrier : la plupart des rappels (vaccin, vermifuge,
 // antiparasitaire) se pensent en "dans X mois" plutot qu'en date precise -- calculer
@@ -153,7 +168,7 @@ export default function CarnetSanteScreen() {
         .select('chien_id, puce_identification, veterinaire_nom, veterinaire_telephone, veterinaire_adresse, veterinaire_lieu_id, sterilise, date_sterilisation')
         .eq('chien_id', chienId).maybeSingle(),
       supabase.from('chien_carnet_entries')
-        .select('id, type, titre, date, date_rappel, poids_kg, taille_cm, notes')
+        .select('id, type, titre, date, date_rappel, date_echeance, poids_kg, taille_cm, notes')
         .eq('chien_id', chienId).order('date', { ascending: false }),
       supabase.from('chien_questions_veto')
         .select('id, question, posee')
@@ -276,12 +291,17 @@ export default function CarnetSanteScreen() {
     setEntryTitre(entry.titre || '');
     setEntryDate(isoToDate(entry.date));
     setEntryHasRappel(!!entry.date_rappel);
-    // La date_rappel stockee est deja le resultat (echeance - delai) : sans
-    // reconstituer l'echeance d'origine (non conservee separement), on la
-    // reaffiche telle quelle avec un delai "jour meme" -- si l'utilisateur ne
-    // touche pas a cette section, la date de rappel enregistree ne change pas.
-    setEntryEcheance(entry.date_rappel ? isoToDate(entry.date_rappel) : new Date());
-    setEntryRappelOffset(0);
+    // date_echeance et date_rappel sont stockees separement : on peut reconstituer
+    // fidelement l'echeance ET le delai choisis a l'origine (au lieu de retomber sur
+    // "jour meme" par defaut comme avant que date_echeance n'existe).
+    const echeance = entry.date_echeance || entry.date_rappel;
+    setEntryEcheance(echeance ? isoToDate(echeance) : new Date());
+    if (entry.date_echeance && entry.date_rappel) {
+      const diffDays = Math.round((isoToDate(entry.date_echeance).getTime() - isoToDate(entry.date_rappel).getTime()) / 86_400_000);
+      setEntryRappelOffset(diffDays);
+    } else {
+      setEntryRappelOffset(0);
+    }
     setEntryPoids(entry.poids_kg != null ? String(entry.poids_kg) : '');
     setEntryTaille(entry.taille_cm != null ? String(entry.taille_cm) : '');
     setEntryNotes(entry.notes || '');
@@ -291,10 +311,12 @@ export default function CarnetSanteScreen() {
   async function saveEntry() {
     setSavingEntry(true);
     let dateRappel: string | null = null;
+    let dateEcheance: string | null = null;
     if (entryHasRappel && REMINDER_TYPES.includes(entryType)) {
       // Pour un rdv veto, la base du rappel est la date du rendez-vous lui-meme
       // (entryDate), pas une echeance separee -- cf. commentaire dans le JSX.
       const rappelBase = entryType === 'rdv_veto' ? entryDate : entryEcheance;
+      dateEcheance = dateToIso(rappelBase);
       const rappel = new Date(rappelBase);
       rappel.setDate(rappel.getDate() - entryRappelOffset);
       dateRappel = dateToIso(rappel);
@@ -310,6 +332,7 @@ export default function CarnetSanteScreen() {
       titre: entryTitre.trim() || null,
       date: dateToIso(entryDate),
       date_rappel: dateRappel,
+      date_echeance: dateEcheance,
       poids_kg: entryType === 'pesee' && entryPoids ? parseFloat(entryPoids.replace(',', '.')) : null,
       taille_cm: entryType === 'pesee' && entryTaille ? parseFloat(entryTaille.replace(',', '.')) : null,
       notes: entryNotes.trim() || null,
@@ -518,7 +541,8 @@ export default function CarnetSanteScreen() {
                   <Text style={styles.entrySub}>
                     {formatDateFr(e.date)}
                     {e.type === 'pesee' && e.poids_kg != null ? ` · ${e.poids_kg} kg${e.taille_cm ? ` · ${e.taille_cm} cm` : ''}` : ''}
-                    {e.date_rappel ? ` · rappel le ${formatDateFr(e.date_rappel)}` : ''}
+                    {e.date_echeance && e.type !== 'rdv_veto' ? ` · prochain ${TYPE_META[e.type].label.toLowerCase()} le ${formatDateFr(e.date_echeance)}` : ''}
+                    {e.date_rappel ? ` (rappel le ${formatDateFr(e.date_rappel)})` : ''}
                   </Text>
                   {e.notes ? <Text style={styles.entryNotes}>{e.notes}</Text> : null}
                 </View>
@@ -584,7 +608,7 @@ export default function CarnetSanteScreen() {
               <Text style={styles.fieldLabel}>Titre (optionnel)</Text>
               <TextInput style={styles.fieldInput} value={entryTitre} onChangeText={setEntryTitre} placeholder={`Ex : ${TYPE_META[entryType].label}`} placeholderTextColor={colors.textMuted} returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
 
-              <Text style={styles.fieldLabel}>Date</Text>
+              <Text style={styles.fieldLabel}>{DATE_FIELD_LABEL[entryType]}</Text>
               <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEntryDatePicker(true)}>
                 <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
                 <Text style={styles.dateBtnText}>{entryDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
