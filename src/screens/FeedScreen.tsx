@@ -1363,6 +1363,22 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
     sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId });
   }
 
+  // Une photo "fromMap" n'a pas de vrai id de community_posts : son id affiche
+  // (`map-${photoId}`) est reconstruit a chaque chargement du fil et ne correspond a
+  // aucune ligne reelle. L'ancien code envoyait quand meme ce faux id en postId -- au
+  // tap, posts.find() ne le retrouvait quasiment jamais (regroupement par carrousel non
+  // garanti identique d'un chargement a l'autre), et la notif n'ouvrait rien. On pointe
+  // plutot vers la fiche du lieu (ou la photo est visible), comme pour "nouveau lieu".
+  async function notifyPhotoLikeLieu(ownerId: string, lieuId: string) {
+    if (!myUserId || ownerId === myUserId) return;
+    const [{ data: owner }, { data: me }] = await Promise.all([
+      supabase.from('profils').select('push_token,notif_photo_like').eq('id', ownerId).single(),
+      supabase.from('profils').select('prenom').eq('id', myUserId).single(),
+    ]);
+    if (!owner?.push_token || owner.notif_photo_like === false) return;
+    sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like_lieu', lieuId });
+  }
+
   function toggleLike(postId: string) {
     if (!myUserId) {
       Alert.alert('Connexion requise', 'Connecte-toi pour liker une photo.');
@@ -1385,7 +1401,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
           .eq('photo_id', photoId).eq('user_id', myUserId).then(() => {});
       } else {
         supabase.from('photo_likes').insert({ photo_id: photoId, user_id: myUserId }).then(() => {});
-        notifyPhotoLike(post.user_id, post.id);
+        if (post.lieu_id) notifyPhotoLikeLieu(post.user_id, post.lieu_id);
       }
     } else {
       if (liked) {

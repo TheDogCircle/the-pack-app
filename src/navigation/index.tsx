@@ -280,7 +280,7 @@ export default function Navigation() {
     // moment du deploiement, ou un futur oubli de convention, ne doit pas se traduire
     // par une notif qui ne fait rien au tap.
     const lieuId = data.lieuId || data.lieu_id;
-    if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer') {
+    if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer' || data.type === 'photo_like_lieu') {
       if (lieuId) {
         mapNavigation.setPendingLieu(lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);

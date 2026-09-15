@@ -1666,8 +1666,13 @@ export default function CarteScreen() {
           supabase.from('profils').select('push_token,notif_photo_like').eq('id', ownerId).single(),
           supabase.from('profils').select('prenom').eq('id', userId).single(),
         ]);
-        if (owner?.push_token && owner.notif_photo_like !== false) {
-          sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like', postId: `map-${photoId}` });
+        if (owner?.push_token && owner.notif_photo_like !== false && selectedLieu) {
+          // Une photo likee ici vient de la galerie d'un lieu (table `photos`), pas d'un
+          // community_posts -- l'ancien `postId: 'map-' + photoId` ne correspondait a
+          // aucun post reel : FeedScreen cherchait cet id parmi ses posts et ne le
+          // trouvait jamais, le tap n'ouvrait donc rien. On pointe vers la fiche du lieu
+          // (ou la photo est visible) via le meme mecanisme que "nouveau lieu".
+          sendPushNotification(owner.push_token, 'Nouveau like', `${me?.prenom || 'Quelqu\'un'} a aimé une de tes photos`, { type: 'photo_like_lieu', lieuId: selectedLieu.id });
         }
       }
     }

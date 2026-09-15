@@ -64,6 +64,7 @@ export default function ProfilPublicScreen() {
   const [followModal, setFollowModal] = useState(false);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
+  const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
 
   useEffect(() => { if (userId) init(); }, [userId]);
 
@@ -203,7 +204,9 @@ export default function ProfilPublicScreen() {
       <View style={styles.header}>
         <View style={styles.avatarRow}>
           {profil.avatar_url ? (
-            <Image source={{ uri: profil.avatar_url }} style={styles.avatar} />
+            <TouchableOpacity activeOpacity={0.85} onPress={() => setAvatarViewerVisible(true)}>
+              <Image source={{ uri: profil.avatar_url }} style={styles.avatar} />
+            </TouchableOpacity>
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Text style={styles.avatarLetter}>{(profil.prenom || '?')[0].toUpperCase()}</Text>
@@ -452,6 +455,21 @@ export default function ProfilPublicScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={avatarViewerVisible} animationType="fade" transparent onRequestClose={() => setAvatarViewerVisible(false)}>
+        <TouchableOpacity
+          style={styles.avatarViewerOverlay}
+          activeOpacity={1}
+          onPress={() => setAvatarViewerVisible(false)}
+        >
+          {profil.avatar_url ? (
+            <Image source={{ uri: profil.avatar_url }} style={styles.avatarViewerImage} resizeMode="contain" />
+          ) : null}
+          <TouchableOpacity style={styles.avatarViewerClose} onPress={() => setAvatarViewerVisible(false)}>
+            <Ionicons name="close" size={28} color={colors.ivory} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -467,6 +485,9 @@ const styles = StyleSheet.create({
   avatar: { width: 68, height: 68, borderRadius: 34, borderWidth: 2, borderColor: 'rgba(245,239,224,0.3)' },
   avatarFallback: { backgroundColor: 'rgba(245,239,224,0.15)', alignItems: 'center', justifyContent: 'center' },
   avatarLetter: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 26, color: colors.ivory },
+  avatarViewerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
+  avatarViewerImage: { width: SCREEN_W, height: SCREEN_W },
+  avatarViewerClose: { position: 'absolute', top: 56, right: 20, padding: 8 },
   headerInfo: { flex: 1, gap: 3 },
   nom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.ivory },
   username: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.terraPale },
