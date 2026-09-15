@@ -60,7 +60,7 @@ export default function ProfilPublicScreen() {
   const [messaging, setMessaging] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'adresses' | 'photos' | 'avis'>('adresses');
+  const [activeTab, setActiveTab] = useState<'adresses' | 'photos' | 'avis'>('photos');
   const [followModal, setFollowModal] = useState(false);
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
@@ -299,8 +299,8 @@ export default function ProfilPublicScreen() {
       {/* Onglets */}
       <View style={styles.tabs}>
         {([
-          { key: 'adresses', label: 'Adresses', icon: 'heart-outline' as IoniconsName },
           { key: 'photos',   label: 'Photos',   icon: 'images-outline' as IoniconsName },
+          { key: 'adresses', label: 'Adresses', icon: 'heart-outline' as IoniconsName },
           { key: 'avis',     label: 'Avis',     icon: 'star-outline' as IoniconsName },
         ] as const).map(t => (
           <TouchableOpacity key={t.key} style={[styles.tab, activeTab === t.key && styles.tabActive]} onPress={() => setActiveTab(t.key)}>
