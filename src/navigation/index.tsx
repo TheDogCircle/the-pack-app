@@ -304,6 +304,10 @@ export default function Navigation() {
       }
     } else if (data.type === 'dog_birthday') {
       navigationRef.navigate('Anniversaires' as any);
+    } else if (data.type === 'carnet_rappel') {
+      if (data.chienId) {
+        navigationRef.navigate('CarnetSante' as any, { chienId: data.chienId, chienNom: data.chienNom || '' } as any);
+      }
     } else if (data.type === 'reservation') {
       navigationRef.navigate('MesReservations' as any);
     } else if (data.type === 'new_reservation') {
