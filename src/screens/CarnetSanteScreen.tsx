@@ -482,7 +482,7 @@ export default function CarnetSanteScreen() {
               {showEntryDatePicker && (
                 <DateTimePicker
                   value={entryDate} mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  display={Platform.OS === 'ios' ? 'inline' : 'default'}
                   onChange={(_, d) => { setShowEntryDatePicker(Platform.OS === 'ios'); if (d) setEntryDate(d); }}
                 />
               )}
@@ -504,7 +504,7 @@ export default function CarnetSanteScreen() {
                       {showEcheancePicker && (
                         <DateTimePicker
                           value={entryEcheance} mode="date"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          display={Platform.OS === 'ios' ? 'inline' : 'default'}
                           minimumDate={new Date()}
                           onChange={(_, d) => { setShowEcheancePicker(Platform.OS === 'ios'); if (d) setEntryEcheance(d); }}
                         />
@@ -611,7 +611,7 @@ export default function CarnetSanteScreen() {
                   {showSterilisationPicker && (
                     <DateTimePicker
                       value={dateSterilisation || new Date()} mode="date"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      display={Platform.OS === 'ios' ? 'inline' : 'default'}
                       maximumDate={new Date()}
                       onChange={(_, d) => { setShowSterilisationPicker(Platform.OS === 'ios'); if (d) setDateSterilisation(d); }}
                     />

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Image, Linking, AppState, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image, Linking, AppState, View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -187,10 +187,14 @@ function MainTabs() {
           // Depuis Expo SDK 54 / Android 15, l'edge-to-edge est impose par defaut --
           // l'app dessine derriere la barre systeme (3 boutons ou geste), donc sans
           // ce rattrapage manuel la barre d'onglets se retrouvait partiellement
-          // recouverte par la barre systeme. insets.bottom vaut 0 sur les appareils
-          // ou l'inset ne s'applique pas (dont iOS sans encoche), donc ce calcul ne
-          // change rien la ou ca fonctionnait deja.
-          paddingBottom: Math.max(insets.bottom, 8), paddingTop: 4, height: 58 + insets.bottom,
+          // recouverte par la barre systeme. Corrige uniquement pour Android : sur
+          // iOS, insets.bottom vaut ~34 sur tout iPhone avec encoche/Dynamic Island
+          // (donc quasiment tout le parc actuel), pas 0 comme suppose initialement --
+          // appliquer ce meme calcul cote iOS gonflait la hauteur de la barre
+          // (74 -> ~92) et la faisait paraitre remontee par rapport a avant.
+          ...(Platform.OS === 'android'
+            ? { paddingBottom: Math.max(insets.bottom, 8), paddingTop: 4, height: 58 + insets.bottom }
+            : { paddingBottom: 8, paddingTop: 4, height: 74 }),
         },
         tabBarActiveTintColor: colors.terraPale,
         tabBarInactiveTintColor: 'rgba(245,239,224,0.45)',
