@@ -6,6 +6,7 @@ import {
 import { useRoute, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
@@ -49,25 +50,24 @@ const TYPE_META: Record<EntryType, { label: string; icon: keyof typeof Ionicons.
 const TYPE_ORDER: EntryType[] = ['vaccin', 'rdv_veto', 'vermifuge', 'antiparasitaire', 'pesee', 'note'];
 const REMINDER_TYPES: EntryType[] = ['vaccin', 'vermifuge', 'antiparasitaire', 'rdv_veto'];
 
-// Meme convention que SettingsScreen (formatDate) : formatage JJ/MM/AAAA au fil de la
-// saisie, redefini ici plutot que partage car SettingsScreen ne l'exporte pas.
-function formatDateInput(text: string): string {
-  const digits = text.replace(/\D/g, '').slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+// L'echeance (prochaine date prevue, ex : prochain rappel de vaccin) et le delai de
+// prevenance choisis par l'utilisateur sont combines cote client pour produire la
+// date_rappel stockee en base -- la colonne reste une simple date, pas de migration
+// necessaire pour ce changement d'UX.
+const RAPPEL_OFFSETS: { label: string; days: number }[] = [
+  { label: 'Le jour même', days: 0 },
+  { label: 'La veille', days: 1 },
+  { label: '3 jours avant', days: 3 },
+  { label: '5 jours avant', days: 5 },
+  { label: '1 semaine avant', days: 7 },
+];
+
+function dateToIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function parseFrDateToIso(text: string): string | null {
-  const m = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  const [, dd, mm, yyyy] = m;
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function isoToFrDate(iso: string): string {
-  const [yyyy, mm, dd] = iso.split('-');
-  return `${dd}/${mm}/${yyyy}`;
+function isoToDate(iso: string): Date {
+  return new Date(`${iso}T00:00:00`);
 }
 
 function formatDateFr(iso: string): string {
@@ -96,8 +96,12 @@ export default function CarnetSanteScreen() {
   const [entryModal, setEntryModal] = useState(false);
   const [entryType, setEntryType] = useState<EntryType>('vaccin');
   const [entryTitre, setEntryTitre] = useState('');
-  const [entryDate, setEntryDate] = useState('');
-  const [entryDateRappel, setEntryDateRappel] = useState('');
+  const [entryDate, setEntryDate] = useState(new Date());
+  const [showEntryDatePicker, setShowEntryDatePicker] = useState(false);
+  const [entryHasRappel, setEntryHasRappel] = useState(false);
+  const [entryEcheance, setEntryEcheance] = useState(new Date());
+  const [showEcheancePicker, setShowEcheancePicker] = useState(false);
+  const [entryRappelOffset, setEntryRappelOffset] = useState(3);
   const [entryPoids, setEntryPoids] = useState('');
   const [entryTaille, setEntryTaille] = useState('');
   const [entryNotes, setEntryNotes] = useState('');
@@ -110,7 +114,8 @@ export default function CarnetSanteScreen() {
   const [vetLieuId, setVetLieuId] = useState<string | null>(null);
   const [puce, setPuce] = useState('');
   const [sterilise, setSterilise] = useState(false);
-  const [dateSterilisation, setDateSterilisation] = useState('');
+  const [dateSterilisation, setDateSterilisation] = useState<Date | null>(null);
+  const [showSterilisationPicker, setShowSterilisationPicker] = useState(false);
   const [savingInfo, setSavingInfo] = useState(false);
 
   const [vetPickerModal, setVetPickerModal] = useState(false);
@@ -178,7 +183,7 @@ export default function CarnetSanteScreen() {
     setVetLieuId(privateInfo?.veterinaire_lieu_id || null);
     setPuce(privateInfo?.puce_identification || '');
     setSterilise(privateInfo?.sterilise || false);
-    setDateSterilisation(privateInfo?.date_sterilisation ? isoToFrDate(privateInfo.date_sterilisation) : '');
+    setDateSterilisation(privateInfo?.date_sterilisation ? isoToDate(privateInfo.date_sterilisation) : null);
     setInfoModal(true);
   }
 
@@ -215,10 +220,6 @@ export default function CarnetSanteScreen() {
   }
 
   async function saveInfo() {
-    if (sterilise && dateSterilisation && !parseFrDateToIso(dateSterilisation)) {
-      Alert.alert('Date invalide', 'Utilise le format JJ/MM/AAAA.');
-      return;
-    }
     setSavingInfo(true);
     const update = {
       chien_id: chienId,
@@ -228,7 +229,7 @@ export default function CarnetSanteScreen() {
       veterinaire_lieu_id: vetLieuId,
       puce_identification: puce.trim() || null,
       sterilise,
-      date_sterilisation: sterilise ? parseFrDateToIso(dateSterilisation) : null,
+      date_sterilisation: sterilise && dateSterilisation ? dateToIso(dateSterilisation) : null,
     };
     const { error } = await supabase.from('chien_infos_privees').upsert(update);
     setSavingInfo(false);
@@ -240,8 +241,10 @@ export default function CarnetSanteScreen() {
   function openEntryModal() {
     setEntryType('vaccin');
     setEntryTitre('');
-    setEntryDate(isoToFrDate(new Date().toISOString().slice(0, 10)));
-    setEntryDateRappel('');
+    setEntryDate(new Date());
+    setEntryHasRappel(false);
+    setEntryEcheance(new Date());
+    setEntryRappelOffset(3);
     setEntryPoids('');
     setEntryTaille('');
     setEntryNotes('');
@@ -249,16 +252,19 @@ export default function CarnetSanteScreen() {
   }
 
   async function saveEntry() {
-    const dateIso = parseFrDateToIso(entryDate);
-    if (!dateIso) { Alert.alert('Date invalide', 'Utilise le format JJ/MM/AAAA.'); return; }
-    if (entryDateRappel && !parseFrDateToIso(entryDateRappel)) { Alert.alert('Date de rappel invalide', 'Utilise le format JJ/MM/AAAA.'); return; }
     setSavingEntry(true);
+    let dateRappel: string | null = null;
+    if (entryHasRappel && REMINDER_TYPES.includes(entryType)) {
+      const rappel = new Date(entryEcheance);
+      rappel.setDate(rappel.getDate() - entryRappelOffset);
+      dateRappel = dateToIso(rappel);
+    }
     const payload = {
       chien_id: chienId,
       type: entryType,
       titre: entryTitre.trim() || null,
-      date: dateIso,
-      date_rappel: entryDateRappel ? parseFrDateToIso(entryDateRappel) : null,
+      date: dateToIso(entryDate),
+      date_rappel: dateRappel,
       poids_kg: entryType === 'pesee' && entryPoids ? parseFloat(entryPoids.replace(',', '.')) : null,
       taille_cm: entryType === 'pesee' && entryTaille ? parseFloat(entryTaille.replace(',', '.')) : null,
       notes: entryNotes.trim() || null,
@@ -469,12 +475,61 @@ export default function CarnetSanteScreen() {
               <TextInput style={styles.fieldInput} value={entryTitre} onChangeText={setEntryTitre} placeholder={`Ex : ${TYPE_META[entryType].label}`} placeholderTextColor={colors.textMuted} />
 
               <Text style={styles.fieldLabel}>Date</Text>
-              <TextInput style={styles.fieldInput} value={entryDate} onChangeText={t => setEntryDate(formatDateInput(t))} placeholder="JJ/MM/AAAA" placeholderTextColor={colors.textMuted} keyboardType="number-pad" maxLength={10} />
+              <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEntryDatePicker(true)}>
+                <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                <Text style={styles.dateBtnText}>{entryDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+              </TouchableOpacity>
+              {showEntryDatePicker && (
+                <DateTimePicker
+                  value={entryDate} mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_, d) => { setShowEntryDatePicker(Platform.OS === 'ios'); if (d) setEntryDate(d); }}
+                />
+              )}
 
               {REMINDER_TYPES.includes(entryType) && (
                 <>
-                  <Text style={styles.fieldLabel}>Date de rappel (optionnel)</Text>
-                  <TextInput style={styles.fieldInput} value={entryDateRappel} onChangeText={t => setEntryDateRappel(formatDateInput(t))} placeholder="JJ/MM/AAAA" placeholderTextColor={colors.textMuted} keyboardType="number-pad" maxLength={10} />
+                  <TouchableOpacity style={styles.checkboxRow} onPress={() => setEntryHasRappel(v => !v)}>
+                    <Ionicons name={entryHasRappel ? 'checkbox' : 'square-outline'} size={20} color={entryHasRappel ? colors.sage : colors.textMuted} />
+                    <Text style={styles.checkboxLabel}>Programmer un rappel</Text>
+                  </TouchableOpacity>
+
+                  {entryHasRappel && (
+                    <>
+                      <Text style={styles.fieldLabel}>Échéance (prochaine date prévue)</Text>
+                      <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEcheancePicker(true)}>
+                        <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                        <Text style={styles.dateBtnText}>{entryEcheance.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                      </TouchableOpacity>
+                      {showEcheancePicker && (
+                        <DateTimePicker
+                          value={entryEcheance} mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          minimumDate={new Date()}
+                          onChange={(_, d) => { setShowEcheancePicker(Platform.OS === 'ios'); if (d) setEntryEcheance(d); }}
+                        />
+                      )}
+
+                      <Text style={styles.fieldLabel}>Me le rappeler</Text>
+                      <View style={styles.typeGrid}>
+                        {RAPPEL_OFFSETS.map(o => {
+                          const active = entryRappelOffset === o.days;
+                          return (
+                            <TouchableOpacity
+                              key={o.days}
+                              style={[styles.typeChip, active && { backgroundColor: colors.terra, borderColor: colors.terra }]}
+                              onPress={() => setEntryRappelOffset(o.days)}
+                            >
+                              <Text style={[styles.typeChipText, active && { color: colors.ivory }]}>{o.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                      <Text style={styles.rappelPreview}>
+                        Apparaîtra dans "À venir" à partir du {new Date(entryEcheance.getTime() - entryRappelOffset * 86_400_000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}.
+                      </Text>
+                    </>
+                  )}
                 </>
               )}
 
@@ -547,7 +602,20 @@ export default function CarnetSanteScreen() {
               {sterilise && (
                 <>
                   <Text style={styles.fieldLabel}>Date de stérilisation</Text>
-                  <TextInput style={styles.fieldInput} value={dateSterilisation} onChangeText={t => setDateSterilisation(formatDateInput(t))} placeholder="JJ/MM/AAAA" placeholderTextColor={colors.textMuted} keyboardType="number-pad" maxLength={10} />
+                  <TouchableOpacity style={styles.dateBtn} onPress={() => setShowSterilisationPicker(true)}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                    <Text style={styles.dateBtnText}>
+                      {dateSterilisation ? dateSterilisation.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Choisir une date'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showSterilisationPicker && (
+                    <DateTimePicker
+                      value={dateSterilisation || new Date()} mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      maximumDate={new Date()}
+                      onChange={(_, d) => { setShowSterilisationPicker(Platform.OS === 'ios'); if (d) setDateSterilisation(d); }}
+                    />
+                  )}
                 </>
               )}
 
@@ -696,6 +764,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 11, backgroundColor: colors.white,
   },
   fieldTextarea: { minHeight: 70, textAlignVertical: 'top' },
+  dateBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 11, backgroundColor: colors.white,
+  },
+  dateBtnText: { fontFamily: 'DMSans_400Regular', fontSize: 15, color: colors.bordeaux },
+  rappelPreview: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 8, fontStyle: 'italic' },
 
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   typeChip: {
