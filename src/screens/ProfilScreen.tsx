@@ -514,17 +514,17 @@ export default function ProfilScreen() {
       </View>
 
       {/* Mes rendez-vous */}
-      <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.8}>
-        <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+      <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.85}>
+        <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
         <Text style={styles.resaBannerText}>Mes rendez-vous</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
       </TouchableOpacity>
 
       {/* Carnet de santé */}
-      <TouchableOpacity style={styles.resaBannerRow} onPress={goToCarnetSante} activeOpacity={0.8}>
-        <Ionicons name="medkit-outline" size={16} color={colors.bordeaux} />
+      <TouchableOpacity style={styles.resaBannerRow} onPress={goToCarnetSante} activeOpacity={0.85}>
+        <Ionicons name="medkit-outline" size={16} color={colors.ivory} />
         <Text style={styles.resaBannerText}>Carnet de santé</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
       </TouchableOpacity>
 
       {/* Demandes en attente */}
@@ -1034,10 +1034,10 @@ const styles = StyleSheet.create({
   shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   resaBannerRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.terra, borderRadius: 12,
     paddingVertical: 12, paddingHorizontal: 14, marginHorizontal: 16, marginBottom: 10,
   },
-  resaBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  resaBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
   explorateurCard: {
     marginHorizontal: 16, marginBottom: 16, height: 100, borderRadius: 16, overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,

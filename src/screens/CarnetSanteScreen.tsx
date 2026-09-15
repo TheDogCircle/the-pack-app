@@ -63,6 +63,18 @@ const RAPPEL_OFFSETS: { label: string; days: number }[] = [
   { label: '1 semaine avant', days: 7 },
 ];
 
+// Alternative rapide au calendrier : la plupart des rappels (vaccin, vermifuge,
+// antiparasitaire) se pensent en "dans X mois" plutot qu'en date precise -- calculer
+// soi-meme cette date sur un calendrier est une friction inutile pour le cas courant.
+// Le calendrier reste disponible juste en dessous pour une date exacte.
+const DUREE_OPTIONS: { label: string; months: number }[] = [
+  { label: '1 mois', months: 1 },
+  { label: '2 mois', months: 2 },
+  { label: '3 mois', months: 3 },
+  { label: '6 mois', months: 6 },
+  { label: '1 an', months: 12 },
+];
+
 function dateToIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -280,7 +292,10 @@ export default function CarnetSanteScreen() {
     setSavingEntry(true);
     let dateRappel: string | null = null;
     if (entryHasRappel && REMINDER_TYPES.includes(entryType)) {
-      const rappel = new Date(entryEcheance);
+      // Pour un rdv veto, la base du rappel est la date du rendez-vous lui-meme
+      // (entryDate), pas une echeance separee -- cf. commentaire dans le JSX.
+      const rappelBase = entryType === 'rdv_veto' ? entryDate : entryEcheance;
+      const rappel = new Date(rappelBase);
       rappel.setDate(rappel.getDate() - entryRappelOffset);
       dateRappel = dateToIso(rappel);
     }
@@ -496,6 +511,9 @@ export default function CarnetSanteScreen() {
                   <Ionicons name={TYPE_META[e.type].icon} size={16} color={TYPE_META[e.type].color} />
                 </View>
                 <View style={{ flex: 1 }}>
+                  {e.titre ? (
+                    <Text style={[styles.entryCategory, { color: TYPE_META[e.type].color }]}>{TYPE_META[e.type].label}</Text>
+                  ) : null}
                   <Text style={styles.entryTitle}>{e.titre || TYPE_META[e.type].label}</Text>
                   <Text style={styles.entrySub}>
                     {formatDateFr(e.date)}
@@ -579,30 +597,59 @@ export default function CarnetSanteScreen() {
                 />
               )}
 
-              {REMINDER_TYPES.includes(entryType) && (
+              {REMINDER_TYPES.includes(entryType) && (() => {
+                // Pour un rdv veto, la date du rendez-vous EST deja le champ "Date" ci-dessus
+                // -- lui refaire choisir une "echeance" separee n'avait pas de sens et c'est
+                // ce qui rendait la case a cocher incomprehensible. On reutilise directement
+                // entryDate comme base du rappel, et on ne demande plus qu'un delai avant.
+                const isRdv = entryType === 'rdv_veto';
+                const rappelBase = isRdv ? entryDate : entryEcheance;
+                return (
                 <>
                   <TouchableOpacity style={styles.checkboxRow} onPress={() => setEntryHasRappel(v => !v)}>
                     <Ionicons name={entryHasRappel ? 'checkbox' : 'square-outline'} size={20} color={entryHasRappel ? colors.sage : colors.textMuted} />
-                    <Text style={styles.checkboxLabel}>Me rappeler de refaire ça</Text>
+                    <Text style={styles.checkboxLabel}>{isRdv ? 'Me rappeler avant ce rendez-vous' : 'Me rappeler de refaire ça'}</Text>
                   </TouchableOpacity>
                   {!entryHasRappel && (
-                    <Text style={styles.rappelHint}>Utile pour un vaccin, un vermifuge… qu'il faudra refaire dans quelques semaines ou mois.</Text>
+                    <Text style={styles.rappelHint}>
+                      {isRdv ? "Tu seras prévenu(e) avant la date du rendez-vous indiquée ci-dessus." : "Utile pour un vaccin, un vermifuge… qu'il faudra refaire dans quelques semaines ou mois."}
+                    </Text>
                   )}
 
                   {entryHasRappel && (
                     <>
-                      <Text style={styles.fieldLabel}>Prochain {TYPE_META[entryType].label.toLowerCase()} prévu le</Text>
-                      <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEcheancePicker(true)}>
-                        <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
-                        <Text style={styles.dateBtnText}>{entryEcheance.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-                      </TouchableOpacity>
-                      {showEcheancePicker && (
-                        <DateTimePicker
-                          value={entryEcheance} mode="date"
-                          display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                          minimumDate={new Date()}
-                          onChange={(_, d) => { setShowEcheancePicker(Platform.OS === 'ios'); if (d) setEntryEcheance(d); }}
-                        />
+                      {!isRdv && (
+                        <>
+                          <Text style={styles.fieldLabel}>Prochain {TYPE_META[entryType].label.toLowerCase()} prévu le</Text>
+                          <View style={styles.typeGrid}>
+                            {DUREE_OPTIONS.map(o => (
+                              <TouchableOpacity
+                                key={o.months}
+                                style={styles.typeChip}
+                                onPress={() => {
+                                  const d = new Date();
+                                  d.setMonth(d.getMonth() + o.months);
+                                  setEntryEcheance(d);
+                                }}
+                              >
+                                <Text style={styles.typeChipText}>Dans {o.label}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                          <Text style={styles.rappelHint}>Ou choisis une date précise :</Text>
+                          <TouchableOpacity style={styles.dateBtn} onPress={() => setShowEcheancePicker(true)}>
+                            <Ionicons name="calendar-outline" size={16} color={colors.bordeaux} />
+                            <Text style={styles.dateBtnText}>{entryEcheance.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                          </TouchableOpacity>
+                          {showEcheancePicker && (
+                            <DateTimePicker
+                              value={entryEcheance} mode="date"
+                              display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                              minimumDate={new Date()}
+                              onChange={(_, d) => { setShowEcheancePicker(Platform.OS === 'ios'); if (d) setEntryEcheance(d); }}
+                            />
+                          )}
+                        </>
                       )}
 
                       <Text style={styles.fieldLabel}>Me prévenir</Text>
@@ -621,12 +668,13 @@ export default function CarnetSanteScreen() {
                         })}
                       </View>
                       <Text style={styles.rappelPreview}>
-                        Apparaîtra dans "À venir" à partir du {new Date(entryEcheance.getTime() - entryRappelOffset * 86_400_000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}.
+                        Apparaîtra dans "À venir" à partir du {new Date(rappelBase.getTime() - entryRappelOffset * 86_400_000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}.
                       </Text>
                     </>
                   )}
                 </>
-              )}
+                );
+              })()}
 
               {entryType === 'pesee' && (
                 <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -837,6 +885,7 @@ const styles = StyleSheet.create({
 
   entryRow: { flexDirection: 'row', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
   entryIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  entryCategory: { fontFamily: 'DMSans_500Medium', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 1 },
   entryTitle: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   entrySub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
   entryNotes: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, marginTop: 4, fontStyle: 'italic' },
