@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Supercluster from 'supercluster';
 import {
   View, StyleSheet, Text, TouchableOpacity, ActivityIndicator,
   Animated, ScrollView, Linking, Dimensions, Modal, Keyboard,
@@ -292,19 +291,6 @@ function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: num
           <Ionicons name="walk-outline" size={16} color="#fff" />
         </View>
         <View style={[styles.baladeTail, isSelected && { borderTopColor: '#2E7D6B' }]} />
-      </View>
-    </Marker>
-  );
-}
-
-function ClusterMarker({ latitude, longitude, pointCount, onPress }: { latitude: number; longitude: number; pointCount: number; onPress: () => void }) {
-  const { tracksViewChanges, markerRef } = useSettledTracking(false);
-  const size = pointCount >= 10 ? 48 : 40;
-  return (
-    <Marker ref={markerRef} coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 0.5 }} onPress={onPress}>
-      <View style={[styles.clusterBubble, { width: size, height: size, borderRadius: size / 2 }]}>
-        <View style={styles.markerShine} />
-        <Text style={styles.clusterText}>{pointCount}</Text>
       </View>
     </Marker>
   );
@@ -945,8 +931,8 @@ export default function CarteScreen() {
         const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
         gpsCameraHandledRef.current = true;
         mapRef.current?.animateToRegion(r, 600);
-        // region (et donc les clusters affichés) n'est mis à jour qu'une fois l'animation
-        // reellement terminee, via onRegionChangeComplete — sinon les clusters se recalculent
+        // region (et donc les lieux recharges) n'est mis a jour qu'une fois l'animation
+        // reellement terminee, via onRegionChangeComplete — sinon le fetch se relance
         // immediatement sur la nouvelle zone (etroite) alors que les lieux charges correspondent
         // encore a l'ancienne (large), et les epingles disparaissent le temps de l'animation.
         // Si onRegionChangeComplete ne se declenche pas (ref pas encore prete, plateforme...),
@@ -2289,35 +2275,6 @@ export default function CarteScreen() {
     return balades.filter(b => baladeSearchFiltres.every(key => (b as any)[key]));
   }, [balades, baladeSearchFiltres]);
 
-  const clusterIndex = useMemo(() => {
-    const index = new Supercluster<{ lieu: Lieu }>({ radius: 50, maxZoom: 13 });
-    index.load(filteredLieux.map(l => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: [l.lng, l.lat] },
-      properties: { lieu: l },
-    })));
-    return index;
-  }, [filteredLieux]);
-
-  const clusters = useMemo(() => {
-    if (!region.latitudeDelta || !region.longitudeDelta ||
-        region.latitudeDelta <= 0 || region.longitudeDelta <= 0 ||
-        isNaN(region.latitude) || isNaN(region.longitude)) return [];
-    const rawZoom = Math.round(Math.log(360 / region.latitudeDelta) / Math.LN2);
-    const zoom = isFinite(rawZoom) ? Math.min(20, Math.max(0, rawZoom)) : 10;
-    const bbox: [number, number, number, number] = [
-      region.longitude - region.longitudeDelta / 2,
-      region.latitude - region.latitudeDelta / 2,
-      region.longitude + region.longitudeDelta / 2,
-      region.latitude + region.latitudeDelta / 2,
-    ];
-    try {
-      return clusterIndex.getClusters(bbox, zoom);
-    } catch {
-      return [];
-    }
-  }, [clusterIndex, region]);
-
   const filterActive = filterMinNote > 0 || filterEquipements.length > 0 || filterCat !== null || filterDistance !== null || baladeSearchFiltres.length > 0;
 
   function openFilterModal() {
@@ -2988,15 +2945,14 @@ export default function CarteScreen() {
         onRegionChangeComplete={r => {
           // onRegionChangeComplete se declenche plusieurs fois pendant un seul geste de
           // pincement continu (pas uniquement une fois le geste termine) -- react-native-maps
-          // le remonte a chaque "batch" de changement livre par le natif. Comme `region` pilote
-          // directement le recalcul des clusters Supercluster ci-dessous, et que ce recalcul
-          // change les cluster_id (donc les `key` des <Marker>), un setRegion() synchrone ici
-          // provoquait un demontage/remontage des marqueurs a CHAQUE micro-etape du zoom -- et
-          // chaque remontage relance le cycle de stabilisation `tracksViewChanges` (1 a 1.8s sur
-          // Android, cf useSettledTracking plus haut), d'ou les bulles qui semblaient disparaitre
-          // puis reapparaitre pendant le zoom/dezoom. En debounçant setRegion (et non plus
-          // seulement le fetch reseau), les nombreux evenements intermediaires d'un meme geste
-          // sont regroupes en un seul recalcul de clusters une fois le geste stabilise.
+          // le remonte a chaque "batch" de changement livre par le natif. Les marqueurs de lieux
+          // sont maintenant affiches un par un avec une key stable (l.id), sans regroupement
+          // (clustering) : un ancien Supercluster recalculait des cluster_id qui changeaient a
+          // chaque micro-etape du zoom, forcant un demontage/remontage des marqueurs et donc un
+          // redemarrage du cycle de stabilisation `tracksViewChanges` (1 a 1.8s sur Android, cf
+          // useSettledTracking plus haut) -- d'ou des epingles qui semblaient sauter ou disparaitre
+          // puis reapparaitre pendant le zoom/pan. Le debounce de setRegion ci-dessous reste utile
+          // pour ne pas relancer fetchLieux (reseau) a chaque evenement intermediaire d'un geste.
           if (regionTimer.current) clearTimeout(regionTimer.current);
           regionTimer.current = setTimeout(() => {
             setRegion(r);
@@ -3009,49 +2965,15 @@ export default function CarteScreen() {
         showsUserLocation
         showsMyLocationButton={false}
       >
-        {!showEvents && !showBalades && clusters.map((cluster: any) => {
-          const [lng, lat] = cluster.geometry.coordinates;
-          const { cluster: isCluster, cluster_id, point_count, lieu } = cluster.properties;
-
-          if (isCluster) {
-            return (
-              <ClusterMarker
-                key={`c-${cluster_id}`}
-                latitude={lat}
-                longitude={lng}
-                pointCount={point_count}
-                onPress={() => {
-                  const leaves = clusterIndex.getLeaves(cluster_id, Infinity);
-                  const lats = leaves.map((f: any) => f.geometry.coordinates[1]).filter((v: number) => v && !isNaN(v));
-                  const lngs = leaves.map((f: any) => f.geometry.coordinates[0]).filter((v: number) => v && !isNaN(v));
-                  if (!lats.length || !lngs.length) return;
-                  const minLat = lats.reduce((a: number, b: number) => Math.min(a, b), lats[0]);
-                  const maxLat = lats.reduce((a: number, b: number) => Math.max(a, b), lats[0]);
-                  const minLng = lngs.reduce((a: number, b: number) => Math.min(a, b), lngs[0]);
-                  const maxLng = lngs.reduce((a: number, b: number) => Math.max(a, b), lngs[0]);
-                  mapRef.current?.animateToRegion({
-                    latitude: (minLat + maxLat) / 2,
-                    longitude: (minLng + maxLng) / 2,
-                    latitudeDelta: (maxLat - minLat) * 1.5 + 0.01,
-                    longitudeDelta: (maxLng - minLng) * 1.5 + 0.01,
-                  }, 400);
-                }}
-              />
-            );
-          }
-
-          const l: Lieu = lieu;
-          const isSelected = selectedLieu?.id === l.id;
-          return (
-            <LieuMarker
-              key={l.id}
-              lieu={l}
-              isSelected={isSelected}
-              forceTrack={prevSelectedId === l.id}
-              onPress={() => openFiche(l)}
-            />
-          );
-        })}
+        {!showEvents && !showBalades && filteredLieux.map(l => (
+          <LieuMarker
+            key={l.id}
+            lieu={l}
+            isSelected={selectedLieu?.id === l.id}
+            forceTrack={prevSelectedId === l.id}
+            onPress={() => openFiche(l)}
+          />
+        ))}
         {showEvents && mapEvents.map(e => (
           <MapEventPin
             key={`ev-${e.id}`}
@@ -4496,13 +4418,6 @@ const styles = StyleSheet.create({
     borderLeftColor: 'transparent', borderRightColor: 'transparent',
     marginTop: -1,
   },
-  clusterBubble: {
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    backgroundColor: colors.terra,
-    borderWidth: 2.5, borderColor: '#fff',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 6,
-  },
-  clusterText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: '#fff', fontWeight: '700' },
   topOverlay: { position: 'absolute', top: 0, left: 0, right: 0, gap: 8, paddingTop: 10 },
   carteListeRow: { alignItems: 'center' },
   carteListeToggle: {
