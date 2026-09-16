@@ -20,6 +20,7 @@ import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
+import { findOrCreateDM } from '../lib/conversations';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
 import { startBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeStartMs, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
@@ -666,6 +667,10 @@ export default function CarteScreen() {
   const [feedbackType, setFeedbackType] = useState<'probleme' | 'amelioration'>('probleme');
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [sendModal, setSendModal] = useState<{ type: 'photo' | 'lieu'; id: string } | null>(null);
+  const [sendFriends, setSendFriends] = useState<{ id: string; username: string | null; prenom: string | null; avatar_url: string | null }[] | null>(null);
+  const [sendFriendsLoading, setSendFriendsLoading] = useState(false);
+  const [sendingToId, setSendingToId] = useState<string | null>(null);
   const [myDogName, setMyDogName] = useState<string | null>(null);
   const [dogTagModal, setDogTagModal] = useState(false);
   const [dogTagInput, setDogTagInput] = useState('');
@@ -2246,6 +2251,53 @@ export default function CarteScreen() {
     await Share.share({ message: text });
   }
 
+  // Envoi interne (DM) d'une photo ou d'une fiche lieu -- distinct du partage externe
+  // (shareLieu/shareLieuWhatsapp) qui sort de l'app. "Amis" = meme definition que
+  // partout ailleurs dans l'app (follows accepte, dans le sens ou je suis l'autre).
+  async function loadSendFriends() {
+    if (sendFriends) return sendFriends;
+    if (!userId) return [];
+    setSendFriendsLoading(true);
+    try {
+      const { data: followRows } = await supabase.from('follows').select('following_id').eq('follower_id', userId).eq('statut', 'accepte');
+      const ids = (followRows || []).map((f: any) => f.following_id);
+      if (!ids.length) { setSendFriends([]); return []; }
+      const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url').in('id', ids);
+      const sorted = ((data || []) as any[]).sort((a, b) => (a.prenom || '').localeCompare(b.prenom || '', 'fr'));
+      setSendFriends(sorted);
+      return sorted;
+    } finally {
+      setSendFriendsLoading(false);
+    }
+  }
+
+  function openSendModal(type: 'photo' | 'lieu', id: string) {
+    setSendModal({ type, id });
+    loadSendFriends();
+  }
+
+  async function sendToFriend(friendId: string) {
+    if (!sendModal || !userId) return;
+    setSendingToId(friendId);
+    try {
+      const convId = await findOrCreateDM(userId, friendId);
+      if (!convId) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
+      const contenu = sendModal.type === 'photo' ? '📷 Photo partagée' : `📍 ${selectedLieu?.nom || 'Lieu partagé'}`;
+      const { error } = await supabase.from('messages').insert({
+        conversation_id: convId,
+        user_id: userId,
+        contenu,
+        type: sendModal.type,
+        shared_entity_id: sendModal.id,
+      });
+      if (error) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
+      setSendModal(null);
+      Alert.alert('Envoyé ✅', 'Ton ami va le recevoir dans sa messagerie.');
+    } finally {
+      setSendingToId(null);
+    }
+  }
+
   const FICHE_HEADER_H = Math.round(SCREEN_H * 0.42);
 
   const FAV_LISTS: { key: string; label: string; icon: IoniconsName; color: string }[] = [
@@ -2563,20 +2615,25 @@ export default function CarteScreen() {
                 {currentPhoto.authorUsername && (
                   <Text style={styles.fichePhotoAuthor}>{currentPhoto.authorUsername}</Text>
                 )}
-                {!currentPhoto.fromCommunity && (
-                  <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
-                    <Ionicons
-                      name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
-                      size={14}
-                      color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
-                    />
-                    {currentPhoto.likeCount > 0 && (
-                      <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
-                        {currentPhoto.likeCount}
-                      </Text>
-                    )}
+                <View style={styles.fichePhotoActionsRow}>
+                  {!currentPhoto.fromCommunity && (
+                    <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
+                      <Ionicons
+                        name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
+                        size={14}
+                        color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
+                      />
+                      {currentPhoto.likeCount > 0 && (
+                        <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
+                          {currentPhoto.likeCount}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => openSendModal('photo', currentPhoto.id)}>
+                    <Ionicons name="paper-plane-outline" size={15} color="rgba(255,255,255,0.85)" />
                   </TouchableOpacity>
-                )}
+                </View>
               </View>
             )}
           </View>
@@ -2781,6 +2838,9 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.actionShare} onPress={shareLieu}>
                     <Ionicons name="share-outline" size={16} color={colors.bordeaux} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionShare} onPress={() => openSendModal('lieu', selectedLieu.id)}>
+                    <Ionicons name="paper-plane-outline" size={16} color={colors.bordeaux} />
                   </TouchableOpacity>
                 </View>
 
@@ -3978,6 +4038,51 @@ export default function CarteScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Envoyer une photo / un lieu par message */}
+      <Modal visible={!!sendModal} transparent animationType="slide" onRequestClose={() => setSendModal(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSendModal(null)}>
+          <TouchableOpacity style={[styles.modalCard, { maxHeight: '70%' }]} activeOpacity={1} onPress={() => {}}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Envoyer à un ami</Text>
+              <TouchableOpacity onPress={() => setSendModal(null)}>
+                <Ionicons name="close" size={22} color={colors.bordeaux} />
+              </TouchableOpacity>
+            </View>
+            {sendFriendsLoading ? (
+              <ActivityIndicator color={colors.terra} style={{ marginVertical: 20 }} />
+            ) : !sendFriends || sendFriends.length === 0 ? (
+              <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 12 }}>
+                Tu ne suis encore personne — les envois se font pour l'instant uniquement à tes amis.
+              </Text>
+            ) : (
+              <FlatList
+                data={sendFriends}
+                keyExtractor={item => item.id}
+                style={{ maxHeight: 360 }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.sendFriendRow}
+                    onPress={() => sendToFriend(item.id)}
+                    disabled={sendingToId === item.id}
+                  >
+                    {item.avatar_url
+                      ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
+                      : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
+                      {item.username && <Text style={styles.sendFriendUsername}>@{item.username}</Text>}
+                    </View>
+                    {sendingToId === item.id
+                      ? <ActivityIndicator size="small" color={colors.terra} />
+                      : <Ionicons name="paper-plane-outline" size={18} color={colors.terra} />}
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Event detail modal */}
       <Modal visible={!!selectedMapEvent} transparent animationType="slide" onRequestClose={() => setSelectedMapEvent(null)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedMapEvent(null)}>
@@ -4669,6 +4774,7 @@ const styles = StyleSheet.create({
   ficheInfoScore: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux, marginLeft: 4 },
   ficheInfoAvis: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   fichePhotoAuthor: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(255,255,255,0.7)' },
+  fichePhotoActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   fichePhotoLikeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fichePhotoLikeCount: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(255,255,255,0.8)' },
   fichePhotoCounter: {
@@ -4790,6 +4896,10 @@ const styles = StyleSheet.create({
   favDropdownRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
   favDropdownBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
   favDropdownLabel: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux, flex: 1 },
+  sendFriendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sendFriendAvatar: { width: 40, height: 40, borderRadius: 20 },
+  sendFriendName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  sendFriendUsername: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   modalCard: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, gap: 16 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
