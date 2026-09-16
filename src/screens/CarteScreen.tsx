@@ -306,6 +306,8 @@ type EventMarker = {
   max_participants: number | null; payant: boolean; prix: number | null;
   nb_inscrits: number; je_suis_inscrit: boolean;
   profils: { prenom: string | null; username: string | null } | null;
+  site_web: string | null; code_promo: string | null;
+  partenaires_mentions: { type: 'partenaire' | 'instagram'; nom: string; id?: string; logo_url?: string | null; url?: string }[] | null;
 };
 type Balade = {
   id: string; user_id: string; nom: string; description: string | null;
@@ -2031,7 +2033,7 @@ export default function CarteScreen() {
     const now = new Date().toISOString();
     const { data } = await supabase
       .from('evenements')
-      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,profils(prenom,username)')
+      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils(prenom,username)')
       .eq('valide', true).eq('actif', true)
       .gte('date_heure', now)
       .not('lat', 'is', null)
@@ -4029,7 +4031,42 @@ export default function CarteScreen() {
                       </View>
                     ) : null}
 
-                    {userId ? (
+                    {selectedMapEvent.partenaires_mentions?.length ? (
+                      <View style={styles.eventModalMentionsRow}>
+                        {selectedMapEvent.partenaires_mentions.map((m, i) => (
+                          <TouchableOpacity
+                            key={i}
+                            style={styles.eventModalMentionChip}
+                            onPress={() => {
+                              if (m.type === 'instagram' && m.url) Linking.openURL(m.url);
+                              else navigation.navigate('Services');
+                            }}
+                          >
+                            {m.logo_url ? <Image source={{ uri: m.logo_url }} style={styles.eventModalMentionLogo} /> : null}
+                            <Text style={styles.eventModalMentionText}>{m.type === 'instagram' ? `📷 ${m.nom}` : m.nom}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+
+                    {selectedMapEvent.code_promo ? (
+                      <View style={styles.eventModalPromoBox}>
+                        <Text style={styles.eventModalPromoLabel}>Code promo</Text>
+                        <Text style={styles.eventModalPromoCode}>{selectedMapEvent.code_promo}</Text>
+                      </View>
+                    ) : null}
+
+                    {selectedMapEvent.site_web ? (
+                      <>
+                        <TouchableOpacity style={styles.eventModalJoin} onPress={() => {
+                          trackEvent('click', 'carte_evenement', { target_type: 'event', target_id: selectedMapEvent.id, action: 'website' });
+                          Linking.openURL(selectedMapEvent.site_web!);
+                        }}>
+                          <Text style={styles.eventModalJoinText}>Voir le site officiel</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.eventModalExternalNote}>Inscription non disponible sur l'app — organisé par un tiers</Text>
+                      </>
+                    ) : userId ? (
                       isFull ? (
                         <View style={styles.eventModalFull}>
                           <Text style={styles.eventModalFullText}>Complet — plus de places</Text>
@@ -4952,6 +4989,21 @@ const styles = StyleSheet.create({
   eventModalJoinText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
   eventModalCancel: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff3e0', borderRadius: 14, padding: 13, marginTop: 4, borderWidth: 1, borderColor: '#ffcc80' },
   eventModalCancelText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#e65100' },
+  eventModalMentionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  eventModalMentionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: colors.ivoryPale, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  eventModalMentionLogo: { width: 18, height: 18, borderRadius: 5 },
+  eventModalMentionText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  eventModalPromoBox: {
+    backgroundColor: colors.ivoryPale, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    padding: 10, alignItems: 'center',
+  },
+  eventModalPromoLabel: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
+  eventModalPromoCode: { fontFamily: 'DMSans_600SemiBold', fontSize: 16, color: colors.terra, letterSpacing: 1 },
+  eventModalExternalNote: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: -6 },
   // Filter modal
   filterSheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
