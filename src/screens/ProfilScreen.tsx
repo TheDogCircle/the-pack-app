@@ -251,7 +251,6 @@ export default function ProfilScreen() {
   const [myBalades, setMyBalades] = useState<{ id: string; nom: string; distance_km: number | null; duree_secondes: number | null; created_at: string }[]>([]);
   const [baladesOpen, setBaladesOpen] = useState(false);
   const [chiens, setChiens] = useState<{ id: string; nom: string }[]>([]);
-  const [nextRdv, setNextRdv] = useState<{ chienId: string; chienNom: string; date: string; heure: string | null } | null>(null);
   const [dogPicker, setDogPicker] = useState(false);
   const cardRef = useRef<View>(null);
 
@@ -285,29 +284,6 @@ export default function ProfilScreen() {
       supabase.from('chiens').select('id,nom').eq('user_id', session.user.id).order('created_at', { ascending: true }),
     ]);
     setChiens((mesChiens || []) as { id: string; nom: string }[]);
-
-    // Prochain RDV veto (tous chiens confondus) -- affiche uniquement s'il y en a un a
-    // venir, cf. encadre conditionnel plus bas.
-    if (mesChiens && mesChiens.length > 0) {
-      const todayIso = new Date().toISOString().slice(0, 10);
-      const { data: rdvData } = await supabase.from('chien_carnet_entries')
-        .select('chien_id, date, heure_rdv, chiens(nom)')
-        .eq('type', 'rdv_veto')
-        .in('chien_id', mesChiens.map((c: any) => c.id))
-        .gte('date', todayIso)
-        .order('date', { ascending: true })
-        .order('heure_rdv', { ascending: true, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
-      setNextRdv(rdvData ? {
-        chienId: (rdvData as any).chien_id,
-        chienNom: (rdvData as any).chiens?.nom || '',
-        date: (rdvData as any).date,
-        heure: (rdvData as any).heure_rdv,
-      } : null);
-    } else {
-      setNextRdv(null);
-    }
     setExplorateur(expData || null);
     setFollowersCount(followersRes.count ?? 0);
     setFollowingCount(followingRes.count ?? 0);
@@ -550,23 +526,6 @@ export default function ProfilScreen() {
         <Text style={styles.resaBannerText}>Carnet de santé</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
       </TouchableOpacity>
-
-      {/* Prochain RDV véto -- n'apparaît que s'il y en a un à venir, pour ne pas
-          surcharger le profil quand ce n'est pas pertinent. */}
-      {nextRdv && (
-        <TouchableOpacity
-          style={styles.resaBannerRow}
-          onPress={() => navigation.navigate('CarnetSante', { chienId: nextRdv.chienId, chienNom: nextRdv.chienNom })}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="alarm-outline" size={16} color={colors.ivory} />
-          <Text style={styles.resaBannerText}>
-            Prochain RDV véto{nextRdv.chienNom ? ` (${nextRdv.chienNom})` : ''} le {new Date(`${nextRdv.date}T00:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
-            {nextRdv.heure ? ` à ${nextRdv.heure.slice(0, 5).replace(':', 'h')}` : ''}
-          </Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
-        </TouchableOpacity>
-      )}
 
       {/* Demandes en attente */}
       {pendingRequests.length > 0 && (

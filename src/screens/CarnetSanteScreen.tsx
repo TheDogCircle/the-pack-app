@@ -399,6 +399,10 @@ export default function CarnetSanteScreen() {
   }
 
   const latestPesee = entries.find(e => e.type === 'pesee' && e.poids_kg != null);
+  const todayIsoForRdv = dateToIso(new Date());
+  const nextRdv = [...entries]
+    .filter(e => e.type === 'rdv_veto' && e.date >= todayIsoForRdv)
+    .sort((a, b) => (a.date === b.date ? (a.heure_rdv || '').localeCompare(b.heure_rdv || '') : a.date < b.date ? -1 : 1))[0] || null;
   // rdv_veto a son propre encadre (voir ProfilScreen, "Prochain RDV veto") -- ne pas le
   // dupliquer ici, la liste "A venir" ne concerne plus que les soins periodiques.
   const upcoming = [...entries].filter(e => e.date_rappel && e.type !== 'rdv_veto').sort((a, b) => (a.date_rappel! < b.date_rappel! ? -1 : 1));
@@ -447,6 +451,18 @@ export default function CarnetSanteScreen() {
             {privateInfo?.veterinaire_telephone ? <Text style={styles.quickSub}>{privateInfo.veterinaire_telephone}</Text> : null}
           </View>
         </View>
+
+        {nextRdv && (
+          <TouchableOpacity style={styles.quickCardWide} onPress={() => openEditEntryModal(nextRdv)} activeOpacity={0.8}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.quickLabel}>Prochain RDV véto</Text>
+              <Text style={styles.quickValue}>
+                {formatDateFr(nextRdv.date)}{nextRdv.heure_rdv ? ` à ${nextRdv.heure_rdv.slice(0, 5).replace(':', 'h')}` : ''}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
 
         {upcoming.length > 0 && (
           <View style={styles.section}>
@@ -903,6 +919,11 @@ const styles = StyleSheet.create({
   quickLabel: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 },
   quickValue: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux, marginTop: 4 },
   quickSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  quickCardWide: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
+    padding: 14,
+  },
 
   section: {
     backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border,
