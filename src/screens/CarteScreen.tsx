@@ -2886,6 +2886,53 @@ export default function CarteScreen() {
           </ScrollView>
         </Animated.View>
 
+        {/* Envoyer une photo / un lieu par message -- overlay inline (pas un second <Modal>,
+            qui ne se presente pas correctement au-dessus d'un Modal deja visible sur iOS). */}
+        {sendModal && (
+          <View style={StyleSheet.absoluteFillObject}>
+            <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }]} onPress={() => setSendModal(null)} activeOpacity={1} />
+            <View style={[styles.modalCard, { position: 'absolute', bottom: 0, left: 0, right: 0, maxHeight: SCREEN_H * 0.7, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Envoyer à un ami</Text>
+                <TouchableOpacity onPress={() => setSendModal(null)}>
+                  <Ionicons name="close" size={22} color={colors.bordeaux} />
+                </TouchableOpacity>
+              </View>
+              {sendFriendsLoading ? (
+                <ActivityIndicator color={colors.terra} style={{ marginVertical: 20 }} />
+              ) : !sendFriends || sendFriends.length === 0 ? (
+                <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 12 }}>
+                  Tu ne suis encore personne — les envois se font pour l'instant uniquement à tes amis.
+                </Text>
+              ) : (
+                <FlatList
+                  data={sendFriends}
+                  keyExtractor={item => item.id}
+                  style={{ maxHeight: 360 }}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.sendFriendRow}
+                      onPress={() => sendToFriend(item.id)}
+                      disabled={sendingToId === item.id}
+                    >
+                      {item.avatar_url
+                        ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
+                        : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
+                        {item.username && <Text style={styles.sendFriendUsername}>@{item.username}</Text>}
+                      </View>
+                      {sendingToId === item.id
+                        ? <ActivityIndicator size="small" color={colors.terra} />
+                        : <Ionicons name="paper-plane-outline" size={18} color={colors.terra} />}
+                    </TouchableOpacity>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        )}
+
         {enrichModal && (
           <View style={StyleSheet.absoluteFillObject}>
             <TouchableOpacity style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }]} onPress={() => setEnrichModal(false)} activeOpacity={1} />
@@ -4036,51 +4083,6 @@ export default function CarteScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Envoyer une photo / un lieu par message */}
-      <Modal visible={!!sendModal} transparent animationType="slide" onRequestClose={() => setSendModal(null)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSendModal(null)}>
-          <TouchableOpacity style={[styles.modalCard, { maxHeight: '70%' }]} activeOpacity={1} onPress={() => {}}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Envoyer à un ami</Text>
-              <TouchableOpacity onPress={() => setSendModal(null)}>
-                <Ionicons name="close" size={22} color={colors.bordeaux} />
-              </TouchableOpacity>
-            </View>
-            {sendFriendsLoading ? (
-              <ActivityIndicator color={colors.terra} style={{ marginVertical: 20 }} />
-            ) : !sendFriends || sendFriends.length === 0 ? (
-              <Text style={{ fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 12 }}>
-                Tu ne suis encore personne — les envois se font pour l'instant uniquement à tes amis.
-              </Text>
-            ) : (
-              <FlatList
-                data={sendFriends}
-                keyExtractor={item => item.id}
-                style={{ maxHeight: 360 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.sendFriendRow}
-                    onPress={() => sendToFriend(item.id)}
-                    disabled={sendingToId === item.id}
-                  >
-                    {item.avatar_url
-                      ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
-                      : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
-                      {item.username && <Text style={styles.sendFriendUsername}>@{item.username}</Text>}
-                    </View>
-                    {sendingToId === item.id
-                      ? <ActivityIndicator size="small" color={colors.terra} />
-                      : <Ionicons name="paper-plane-outline" size={18} color={colors.terra} />}
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
       </Modal>
 
       {/* Event detail modal */}
