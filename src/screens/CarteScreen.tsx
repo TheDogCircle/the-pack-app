@@ -924,20 +924,39 @@ export default function CarteScreen() {
     fetchLieux(region, null, true);
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        setUserLat(loc.coords.latitude);
-        setUserLng(loc.coords.longitude);
-        const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+      if (status !== 'granted') return;
+
+      // getCurrentPositionAsync peut prendre plusieurs secondes (voire plus, GPS a froid,
+      // interieur...) avant de resoudre -- la carte restait jusque-la sur la vue par
+      // defaut (France entiere) tout ce temps, donnant l'impression que "rien ne charge"
+      // tant qu'on ne tapait pas sur "Localiser" (qui, lui, attend patiemment le fix).
+      // getLastKnownPositionAsync renvoie immediatement la derniere position en cache
+      // (recente dans l'immense majorite des cas, l'app etant relancee regulierement au
+      // meme endroit) : on centre dessus tout de suite, sans animation, puis on affine
+      // avec le fix precis des qu'il arrive.
+      const cached = await Location.getLastKnownPositionAsync();
+      if (cached) {
+        setUserLat(cached.coords.latitude);
+        setUserLng(cached.coords.longitude);
         gpsCameraHandledRef.current = true;
-        mapRef.current?.animateToRegion(r, 600);
-        // region (et donc les lieux recharges) n'est mis a jour qu'une fois l'animation
-        // reellement terminee, via onRegionChangeComplete — sinon le fetch se relance
-        // immediatement sur la nouvelle zone (etroite) alors que les lieux charges correspondent
-        // encore a l'ancienne (large), et les epingles disparaissent le temps de l'animation.
-        // Si onRegionChangeComplete ne se declenche pas (ref pas encore prete, plateforme...),
-        // le fetch initial ci-dessus garantit que la carte n'est jamais vide pour autant.
+        mapRef.current?.animateToRegion({
+          latitude: cached.coords.latitude, longitude: cached.coords.longitude,
+          latitudeDelta: 0.08, longitudeDelta: 0.08,
+        }, 0);
       }
+
+      const loc = await Location.getCurrentPositionAsync({});
+      setUserLat(loc.coords.latitude);
+      setUserLng(loc.coords.longitude);
+      const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+      gpsCameraHandledRef.current = true;
+      mapRef.current?.animateToRegion(r, 600);
+      // region (et donc les lieux recharges) n'est mis a jour qu'une fois l'animation
+      // reellement terminee, via onRegionChangeComplete — sinon le fetch se relance
+      // immediatement sur la nouvelle zone (etroite) alors que les lieux charges correspondent
+      // encore a l'ancienne (large), et les epingles disparaissent le temps de l'animation.
+      // Si onRegionChangeComplete ne se declenche pas (ref pas encore prete, plateforme...),
+      // le fetch initial ci-dessus garantit que la carte n'est jamais vide pour autant.
     })();
   }, []);
 
