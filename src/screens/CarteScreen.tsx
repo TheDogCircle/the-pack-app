@@ -2760,11 +2760,11 @@ export default function CarteScreen() {
                   ) : null}
                   {selectedLieu.cat === 'veto' ? (
                     <TouchableOpacity
-                      style={styles.actionSecondary}
+                      style={styles.actionVeteReferent}
                       onPress={() => attachAsVeteReferent(selectedLieu)}
                     >
                       <Ionicons name="medkit-outline" size={16} color={colors.ivory} />
-                      <Text style={styles.actionSecondaryText} numberOfLines={1}>Mon véto référent</Text>
+                      <Text style={styles.actionSecondaryText} numberOfLines={2}>Mon véto référent</Text>
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity
@@ -4754,6 +4754,14 @@ const styles = StyleSheet.create({
     flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
     borderRadius: 12, paddingVertical: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: '#C4693A',
     backgroundColor: '#C4693A', minWidth: 118,
+  },
+  // Meme souci que actionReserver : "Mon véto référent" est le libellé le plus long
+  // du groupe et se faisait couper avec le minWidth commun de actionSecondary (78).
+  // Jamais affiche en meme temps que actionReserver (cat 'veto' vs 'educateur').
+  actionVeteReferent: {
+    flex: 1.4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8, borderWidth: 1, borderColor: '#C4693A',
+    backgroundColor: '#C4693A', minWidth: 150,
   },
   actionSecondaryActive: { borderColor: '#C4693A', backgroundColor: '#C4693A' },
   actionSecondaryText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 12 },
