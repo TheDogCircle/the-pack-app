@@ -556,8 +556,10 @@ export default function MessagerieScreen({
     const mySet = new Set((mine || []).map((r: any) => r.conversation_id));
     const shared = (theirs || []).map((r: any) => r.conversation_id).filter((id: string) => mySet.has(id));
     for (const cid of shared) {
+      const match = conversations.find(c => c.id === cid);
+      if (!match || match.type === 'groupe') continue;
       const { count } = await supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
-      if (count === 2) return conversations.find(c => c.id === cid) ?? null;
+      if (count === 2) return match;
     }
     return null;
   }

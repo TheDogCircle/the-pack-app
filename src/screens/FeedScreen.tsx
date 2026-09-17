@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
+import { findOrCreateDM } from '../lib/conversations';
 import { mapNavigation } from '../lib/mapNavigation';
 import { normalizePhone } from '../lib/phone';
 import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
@@ -69,6 +70,7 @@ type Comment = {
   created_at: string;
   user_id: string;
   profils: { prenom: string; avatar_url: string | null } | null;
+  mentions?: { id: string; username: string }[];
 };
 
 type LieuResult = { id: string; nom: string; cat: string; ville: string };
@@ -137,10 +139,11 @@ type PostCardProps = {
   onLieuPress: (lieuId: string) => void;
   onDeletePress: (post: CommunityPost) => void;
   onAuthorPress: (post: CommunityPost) => void;
+  onSendPress: (post: CommunityPost) => void;
   birthdayUserIds?: Set<string>;
 };
 
-function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress, onAuthorPress, birthdayUserIds }: PostCardProps) {
+function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDeletePress, onAuthorPress, onSendPress, birthdayUserIds }: PostCardProps) {
   const likedByMe = post.community_post_likes.some(l => l.user_id === myUserId);
   const likeCount = post.community_post_likes.length;
   const commentCount = post.community_post_comments.length;
@@ -224,6 +227,9 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
         <TouchableOpacity style={styles.postActionBtn} onPress={() => onCommentPress(post)}>
           <Ionicons name="chatbubble-outline" size={20} color={colors.bordeaux} />
           {commentCount > 0 && <Text style={styles.postActionCount}>{commentCount}</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.postActionBtn} onPress={() => onSendPress(post)}>
+          <Ionicons name="paper-plane-outline" size={20} color={colors.bordeaux} />
         </TouchableOpacity>
       </View>
 
@@ -426,12 +432,79 @@ function CommentsModal({
   onClose: () => void;
   myUserId: string;
 }) {
+  const navigation = useNavigation<any>();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
+  const [mentionSuggestions, setMentionSuggestions] = useState<{ id: string; username: string | null; prenom: string | null; avatar_url: string | null }[]>([]);
+  const friendsRef = useRef<{ id: string; username: string | null; prenom: string | null; avatar_url: string | null }[] | null>(null);
+  const pendingMentionsRef = useRef<{ user_id: string; tag: string }[]>([]);
   const insets = useSafeAreaInsets();
+
+  async function loadCommentFriends() {
+    if (friendsRef.current) return friendsRef.current;
+    if (!myUserId) return [];
+    const { data: followRows } = await supabase.from('follows').select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
+    const ids = (followRows || []).map((f: any) => f.following_id);
+    if (!ids.length) { friendsRef.current = []; return []; }
+    const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url').in('id', ids);
+    const sorted = ((data || []) as any[]).filter(p => p.username).sort((a, b) => (a.prenom || '').localeCompare(b.prenom || '', 'fr'));
+    friendsRef.current = sorted;
+    return sorted;
+  }
+
+  // On suppose le curseur en fin de texte (frappe lineaire) : RN ne fournit pas de
+  // position de curseur fiable et synchrone dans onChangeText (onSelectionChange
+  // arrive dans un evenement separe, potentiellement apres coup) contrairement a
+  // un textarea web. Suffisant pour une frappe normale d'un commentaire.
+  async function onChangeCommentText(value: string) {
+    setText(value);
+    const match = value.match(/(?:^|\s)@([a-zA-Z0-9_.]*)$/);
+    if (!match) { setMentionSuggestions([]); return; }
+    const query = match[1].toLowerCase();
+    const friends = await loadCommentFriends();
+    setMentionSuggestions(friends.filter(f =>
+      (f.username || '').toLowerCase().includes(query) || (f.prenom || '').toLowerCase().includes(query)
+    ).slice(0, 6));
+  }
+
+  function insertMention(username: string, userId: string) {
+    const match = text.match(/(?:^|\s)@([a-zA-Z0-9_.]*)$/);
+    if (!match) return;
+    const whole = match[0];
+    const atIndex = whole.lastIndexOf('@');
+    const leading = whole.slice(0, atIndex);
+    const tag = '@' + username;
+    const prefix = text.slice(0, match.index) + leading;
+    setText(prefix + tag + ' ');
+    setMentionSuggestions([]);
+    pendingMentionsRef.current.push({ user_id: userId, tag });
+  }
+
+  function renderCommentContent(c: Comment) {
+    if (!c.mentions || !c.mentions.length) return <Text style={styles.commentContent}>{c.content}</Text>;
+    let remaining = c.content;
+    const nodes: React.ReactNode[] = [];
+    let key = 0;
+    while (remaining.length) {
+      let earliest: { idx: number; mention: { id: string; username: string } } | null = null;
+      for (const m of c.mentions) {
+        const idx = remaining.indexOf('@' + m.username);
+        if (idx !== -1 && (!earliest || idx < earliest.idx)) earliest = { idx, mention: m };
+      }
+      if (!earliest) { nodes.push(<Text key={key++}>{remaining}</Text>); break; }
+      if (earliest.idx > 0) nodes.push(<Text key={key++}>{remaining.slice(0, earliest.idx)}</Text>);
+      nodes.push(
+        <Text key={key++} style={{ color: colors.terra, fontFamily: 'DMSans_500Medium' }} onPress={() => navigation.navigate('ProfilPublic', { userId: earliest!.mention.id, prenom: '' })}>
+          {'@' + earliest.mention.username}
+        </Text>
+      );
+      remaining = remaining.slice(earliest.idx + earliest.mention.username.length + 1);
+    }
+    return <Text style={styles.commentContent}>{nodes}</Text>;
+  }
 
   useEffect(() => {
     if (visible && post) fetchComments(post.id);
@@ -449,6 +522,10 @@ function CommentsModal({
     const hideSub = Keyboard.addListener(hideEvt, () => setKbHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
+
+  function commentSource(): 'photo' | 'post' {
+    return post?.fromMap && post.realPhotoId ? 'photo' : 'post';
+  }
 
   async function fetchComments(postId: string) {
     setLoadingComments(true);
@@ -475,26 +552,57 @@ function CommentsModal({
         .from('profils').select('id, prenom, avatar_url').in('id', userIds);
       profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
     }
-    setComments((data || []).map((c: any) => ({ ...c, profils: profileMap[c.user_id] || null })));
+    const commentIds = (data || []).map((c: any) => c.id);
+    let mentionsByComment: Record<string, { id: string; username: string }[]> = {};
+    if (commentIds.length) {
+      const { data: mentionRows } = await supabase
+        .from('feed_comment_mentions')
+        .select('comment_id, mentioned_user_id')
+        .eq('source', commentSource())
+        .in('comment_id', commentIds);
+      const mentionedIds = [...new Set((mentionRows || []).map((m: any) => m.mentioned_user_id))];
+      if (mentionedIds.length) {
+        const { data: mentionProfiles } = await supabase.from('profils').select('id, username').in('id', mentionedIds);
+        const mentionProfileMap = Object.fromEntries((mentionProfiles || []).map((p: any) => [p.id, p]));
+        (mentionRows || []).forEach((m: any) => {
+          const mp = mentionProfileMap[m.mentioned_user_id];
+          if (!mp?.username) return;
+          if (!mentionsByComment[m.comment_id]) mentionsByComment[m.comment_id] = [];
+          mentionsByComment[m.comment_id].push({ id: mp.id, username: mp.username });
+        });
+      }
+    }
+    setComments((data || []).map((c: any) => ({ ...c, profils: profileMap[c.user_id] || null, mentions: mentionsByComment[c.id] || [] })));
     setLoadingComments(false);
   }
 
   async function sendComment() {
     if (!text.trim() || !post || !myUserId) return;
     setSending(true);
+    const contenu = text.trim();
+    const source = commentSource();
     let error: any = null;
-    if (post.fromMap && post.realPhotoId) {
-      const { error: e } = await supabase.from('photo_comments').insert({
-        photo_id: post.realPhotoId, user_id: myUserId, content: text.trim(),
-      });
-      error = e;
+    let insertedId: string | null = null;
+    if (source === 'photo') {
+      const { data, error: e } = await supabase.from('photo_comments').insert({
+        photo_id: post.realPhotoId, user_id: myUserId, content: contenu,
+      }).select('id').single();
+      error = e; insertedId = data?.id ?? null;
     } else {
-      const { error: e } = await supabase.from('community_post_comments').insert({
-        post_id: post.id, user_id: myUserId, content: text.trim(),
-      });
-      error = e;
+      const { data, error: e } = await supabase.from('community_post_comments').insert({
+        post_id: post.id, user_id: myUserId, content: contenu,
+      }).select('id').single();
+      error = e; insertedId = data?.id ?? null;
     }
     if (error) { Alert.alert('Erreur', error.message); setSending(false); return; }
+    const validMentions = pendingMentionsRef.current.filter(m => contenu.includes(m.tag));
+    const uniqueMentions = [...new Map(validMentions.map(m => [m.user_id, m])).values()];
+    if (insertedId && uniqueMentions.length) {
+      await supabase.from('feed_comment_mentions').insert(
+        uniqueMentions.map(m => ({ source, comment_id: insertedId, mentioned_user_id: m.user_id }))
+      );
+    }
+    pendingMentionsRef.current = [];
     setText('');
     await fetchComments(post.id);
     setSending(false);
@@ -529,20 +637,36 @@ function CommentsModal({
                   <PostAvatar prenom={c.profils?.prenom || '?'} avatarUrl={c.profils?.avatar_url ?? null} />
                   <View style={styles.commentBubble}>
                     <Text style={styles.commentAuthor}>{c.profils?.prenom || 'Membre'}</Text>
-                    <Text style={styles.commentContent}>{c.content}</Text>
+                    {renderCommentContent(c)}
                   </View>
                 </View>
               )}
             />
           )}
 
+          {mentionSuggestions.length > 0 && (
+            <View style={styles.mentionDropdown}>
+              {mentionSuggestions.map(f => (
+                <TouchableOpacity key={f.id} style={styles.mentionRow} onPress={() => insertMention(f.username || '', f.id)}>
+                  {f.avatar_url
+                    ? <Image source={{ uri: f.avatar_url }} style={styles.mentionAvatar} />
+                    : <View style={[styles.mentionAvatar, { backgroundColor: colors.ivoryPale }]} />}
+                  <View>
+                    <Text style={styles.mentionName}>{f.prenom || ''}</Text>
+                    <Text style={styles.mentionUsername}>@{f.username}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           <View style={[styles.commentInputRow, { paddingBottom: kbHeight > 0 ? 12 : Math.max(insets.bottom, 12) }]}>
             <TextInput
               style={styles.commentTextInput}
-              placeholder="Ajouter un commentaire…"
+              placeholder="Ajouter un commentaire… (@ pour mentionner)"
               placeholderTextColor={colors.textMuted}
               value={text}
-              onChangeText={setText}
+              onChangeText={onChangeCommentText}
               multiline
             />
             <TouchableOpacity onPress={sendComment} disabled={!text.trim() || sending}>
@@ -841,6 +965,10 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   const [tab, setTab] = useState<'feed' | 'messages' | 'membres'>('feed');
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [pendingConvId, setPendingConvId] = useState<string | null>(null);
+  const [sendPost, setSendPost] = useState<CommunityPost | null>(null);
+  const [sendFriends, setSendFriends] = useState<{ id: string; username: string | null; prenom: string | null; avatar_url: string | null }[] | null>(null);
+  const [sendFriendsLoading, setSendFriendsLoading] = useState(false);
+  const [sendingToId, setSendingToId] = useState<string | null>(null);
 
   // Pastilles "nouveau contenu" sur les onglets Feed / Chat / Membres
   const [feedBadge, setFeedBadge] = useState(false);
@@ -1456,6 +1584,49 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
     });
   }
 
+  async function loadSendFriends() {
+    if (sendFriends) return sendFriends;
+    if (!myUserId) return [];
+    setSendFriendsLoading(true);
+    try {
+      const { data: followRows } = await supabase.from('follows').select('following_id').eq('follower_id', myUserId).eq('statut', 'accepte');
+      const ids = (followRows || []).map((f: any) => f.following_id);
+      if (!ids.length) { setSendFriends([]); return []; }
+      const { data } = await supabase.from('profils').select('id,username,prenom,avatar_url').in('id', ids);
+      const sorted = ((data || []) as any[]).sort((a, b) => (a.prenom || '').localeCompare(b.prenom || '', 'fr'));
+      setSendFriends(sorted);
+      return sorted;
+    } finally {
+      setSendFriendsLoading(false);
+    }
+  }
+
+  function openSendModal(post: CommunityPost) {
+    setSendPost(post);
+    loadSendFriends();
+  }
+
+  async function sendToFriend(friendId: string) {
+    if (!sendPost || !myUserId) return;
+    setSendingToId(friendId);
+    try {
+      const convId = await findOrCreateDM(myUserId, friendId);
+      if (!convId) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
+      const { error } = await supabase.from('messages').insert({
+        conversation_id: convId,
+        user_id: myUserId,
+        contenu: '📷 Publication partagée',
+        type: 'post',
+        shared_entity_id: sendPost.id,
+      });
+      if (error) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
+      setSendPost(null);
+      Alert.alert('Envoyé ✅', 'Ton ami va le recevoir dans sa messagerie.');
+    } finally {
+      setSendingToId(null);
+    }
+  }
+
   async function openBalade(post: CommunityPost) {
     if (post.balade_id) {
       mapNavigation.setPendingBalade(post.balade_id);
@@ -1735,6 +1906,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
                     onLieuPress={openLieu}
                     onDeletePress={deletePost}
                     onAuthorPress={openAuthor}
+                    onSendPress={openSendModal}
                     birthdayUserIds={birthdayUserIds}
                   />
                 )
@@ -1888,6 +2060,49 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
             onClose={() => setCommentPost(null)}
             myUserId={myUserId}
           />
+          <Modal visible={!!sendPost} transparent animationType="slide" onRequestClose={() => setSendPost(null)}>
+            <TouchableOpacity style={styles.sendModalOverlay} activeOpacity={1} onPress={() => setSendPost(null)}>
+              <TouchableOpacity style={styles.sendModalCard} activeOpacity={1} onPress={() => {}}>
+                <View style={styles.sendModalHeader}>
+                  <Text style={styles.sendModalTitle}>Envoyer à un ami</Text>
+                  <TouchableOpacity onPress={() => setSendPost(null)}>
+                    <Ionicons name="close" size={22} color={colors.bordeaux} />
+                  </TouchableOpacity>
+                </View>
+                {sendFriendsLoading ? (
+                  <ActivityIndicator color={colors.terra} style={{ marginVertical: 20 }} />
+                ) : !sendFriends || sendFriends.length === 0 ? (
+                  <Text style={styles.sendModalEmpty}>
+                    Tu ne suis encore personne — les envois se font pour l'instant uniquement à tes amis.
+                  </Text>
+                ) : (
+                  <FlatList
+                    data={sendFriends}
+                    keyExtractor={item => item.id}
+                    style={{ maxHeight: 360 }}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.sendFriendRow}
+                        onPress={() => sendToFriend(item.id)}
+                        disabled={sendingToId === item.id}
+                      >
+                        {item.avatar_url
+                          ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
+                          : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
+                          {item.username && <Text style={styles.sendFriendUsername}>@{item.username}</Text>}
+                        </View>
+                        {sendingToId === item.id
+                          ? <ActivityIndicator size="small" color={colors.terra} />
+                          : <Ionicons name="paper-plane-outline" size={18} color={colors.terra} />}
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
         </>
       )}
 
@@ -2261,4 +2476,18 @@ const styles = StyleSheet.create({
   emptyIcon:  { fontSize: 40, marginBottom: 12 },
   emptyText:  { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
   emptySubText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: 4 },
+  sendModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sendModalCard: { backgroundColor: colors.ivoryPale, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, gap: 16, maxHeight: '70%' },
+  sendModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sendModalTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux },
+  sendModalEmpty: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', paddingVertical: 12 },
+  sendFriendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sendFriendAvatar: { width: 40, height: 40, borderRadius: 20 },
+  sendFriendName: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  sendFriendUsername: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  mentionDropdown: { maxHeight: 220, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.white },
+  mentionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  mentionAvatar: { width: 32, height: 32, borderRadius: 16 },
+  mentionName: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  mentionUsername: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terra },
 });

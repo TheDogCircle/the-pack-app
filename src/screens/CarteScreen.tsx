@@ -2615,25 +2615,20 @@ export default function CarteScreen() {
                 {currentPhoto.authorUsername && (
                   <Text style={styles.fichePhotoAuthor}>{currentPhoto.authorUsername}</Text>
                 )}
-                <View style={styles.fichePhotoActionsRow}>
-                  {!currentPhoto.fromCommunity && (
-                    <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
-                      <Ionicons
-                        name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
-                        size={14}
-                        color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
-                      />
-                      {currentPhoto.likeCount > 0 && (
-                        <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
-                          {currentPhoto.likeCount}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity onPress={() => openSendModal('photo', currentPhoto.id)}>
-                    <Ionicons name="paper-plane-outline" size={15} color="rgba(255,255,255,0.85)" />
+                {!currentPhoto.fromCommunity && (
+                  <TouchableOpacity style={styles.fichePhotoLikeRow} onPress={() => togglePhotoLike(currentPhoto.id)}>
+                    <Ionicons
+                      name={currentPhoto.likedByMe ? 'heart' : 'heart-outline'}
+                      size={14}
+                      color={currentPhoto.likedByMe ? '#E05070' : 'rgba(255,255,255,0.8)'}
+                    />
+                    {currentPhoto.likeCount > 0 && (
+                      <Text style={[styles.fichePhotoLikeCount, currentPhoto.likedByMe && { color: '#E05070' }]}>
+                        {currentPhoto.likeCount}
+                      </Text>
+                    )}
                   </TouchableOpacity>
-                </View>
+                )}
               </View>
             )}
           </View>

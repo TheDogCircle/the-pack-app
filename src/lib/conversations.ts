@@ -14,6 +14,11 @@ export async function findOrCreateDM(myUserId: string, otherId: string): Promise
   const mySet = new Set((mine || []).map((r: any) => r.conversation_id));
   const shared = (theirs || []).map((r: any) => r.conversation_id).filter((id: string) => mySet.has(id));
   for (const cid of shared) {
+    // Ignore les conversations desactivees (quittees/supprimees) ou les groupes --
+    // un groupe reduit a 2 membres restants matchait par erreur le count===2 et
+    // faisait atterrir le message dans une conversation invisible pour l'utilisateur.
+    const { data: conv } = await supabase.from('conversations').select('actif,type').eq('id', cid).maybeSingle();
+    if (!conv || !conv.actif || conv.type === 'groupe') continue;
     const { count } = await supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
     if (count === 2) return cid;
   }
