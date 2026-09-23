@@ -18,12 +18,17 @@ serve(async (_req) => {
 
   const cutoff = new Date(Date.now() - RECEIPT_DELAY_MINUTES * 60_000).toISOString();
 
+  // Pas de filtre sur ticket_ids ici : une campagne a 0 destinataire (ex: aucun
+  // anniversaire ce jour-la, personne a proximite) finalise quand meme le log avec
+  // ticket_ids='[]', et doit etre marquee "verifiee" comme les autres -- sinon elle
+  // reste "en attente" indefiniment. Le filtre .not('ticket_ids','eq','[]') qui etait
+  // ici les excluait justement de cette requete, empechant la branche ids.length===0
+  // ci-dessous (ecrite pour gerer ce cas precis) de jamais s'executer.
   const { data: logs, error } = await supabase
     .from('notifications_log')
     .select('id, ticket_ids')
     .is('receipts_checked_at', null)
     .lt('created_at', cutoff)
-    .not('ticket_ids', 'eq', '[]')
     .order('created_at', { ascending: true })
     .limit(MAX_LOGS_PER_RUN);
 
