@@ -289,12 +289,19 @@ export default function Navigation() {
         mapNavigation.setPendingLieu(lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
       }
-    } else if (data.type === 'photo_like' || data.type === 'new_post') {
+    } else if (data.type === 'photo_like' || data.type === 'new_post' || data.type === 'mention_comment') {
       if (data.postId) mapNavigation.setPendingPost(data.postId);
       navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
-    } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today') {
+    } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today' || data.type === 'mention_event_comment') {
       if (data.eventId) mapNavigation.setPendingEvent(data.eventId);
       navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+    } else if (data.type === 'mention_lieu_comment') {
+      // Mention dans un commentaire de fiche lieu (web) : le mobile n'a pas encore
+      // d'ecran pour afficher ce fil de commentaires precis, on ouvre au moins la fiche.
+      if (lieuId) {
+        mapNavigation.setPendingLieu(lieuId);
+        navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
+      }
     } else if (data.type === 'private_event_invite') {
       // N'a jamais eu de branche ici depuis l'ajout de ce type de notif : le tap ne
       // faisait litteralement rien. L'invitation elle-meme n'a pas d'id dans le payload

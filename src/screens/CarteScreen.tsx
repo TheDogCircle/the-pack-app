@@ -2293,6 +2293,14 @@ export default function CarteScreen() {
       if (error) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
       setSendModal(null);
       Alert.alert('Envoyé ✅', 'Ton ami va le recevoir dans sa messagerie.');
+      const [{ data: friend }, { data: me }, { data: memberRow }] = await Promise.all([
+        supabase.from('profils').select('push_token,notif_messages').eq('id', friendId).maybeSingle(),
+        supabase.from('profils').select('prenom').eq('id', userId).maybeSingle(),
+        supabase.from('conversation_members').select('muted').eq('conversation_id', convId).eq('user_id', friendId).maybeSingle(),
+      ]);
+      if (friend?.push_token && friend.notif_messages !== false && !memberRow?.muted) {
+        sendPushNotification(friend.push_token, me?.prenom || 'Quelqu\'un', `t'a envoyé ${contenu}`, { type: 'message', conversationId: convId });
+      }
     } finally {
       setSendingToId(null);
     }

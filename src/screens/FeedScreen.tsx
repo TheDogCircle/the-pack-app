@@ -601,6 +601,14 @@ function CommentsModal({
       await supabase.from('feed_comment_mentions').insert(
         uniqueMentions.map(m => ({ source, comment_id: insertedId, mentioned_user_id: m.user_id }))
       );
+      const [{ data: mentionedProfiles }, { data: me }] = await Promise.all([
+        supabase.from('profils').select('id,push_token').in('id', uniqueMentions.map(m => m.user_id)),
+        supabase.from('profils').select('prenom').eq('id', myUserId).maybeSingle(),
+      ]);
+      (mentionedProfiles || []).forEach((p: any) => {
+        if (p.id === myUserId || !p.push_token) return;
+        sendPushNotification(p.push_token, 'Mention', `${me?.prenom || 'Quelqu\'un'} t'a mentionné(e) dans un commentaire`, { type: 'mention_comment', postId: post.id });
+      });
     }
     pendingMentionsRef.current = [];
     setText('');
@@ -1622,6 +1630,14 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
       if (error) { Alert.alert('Erreur', "Impossible d'envoyer, réessaie."); return; }
       setSendPost(null);
       Alert.alert('Envoyé ✅', 'Ton ami va le recevoir dans sa messagerie.');
+      const [{ data: friend }, { data: me }, { data: memberRow }] = await Promise.all([
+        supabase.from('profils').select('push_token,notif_messages').eq('id', friendId).maybeSingle(),
+        supabase.from('profils').select('prenom').eq('id', myUserId).maybeSingle(),
+        supabase.from('conversation_members').select('muted').eq('conversation_id', convId).eq('user_id', friendId).maybeSingle(),
+      ]);
+      if (friend?.push_token && friend.notif_messages !== false && !memberRow?.muted) {
+        sendPushNotification(friend.push_token, me?.prenom || 'Quelqu\'un', "t'a envoyé une publication", { type: 'message', conversationId: convId });
+      }
     } finally {
       setSendingToId(null);
     }
