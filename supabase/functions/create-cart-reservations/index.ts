@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const { prestation_id, date, heure_debut } = item
+        const { prestation_id, date, heure_debut, chien_id } = item
         if (!prestation_id || !date || !heure_debut) throw new Error('Champs manquants')
 
         const { data: prestation, error: prestaErr } = await supabaseAdmin
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
         const { data: reservation, error: insertErr } = await supabaseAdmin
           .from('reservations')
           .insert({
-            lieu_id, prestation_id, panier_id: panierId,
+            lieu_id, prestation_id, panier_id: panierId, chien_id: chien_id || null,
             user_id: caller.id, client_prenom, client_tel: client_tel || null, client_email: caller.email || null,
             date, heure_debut, heure_fin, statut: 'en_attente', statut_paiement: 'en_attente', montant_ht: prestation.prix,
           })

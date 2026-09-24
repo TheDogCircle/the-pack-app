@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
     const { data: { user: caller }, error: authErr } = await supabaseAdmin.auth.getUser(token)
     if (authErr || !caller) throw new Error('Non autorisé')
 
-    const { forfait_achete_id, prestation_id, date, heure_debut, client_prenom, client_tel } = await req.json()
+    const { forfait_achete_id, prestation_id, date, heure_debut, client_prenom, client_tel, chien_id } = await req.json()
     if (!forfait_achete_id || !prestation_id || !date || !heure_debut || !client_prenom) {
       throw new Error('Champs manquants')
     }
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     const { data: reservation, error: insertErr } = await supabaseAdmin
       .from('reservations')
       .insert({
-        lieu_id: achat.lieu_id, prestation_id, forfait_achete_id,
+        lieu_id: achat.lieu_id, prestation_id, forfait_achete_id, chien_id: chien_id || null,
         user_id: caller.id, client_prenom, client_tel: client_tel || null, client_email: caller.email || null,
         date, heure_debut, heure_fin, statut: 'en_attente', statut_paiement: 'forfait', montant_ht: 0,
       })

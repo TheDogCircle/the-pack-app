@@ -16,7 +16,8 @@ import type { RootStackParamList } from '../navigation';
 type Prestation = { id: string; nom: string; description: string | null; duree: number; prix: number };
 type BookingRoute = RouteProp<RootStackParamList, 'Booking'>;
 
-type CartItem = { key: string; prestation: Prestation; date: Date; slot: string };
+type CartItem = { key: string; prestation: Prestation; date: Date; slot: string; chienId: string | null };
+type Chien = { id: string; nom: string; race: string | null };
 
 type Forfait = { id: string; nom: string; nb_seances: number; prix: number; prestation_id: string | null; validite_jours: number | null };
 type ForfaitAchete = {
@@ -55,6 +56,11 @@ export default function BookingScreen() {
   const [mesForfaits, setMesForfaits] = useState<ForfaitAchete[]>([]);
   const [purchasingForfaitId, setPurchasingForfaitId] = useState<string | null>(null);
   const [usingForfait, setUsingForfait] = useState(false);
+  const [chiens, setChiens] = useState<Chien[]>([]);
+  const [selectedChienId, setSelectedChienId] = useState<string | null>(null);
+  const [showDevisForm, setShowDevisForm] = useState(false);
+  const [devisMessage, setDevisMessage] = useState('');
+  const [submittingDevis, setSubmittingDevis] = useState(false);
 
   const loadForfaits = useCallback(async () => {
     const [{ data: fs }, mesRes] = await Promise.all([
@@ -69,10 +75,11 @@ export default function BookingScreen() {
 
   useEffect(() => {
     (async () => {
-      const [{ data: prestas }, { data: dispos }, profilRes] = await Promise.all([
+      const [{ data: prestas }, { data: dispos }, profilRes, chiensRes] = await Promise.all([
         supabase.from('prestations').select('id,nom,description,duree,prix').eq('lieu_id', lieuId).eq('actif', true).order('prix'),
         supabase.from('disponibilites').select('jour,heure_debut,heure_fin').eq('lieu_id', lieuId),
         session ? supabase.from('profils').select('prenom, telephone').eq('id', session.user.id).maybeSingle() : Promise.resolve({ data: null }),
+        session ? supabase.from('chiens').select('id,nom,race').eq('user_id', session.user.id).order('created_at') : Promise.resolve({ data: [] }),
       ]);
       setPrestations(prestas || []);
       setSelectedPrestation((prestas && prestas[0]) || null);
@@ -80,6 +87,9 @@ export default function BookingScreen() {
       const profil = (profilRes as any)?.data;
       if (profil?.prenom) setPrenom(profil.prenom);
       if (profil?.telephone) setTel(profil.telephone);
+      const dogs = (chiensRes as any).data || [];
+      setChiens(dogs);
+      if (dogs.length === 1) setSelectedChienId(dogs[0].id);
       await loadForfaits();
       setLoading(false);
     })();
@@ -117,7 +127,7 @@ export default function BookingScreen() {
 
   function addToCart() {
     if (!selectedPrestation || !selectedSlot) return;
-    setCart(c => [...c, { key: `${Date.now()}-${Math.random()}`, prestation: selectedPrestation, date, slot: selectedSlot }]);
+    setCart(c => [...c, { key: `${Date.now()}-${Math.random()}`, prestation: selectedPrestation, date, slot: selectedSlot, chienId: selectedChienId }]);
     setSelectedSlot(null);
   }
 
@@ -171,6 +181,7 @@ export default function BookingScreen() {
           heure_debut: `${selectedSlot}:00`,
           client_prenom: prenom.trim(),
           client_tel: tel.trim() || undefined,
+          chien_id: selectedChienId,
         },
       });
       if (error) throw error;
@@ -188,8 +199,39 @@ export default function BookingScreen() {
     }
   }
 
+  async function handleSubmitDevis() {
+    if (!prenom.trim()) {
+      Alert.alert('Formulaire incomplet', 'Indique ton prénom.');
+      return;
+    }
+    setSubmittingDevis(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('submit-devis-request', {
+        body: {
+          lieu_id: lieuId,
+          client_prenom: prenom.trim(),
+          client_tel: tel.trim() || undefined,
+          chien_id: selectedChienId,
+          message: devisMessage.trim() || undefined,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      Alert.alert(
+        'Demande envoyée !',
+        'Le prestataire a été prévenu et te recontactera directement pour établir un devis.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || 'Impossible d\'envoyer la demande pour le moment.');
+    } finally {
+      setSubmittingDevis(false);
+    }
+  }
+
   const currentAsItem: CartItem | null = selectedPrestation && selectedSlot
-    ? { key: '__current__', prestation: selectedPrestation, date, slot: selectedSlot }
+    ? { key: '__current__', prestation: selectedPrestation, date, slot: selectedSlot, chienId: selectedChienId }
     : null;
   const allItems = currentAsItem ? [...cart, currentAsItem] : cart;
   const totalPrix = allItems.reduce((sum, i) => sum + Number(i.prestation.prix), 0);
@@ -210,6 +252,7 @@ export default function BookingScreen() {
             prestation_id: i.prestation.id,
             date: toDateStr(i.date),
             heure_debut: `${i.slot}:00`,
+            chien_id: i.chienId,
           })),
         },
       });
@@ -415,6 +458,25 @@ export default function BookingScreen() {
             </TouchableOpacity>
           )}
 
+          {chiens.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>Ton chien</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                {chiens.map(c => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.dogChip, selectedChienId === c.id && styles.dogChipActive]}
+                    onPress={() => setSelectedChienId(c.id)}
+                  >
+                    <Text style={[styles.dogChipText, selectedChienId === c.id && styles.dogChipTextActive]}>
+                      {c.nom}{c.race ? ` · ${c.race}` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
           <Text style={styles.sectionLabel}>Ton prénom</Text>
           <TextInput style={styles.input} value={prenom} onChangeText={setPrenom} placeholder="Prénom" placeholderTextColor={colors.textMuted} />
 
@@ -439,6 +501,40 @@ export default function BookingScreen() {
               ? <ActivityIndicator color={colors.ivory} />
               : <Text style={styles.submitBtnText}>{allItems.length > 1 ? `Envoyer les ${allItems.length} demandes` : 'Envoyer la demande'}</Text>}
           </TouchableOpacity>
+
+          <View style={styles.devisDivider}>
+            <View style={styles.devisDividerLine} />
+            <Text style={styles.devisDividerText}>ou</Text>
+            <View style={styles.devisDividerLine} />
+          </View>
+
+          {!showDevisForm ? (
+            <TouchableOpacity style={styles.devisToggleBtn} onPress={() => setShowDevisForm(true)}>
+              <Ionicons name="call-outline" size={16} color={colors.bordeaux} />
+              <Text style={styles.devisToggleBtnText}>Demander un devis (tarif à discuter par téléphone)</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.devisBox}>
+              <Text style={styles.sectionLabel}>Décris ta demande</Text>
+              <TextInput
+                style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                value={devisMessage}
+                onChangeText={setDevisMessage}
+                placeholder="Ex : promenades régulières en semaine, besoin d'un devis pour un forfait sur mesure…"
+                placeholderTextColor={colors.textMuted}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.submitBtn, { marginTop: 12 }, (!prenom.trim() || submittingDevis) && styles.submitBtnDisabled]}
+                disabled={!prenom.trim() || submittingDevis}
+                onPress={handleSubmitDevis}
+              >
+                {submittingDevis
+                  ? <ActivityIndicator color={colors.ivory} />
+                  : <Text style={styles.submitBtnText}>Envoyer la demande de devis</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
         </>
       )}
     </ScrollView>
@@ -497,6 +593,22 @@ const styles = StyleSheet.create({
   },
   buyBtn: { backgroundColor: colors.terra, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
   buyBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
+  dogChip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.white,
+  },
+  dogChipActive: { borderColor: colors.terra, backgroundColor: 'rgba(196,105,58,0.08)' },
+  dogChipText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMid },
+  dogChipTextActive: { color: colors.terra },
+  devisDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 4 },
+  devisDividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  devisDividerText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  devisToggleBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 12, paddingVertical: 13, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border,
+  },
+  devisToggleBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  devisBox: { marginTop: 12 },
   input: {
     backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
     padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,
