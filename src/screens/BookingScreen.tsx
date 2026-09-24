@@ -116,8 +116,8 @@ export default function BookingScreen() {
       }
 
       Alert.alert(
-        'Réservation confirmée !',
-        `Ton RDV du ${date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${selectedSlot} est payé et confirmé.`,
+        'Demande envoyée !',
+        `Ta demande pour le ${date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${selectedSlot} a été transmise au prestataire. Ta carte est autorisée mais pas encore débitée — tu ne paies que s'il confirme le créneau.`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (e: any) {
@@ -210,7 +210,7 @@ export default function BookingScreen() {
 
           {selectedPrestation && (
             <View style={styles.summaryBox}>
-              <Text style={styles.summaryLabel}>Total à payer</Text>
+              <Text style={styles.summaryLabel}>Montant (débité seulement si le prestataire confirme)</Text>
               <Text style={styles.summaryPrix}>{Number(selectedPrestation.prix).toFixed(2)} €</Text>
             </View>
           )}
@@ -220,7 +220,7 @@ export default function BookingScreen() {
             disabled={!selectedSlot || submitting}
             onPress={handleReserve}
           >
-            {submitting ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Réserver et payer</Text>}
+            {submitting ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Envoyer la demande</Text>}
           </TouchableOpacity>
         </>
       )}

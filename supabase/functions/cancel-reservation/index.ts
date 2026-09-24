@@ -52,6 +52,17 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Demande pas encore confirmee par le prestataire : la carte est seulement
+    // autorisee (capture_method: 'manual'), jamais debitee -- on annule
+    // l'autorisation plutot que de rembourser (rien n'a ete preleve).
+    if (resa.statut_paiement === 'en_attente') {
+      await stripe.paymentIntents.cancel(resa.stripe_payment_intent_id)
+      await supabaseAdmin.from('reservations').update({ statut: 'annulee', statut_paiement: 'echoue' }).eq('id', reservation_id)
+      return new Response(JSON.stringify({ cancelled: true, refunded: false }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
+
     if (resa.statut_paiement !== 'paye') {
       throw new Error('Le paiement de cette réservation n\'est pas encore confirmé')
     }

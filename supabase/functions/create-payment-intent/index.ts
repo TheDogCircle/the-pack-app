@@ -115,10 +115,17 @@ Deno.serve(async (req) => {
 
     let paymentIntent
     try {
+      // capture_method: 'manual' -- la carte est autorisee (montant bloque) mais
+      // jamais debitee a cette etape : la reservation reste une simple demande
+      // tant que le prestataire ne l'a pas confirmee (cf. confirm-reservation,
+      // qui declenche le capture reel). Sans confirmation sous quelques jours,
+      // l'autorisation expire automatiquement cote Stripe, rien n'est jamais
+      // preleve.
       paymentIntent = await stripe.paymentIntents.create({
         amount: amountCents,
         currency: 'eur',
         payment_method_types: ['card'],
+        capture_method: 'manual',
         application_fee_amount: commissionCents,
         transfer_data: { destination: lieu.stripe_account_id },
         metadata: { reservation_id: reservation.id, lieu_id, prestation_id },
