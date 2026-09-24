@@ -40,6 +40,26 @@ Deno.serve(async (req) => {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const pi = event.data.object as Stripe.PaymentIntent
+
+        // Achat de forfait (plusieurs seances) : rien a voir avec une ligne
+        // reservations existante, on cree directement le credit de seances.
+        if (pi.metadata?.kind === 'forfait_achat') {
+          const validiteJours = pi.metadata.validite_jours ? Number(pi.metadata.validite_jours) : null
+          const dateExpiration = validiteJours
+            ? new Date(Date.now() + validiteJours * 86_400_000).toISOString().slice(0, 10)
+            : null
+          await supabaseAdmin.from('forfaits_achetes').insert({
+            forfait_id: pi.metadata.forfait_id,
+            lieu_id: pi.metadata.lieu_id,
+            user_id: pi.metadata.user_id,
+            nb_seances_total: Number(pi.metadata.nb_seances),
+            prix_paye: Number(pi.metadata.prix),
+            stripe_payment_intent_id: pi.id,
+            date_expiration: dateExpiration,
+          })
+          break
+        }
+
         const commission = (pi.application_fee_amount ?? 0) / 100
 
         const { data: resa, error } = await supabaseAdmin

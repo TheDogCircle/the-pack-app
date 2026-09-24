@@ -18,6 +18,12 @@ type BookingRoute = RouteProp<RootStackParamList, 'Booking'>;
 
 type CartItem = { key: string; prestation: Prestation; date: Date; slot: string };
 
+type Forfait = { id: string; nom: string; nb_seances: number; prix: number; prestation_id: string | null; validite_jours: number | null };
+type ForfaitAchete = {
+  id: string; forfait_id: string; nb_seances_total: number; nb_seances_utilisees: number;
+  date_expiration: string | null; forfaits: { nom: string; prestation_id: string | null } | null;
+};
+
 function toDateStr(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -45,6 +51,21 @@ export default function BookingScreen() {
   const [tel, setTel] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [forfaits, setForfaits] = useState<Forfait[]>([]);
+  const [mesForfaits, setMesForfaits] = useState<ForfaitAchete[]>([]);
+  const [purchasingForfaitId, setPurchasingForfaitId] = useState<string | null>(null);
+  const [usingForfait, setUsingForfait] = useState(false);
+
+  const loadForfaits = useCallback(async () => {
+    const [{ data: fs }, mesRes] = await Promise.all([
+      supabase.from('forfaits').select('id,nom,nb_seances,prix,prestation_id,validite_jours').eq('lieu_id', lieuId).eq('actif', true),
+      session
+        ? supabase.from('forfaits_achetes').select('id,forfait_id,nb_seances_total,nb_seances_utilisees,date_expiration,forfaits(nom,prestation_id)').eq('lieu_id', lieuId).eq('user_id', session.user.id)
+        : Promise.resolve({ data: [] }),
+    ]);
+    setForfaits(fs || []);
+    setMesForfaits(((mesRes as any).data || []) as ForfaitAchete[]);
+  }, [lieuId, session]);
 
   useEffect(() => {
     (async () => {
@@ -59,9 +80,20 @@ export default function BookingScreen() {
       const profil = (profilRes as any)?.data;
       if (profil?.prenom) setPrenom(profil.prenom);
       if (profil?.telephone) setTel(profil.telephone);
+      await loadForfaits();
       setLoading(false);
     })();
   }, [lieuId]);
+
+  const today = toDateStr(new Date());
+  const creditsUtilisables = mesForfaits.filter(f => {
+    if (f.nb_seances_utilisees >= f.nb_seances_total) return false;
+    if (f.date_expiration && f.date_expiration < today) return false;
+    return true;
+  });
+  const matchingCredit = selectedPrestation
+    ? creditsUtilisables.find(f => !f.forfaits?.prestation_id || f.forfaits.prestation_id === selectedPrestation.id)
+    : null;
 
   const loadReservationsForDate = useCallback(async (d: Date) => {
     setSlotsLoading(true);
@@ -91,6 +123,69 @@ export default function BookingScreen() {
 
   function removeFromCart(key: string) {
     setCart(c => c.filter(i => i.key !== key));
+  }
+
+  async function purchaseForfait(forfait: Forfait) {
+    setPurchasingForfaitId(forfait.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('purchase-forfait', { body: { forfait_id: forfait.id } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const { error: initError } = await initPaymentSheet({
+        merchantDisplayName: 'The Pack La Meute',
+        paymentIntentClientSecret: data.client_secret,
+        defaultBillingDetails: { name: prenom.trim() || undefined },
+      });
+      if (initError) throw new Error(initError.message);
+
+      const { error: presentError } = await presentPaymentSheet();
+      if (presentError) {
+        if (presentError.code !== 'Canceled') Alert.alert('Paiement non abouti', presentError.message);
+        return;
+      }
+
+      Alert.alert('Forfait acheté !', `${forfait.nb_seances} séances créditées sur ton compte.`);
+      // La ligne forfaits_achetes est creee par le webhook Stripe, avec un
+      // leger delai apres la confirmation du paiement.
+      setTimeout(loadForfaits, 2500);
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || "Impossible de finaliser l'achat pour le moment.");
+    } finally {
+      setPurchasingForfaitId(null);
+    }
+  }
+
+  async function handleUseForfait() {
+    if (!matchingCredit || !selectedPrestation || !selectedSlot || !prenom.trim()) {
+      Alert.alert('Formulaire incomplet', 'Choisis une prestation, un créneau, et indique ton prénom.');
+      return;
+    }
+    setUsingForfait(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-forfait-reservation', {
+        body: {
+          forfait_achete_id: matchingCredit.id,
+          prestation_id: selectedPrestation.id,
+          date: toDateStr(date),
+          heure_debut: `${selectedSlot}:00`,
+          client_prenom: prenom.trim(),
+          client_tel: tel.trim() || undefined,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      Alert.alert(
+        'Demande envoyée !',
+        `Ta demande pour le ${date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${selectedSlot} a été transmise au prestataire (séance de ton forfait, aucun paiement supplémentaire).`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || 'Impossible de finaliser la réservation pour le moment.');
+    } finally {
+      setUsingForfait(false);
+    }
   }
 
   const currentAsItem: CartItem | null = selectedPrestation && selectedSlot
@@ -174,6 +269,48 @@ export default function BookingScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.lieuNom}>{lieuNom}</Text>
+
+      {creditsUtilisables.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Tes forfaits</Text>
+          <View style={{ gap: 8, marginBottom: 8 }}>
+            {creditsUtilisables.map(f => (
+              <View key={f.id} style={styles.creditItem}>
+                <Ionicons name="ticket-outline" size={16} color={colors.terra} />
+                <Text style={styles.creditItemText}>
+                  {f.forfaits?.nom || 'Forfait'} — {f.nb_seances_total - f.nb_seances_utilisees} séance{f.nb_seances_total - f.nb_seances_utilisees > 1 ? 's' : ''} restante{f.nb_seances_total - f.nb_seances_utilisees > 1 ? 's' : ''}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {forfaits.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Forfaits disponibles</Text>
+          <View style={{ gap: 8, marginBottom: 8 }}>
+            {forfaits.map(f => (
+              <View key={f.id} style={styles.forfaitCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.prestaNom}>{f.nom}</Text>
+                  <Text style={styles.prestaMeta}>{f.nb_seances} séances{f.validite_jours ? ` · valable ${f.validite_jours} jours` : ''}</Text>
+                </View>
+                <Text style={styles.prestaPrix}>{Number(f.prix).toFixed(0)} €</Text>
+                <TouchableOpacity
+                  style={styles.buyBtn}
+                  disabled={purchasingForfaitId === f.id}
+                  onPress={() => purchaseForfait(f)}
+                >
+                  {purchasingForfaitId === f.id
+                    ? <ActivityIndicator size="small" color={colors.terra} />
+                    : <Text style={styles.buyBtnText}>Acheter</Text>}
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
 
       {!prestations.length ? (
         <View style={styles.emptyBox}>
@@ -259,6 +396,18 @@ export default function BookingScreen() {
             </View>
           )}
 
+          {selectedSlot && matchingCredit && (
+            <TouchableOpacity
+              style={[styles.submitBtn, { marginTop: 12 }, usingForfait && styles.submitBtnDisabled]}
+              disabled={usingForfait}
+              onPress={handleUseForfait}
+            >
+              {usingForfait
+                ? <ActivityIndicator color={colors.ivory} />
+                : <Text style={styles.submitBtnText}>Utiliser mon forfait ({matchingCredit.nb_seances_total - matchingCredit.nb_seances_utilisees} restantes)</Text>}
+            </TouchableOpacity>
+          )}
+
           {selectedSlot && (
             <TouchableOpacity style={styles.addCartBtn} onPress={addToCart}>
               <Ionicons name="add-circle-outline" size={16} color={colors.terra} />
@@ -337,6 +486,17 @@ const styles = StyleSheet.create({
   cartItemNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   cartItemMeta: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
   cartItemRemove: { padding: 4 },
+  creditItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(196,105,58,0.08)', borderRadius: 10, padding: 12,
+  },
+  creditItemText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, flex: 1 },
+  forfaitCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+    backgroundColor: colors.white, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, padding: 14,
+  },
+  buyBtn: { backgroundColor: colors.terra, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
+  buyBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.ivory },
   input: {
     backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
     padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,

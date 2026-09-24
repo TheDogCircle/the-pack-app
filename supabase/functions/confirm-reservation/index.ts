@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, statut, statut_paiement, stripe_payment_intent_id, lieux(manager_user_id)')
+      .select('id, statut, statut_paiement, stripe_payment_intent_id, forfait_achete_id, lieux(manager_user_id)')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -45,6 +45,23 @@ Deno.serve(async (req) => {
     if (!managerUserId || managerUserId !== caller.id) throw new Error('Non autorisé sur cette réservation')
 
     if (resa.statut !== 'en_attente') throw new Error('Cette réservation ne peut plus être confirmée')
+
+    // Seance payee via un forfait deja achete : le credit n'est decompte qu'a
+    // la confirmation (pas a la demande), pour ne rien consommer si le
+    // prestataire refuse.
+    if (resa.forfait_achete_id) {
+      const { data: achat, error: achatErr } = await supabaseAdmin
+        .from('forfaits_achetes').select('nb_seances_total, nb_seances_utilisees').eq('id', resa.forfait_achete_id).maybeSingle()
+      if (achatErr) throw achatErr
+      if (!achat || achat.nb_seances_utilisees >= achat.nb_seances_total) {
+        throw new Error('Plus de séance disponible sur ce forfait')
+      }
+      await supabaseAdmin.from('forfaits_achetes').update({ nb_seances_utilisees: achat.nb_seances_utilisees + 1 }).eq('id', resa.forfait_achete_id)
+      await supabaseAdmin.from('reservations').update({ statut: 'confirmee' }).eq('id', reservation_id)
+      return new Response(JSON.stringify({ confirmed: true, captured: false }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
 
     // Reservation web historique, jamais liee a un paiement en ligne : simple
     // changement de statut, comme avant.
