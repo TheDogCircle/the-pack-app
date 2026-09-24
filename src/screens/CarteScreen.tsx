@@ -77,7 +77,7 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   hotel:       { icon: 'bed-outline',        markerIcon: 'bed',          label: 'Hôtel',         color: '#4A7FA5' },
   bar:           { icon: 'wine-outline',        markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
   concept_store: { icon: 'bag-handle-outline', markerIcon: 'bag-handle',   label: 'Concept Store', color: '#D4A853' },
-  educateur:     { icon: 'school-outline',     markerIcon: 'school',       label: 'Éducateur',     color: '#5B8DB8' },
+  educateur:     { icon: 'school-outline',     markerIcon: 'school',       label: 'Promeneur / Éducateur', color: '#5B8DB8' },
   promenade:     { icon: 'walk-outline',       markerIcon: 'walk',         label: 'Promenade',     color: '#8A9A5B' },
   autre:         { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
@@ -125,10 +125,8 @@ const CATEGORIES: { key: string | null; label: string; icon: IoniconsName }[] = 
   { key: 'boutique',   label: 'Boutiques',      icon: 'bag-outline' },
   { key: 'hotel',      label: 'Hôtels',         icon: 'bed-outline' },
   { key: 'bar',        label: 'Bars',           icon: 'wine-outline' },
+  { key: 'educateur',  label: 'Promeneurs & Éducateurs', icon: 'walk-outline' },
 ];
-// Le filtre "Éducateurs" n'est pas encore ajoute a la liste ci-dessus : a activer
-// une fois qu'on aura reellement des educateurs Pro/Premium sur la plateforme,
-// pour ne pas montrer une categorie vide.
 
 const MAIN_CATS = CATEGORIES.slice(0, 5);  // Tout, Parcs, Espaces canins, Vétos, Toilettage
 const AUTRES_CATS = CATEGORIES.slice(5);   // Restos, Cafés, Plages, Boutiques, Hôtels, Bars
