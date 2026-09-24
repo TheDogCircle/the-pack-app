@@ -57,18 +57,34 @@ Deno.serve(async (req) => {
     }
 
     // Le pro annulant rembourse toujours a 100% et ne garde pas sa commission.
-    // Le client beneficie de 100% si annulation >=24h avant le RDV, 50% sinon.
+    // Le client beneficie de 100% si annulation >=48h avant le RDV, 50% entre
+    // 24h et 48h, et 0% dans les dernieres 24h.
     // La date/heure du RDV n'a pas de fuseau explicite en base : on la traite
     // en UTC, precision suffisante pour un seuil exprime en heures pleines.
     let refundPercent = 1
     if (isClient) {
       const rdvDate = new Date(`${resa.date}T${resa.heure_debut}Z`)
       const hoursUntil = (rdvDate.getTime() - Date.now()) / 3_600_000
-      refundPercent = hoursUntil >= 24 ? 1 : 0.5
+      refundPercent = hoursUntil >= 48 ? 1 : hoursUntil >= 24 ? 0.5 : 0
     }
 
     const totalCents = Math.round(Number(resa.montant_ht) * 100)
     const refundAmountCents = Math.round(totalCents * refundPercent)
+
+    // Stripe refuse un remboursement de montant nul (annulation client <24h) :
+    // on annule simplement la reservation sans toucher au paiement.
+    if (refundAmountCents === 0) {
+      await supabaseAdmin
+        .from('reservations')
+        .update({ statut: 'annulee', montant_rembourse: 0 })
+        .eq('id', reservation_id)
+
+      return new Response(JSON.stringify({
+        cancelled: true, refunded: false, montant_rembourse: 0, refund_percent: 0,
+      }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
 
     // refund_application_fee : Stripe rembourse automatiquement une part de la
     // commission proportionnelle au montant rembourse — jamais la commission
