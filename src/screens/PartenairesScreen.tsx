@@ -39,6 +39,7 @@ type Partenaire = {
   id: string; nom: string; description: string | null;
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
   instagram_url: string | null; tiktok_url: string | null;
+  categorie: string | null; lieu_id: string | null;
 };
 
 const SECTEURS = [
@@ -478,6 +479,34 @@ function BrandCard({
   );
 }
 
+// ── Prestataire card (promeneur / éducateur) ─────────────────────────────────
+
+function PrestataireCard({
+  partenaire, ville, cardWidth, onPress,
+}: {
+  partenaire: Partenaire; ville: string | null; cardWidth: number; onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={[s.card, { width: cardWidth }]} onPress={onPress} activeOpacity={0.88}>
+      <View style={s.cardCover}>
+        <View style={s.cardLogo}>
+          {partenaire.logo_url
+            ? <Image source={{ uri: partenaire.logo_url }} style={s.cardLogoImg} resizeMode="contain" />
+            : <Text style={s.cardLogoFallback}>{partenaire.nom[0]}</Text>}
+        </View>
+      </View>
+      <View style={s.cardBody}>
+        <Text style={s.cardName} numberOfLines={1}>{partenaire.nom}</Text>
+        {ville ? <Text style={s.cardDesc} numberOfLines={1}>📍 {ville}</Text> : null}
+        <View style={s.cardArrow}>
+          <Text style={s.cardArrowText}>Réserver</Text>
+          <Ionicons name="arrow-forward" size={12} color={colors.terra} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ── Actualité card (horizontal scroll) ──────────────────────────────────────
 
 function ActuCard({
@@ -530,6 +559,8 @@ export default function PartenairesScreen() {
   const [selectedBrand, setSelectedBrand] = useState<Partenaire | null>(null);
   const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
   const [showCandidature, setShowCandidature] = useState(false);
+  const [macroTab, setMacroTab] = useState<'marques' | 'prestataires'>('marques');
+  const [prestataireVilles, setPrestataireVilles] = useState<Record<string, string>>({});
 
   useEffect(() => { init(); }, [session?.user?.id]);
 
@@ -599,6 +630,17 @@ export default function PartenairesScreen() {
     });
     setPartenaires(parts);
     setAllPosts(visiblePosts);
+
+    // Prestataires (promeneurs/educateurs mobiles) : leur fiche lieux est actif:false
+    // (jamais epinglee sur la carte), donc on va chercher leur ville separement plutot
+    // que de lever le filtre actif=eq.true utilise partout ailleurs sur la carte.
+    const prestaLieuIds = (parts as any[]).filter(p => p.categorie === 'education_promenade' && p.lieu_id).map(p => p.lieu_id);
+    if (prestaLieuIds.length) {
+      const { data: lieuxData } = await supabase.from('lieux').select('id,ville').in('id', prestaLieuIds);
+      const villes: Record<string, string> = {};
+      (lieuxData || []).forEach((l: any) => { if (l.ville) villes[l.id] = l.ville; });
+      setPrestataireVilles(villes);
+    }
     setLoading(false);
   }
 
@@ -606,6 +648,9 @@ export default function PartenairesScreen() {
   const cardWidth = (width - 28 * 2 - cardGap) / 2;
 
   const postsFor = useCallback((id: string) => allPosts.filter(p => p.partenaire_id === id), [allPosts]);
+
+  const marques = useMemo(() => partenaires.filter(p => p.categorie !== 'education_promenade'), [partenaires]);
+  const prestataires = useMemo(() => partenaires.filter(p => p.categorie === 'education_promenade' && p.lieu_id), [partenaires]);
 
   // allPosts is already sorted created_at desc (see load()), so keeping only the
   // first occurrence per brand gives its most recent post — max 1 card/brand in the carousel.
@@ -642,9 +687,10 @@ export default function PartenairesScreen() {
   }
 
   // Build 2-column rows
+  const currentList = macroTab === 'marques' ? marques : prestataires;
   const rows: Partenaire[][] = [];
-  for (let i = 0; i < partenaires.length; i += 2) {
-    rows.push(partenaires.slice(i, i + 2));
+  for (let i = 0; i < currentList.length; i += 2) {
+    rows.push(currentList.slice(i, i + 2));
   }
 
   return (
@@ -661,7 +707,24 @@ export default function PartenairesScreen() {
           <Text style={s.headerSub}>Des marques dog-friendly sélectionnées pour la meute</Text>
         </View>
 
-        {latestPostByBrand.length > 0 ? (
+        {prestataires.length > 0 ? (
+          <View style={s.macroTabRow}>
+            <TouchableOpacity
+              style={[s.macroTabBtn, macroTab === 'marques' && s.macroTabBtnActive]}
+              onPress={() => setMacroTab('marques')}
+            >
+              <Text style={[s.macroTabBtnText, macroTab === 'marques' && s.macroTabBtnTextActive]}>Marques</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.macroTabBtn, macroTab === 'prestataires' && s.macroTabBtnActive]}
+              onPress={() => setMacroTab('prestataires')}
+            >
+              <Text style={[s.macroTabBtnText, macroTab === 'prestataires' && s.macroTabBtnTextActive]}>Promeneurs &amp; Éducateurs</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {macroTab === 'marques' && latestPostByBrand.length > 0 ? (
           <View style={s.actuSection}>
             <Text style={s.actuSectionTitle}>Actualités du moment</Text>
             <ScrollView
@@ -685,33 +748,55 @@ export default function PartenairesScreen() {
           </View>
         ) : null}
 
-        <Text style={s.gridSectionTitle}>Toutes les marques</Text>
+        <Text style={s.gridSectionTitle}>{macroTab === 'marques' ? 'Toutes les marques' : 'Promeneurs & éducateurs'}</Text>
         <View style={s.grid}>
           {rows.map((row, ri) => (
             <View key={ri} style={[s.row, { gap: cardGap }]}>
               {row.map(p => (
-                <BrandCard
-                  key={p.id}
-                  partenaire={p}
-                  posts={postsFor(p.id)}
-                  cardWidth={cardWidth}
-                  onPress={() => setSelectedBrand(p)}
-                />
+                macroTab === 'marques' ? (
+                  <BrandCard
+                    key={p.id}
+                    partenaire={p}
+                    posts={postsFor(p.id)}
+                    cardWidth={cardWidth}
+                    onPress={() => setSelectedBrand(p)}
+                  />
+                ) : (
+                  <PrestataireCard
+                    key={p.id}
+                    partenaire={p}
+                    ville={p.lieu_id ? prestataireVilles[p.lieu_id] || null : null}
+                    cardWidth={cardWidth}
+                    onPress={() => navigation.navigate('Booking', { lieuId: p.lieu_id, lieuNom: p.nom })}
+                  />
+                )
               ))}
             </View>
           ))}
         </View>
 
-        {/* CTA marques */}
-        <View style={s.brandCta}>
-          <Ionicons name="storefront-outline" size={28} color={colors.terra} />
-          <Text style={s.brandCtaTitle}>Vous êtes une marque dog-friendly ?</Text>
-          <Text style={s.brandCtaText}>Rejoignez nos partenaires et partagez vos offres avec toute la communauté.</Text>
-          <TouchableOpacity style={s.brandCtaBtn} onPress={() => setShowCandidature(true)}>
-            <Text style={s.brandCtaBtnLabel}>Postuler comme partenaire</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
-          </TouchableOpacity>
-        </View>
+        {/* CTA */}
+        {macroTab === 'marques' ? (
+          <View style={s.brandCta}>
+            <Ionicons name="storefront-outline" size={28} color={colors.terra} />
+            <Text style={s.brandCtaTitle}>Vous êtes une marque dog-friendly ?</Text>
+            <Text style={s.brandCtaText}>Rejoignez nos partenaires et partagez vos offres avec toute la communauté.</Text>
+            <TouchableOpacity style={s.brandCtaBtn} onPress={() => setShowCandidature(true)}>
+              <Text style={s.brandCtaBtnLabel}>Postuler comme partenaire</Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={s.brandCta}>
+            <Ionicons name="paw-outline" size={28} color={colors.terra} />
+            <Text style={s.brandCtaTitle}>Vous êtes promeneur ou éducateur canin ?</Text>
+            <Text style={s.brandCtaText}>Référencez-vous avec vos certifications (ACACED, assurance RC Pro…) et recevez des réservations.</Text>
+            <TouchableOpacity style={s.brandCtaBtn} onPress={() => Linking.openURL('https://thepacklameute.fr/pro-auth?add=prestataire')}>
+              <Text style={s.brandCtaBtnLabel}>Devenir prestataire</Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       <BrandModal
@@ -741,6 +826,18 @@ const s = StyleSheet.create({
   header: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 16 },
   headerTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux, marginBottom: 3 },
   headerSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+
+  macroTabRow: {
+    flexDirection: 'row', gap: 6, marginHorizontal: 28, marginBottom: 16,
+    backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 4, alignSelf: 'flex-start',
+  },
+  macroTabBtn: { borderRadius: 7, paddingHorizontal: 16, paddingVertical: 8 },
+  macroTabBtnActive: {
+    backgroundColor: colors.white,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 1,
+  },
+  macroTabBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  macroTabBtnTextActive: { color: colors.bordeaux },
 
   // Grid
   grid: { paddingHorizontal: 28, gap: 12 },
