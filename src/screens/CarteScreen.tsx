@@ -2812,7 +2812,16 @@ export default function CarteScreen() {
                   {!selectedLieu.ferme && selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
                     <TouchableOpacity
                       style={styles.actionReserver}
-                      onPress={() => navigation.navigate('Booking', { lieuId: selectedLieu.id, lieuNom: selectedLieu.nom })}
+                      onPress={() => {
+                        // La fiche est un <Modal> natif (fenetre au-dessus de toute la nav
+                        // sur iOS) : la fermer via l'animation de closeFiche() est trop
+                        // lent, l'ecran Booking pousse par le navigateur resterait cache
+                        // derriere pendant la transition. On demonte le Modal tout de
+                        // suite (sans l'animation de fermeture) avant de naviguer.
+                        const lieuId = selectedLieu.id, lieuNom = selectedLieu.nom;
+                        setSelectedLieu(null);
+                        navigation.navigate('Booking', { lieuId, lieuNom });
+                      }}
                     >
                       <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
                       <Text style={styles.actionSecondaryText} numberOfLines={1}>Réserver</Text>

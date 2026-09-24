@@ -41,6 +41,12 @@ type Partenaire = {
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
   instagram_url: string | null; tiktok_url: string | null;
   categorie: string | null; lieu_id: string | null;
+  type_service: string[] | null;
+};
+
+const TYPE_SERVICE_LABELS: Record<string, string> = {
+  promenade_solo: 'Promenade solo', promenade_collective: 'Promenade groupe',
+  garde_domicile: 'Garde à domicile', education: 'Éducation', comportementaliste: 'Comportementaliste',
 };
 
 const SECTEURS = [
@@ -488,6 +494,7 @@ function PrestataireCard({
   partenaire: Partenaire; ville: string | null; distanceKm: number | null; cardWidth: number; onPress: () => void;
 }) {
   const distLabel = distanceKm !== null ? ` · à ${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}` : '';
+  const services = (partenaire.type_service || []).map(t => TYPE_SERVICE_LABELS[t] || t);
   return (
     <TouchableOpacity style={[s.card, { width: cardWidth }]} onPress={onPress} activeOpacity={0.88}>
       <View style={s.cardCover}>
@@ -500,6 +507,13 @@ function PrestataireCard({
       <View style={s.cardBody}>
         <Text style={s.cardName} numberOfLines={1}>{partenaire.nom}</Text>
         {ville ? <Text style={s.cardDesc} numberOfLines={1}>📍 {ville}{distLabel}</Text> : null}
+        {services.length ? (
+          <View style={s.serviceBadgeRow}>
+            {services.map(sv => (
+              <View key={sv} style={s.serviceBadge}><Text style={s.serviceBadgeText} numberOfLines={1}>{sv}</Text></View>
+            ))}
+          </View>
+        ) : null}
         <View style={s.cardArrow}>
           <Text style={s.cardArrowText}>Réserver</Text>
           <Ionicons name="arrow-forward" size={12} color={colors.terra} />
@@ -562,6 +576,7 @@ export default function PartenairesScreen() {
   const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
   const [showCandidature, setShowCandidature] = useState(false);
   const [macroTab, setMacroTab] = useState<'marques' | 'prestataires'>('marques');
+  const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [prestataireVilles, setPrestataireVilles] = useState<Record<string, string>>({});
   const [prestataireCoords, setPrestataireCoords] = useState<Record<string, { lat: number; lng: number }>>({});
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -679,7 +694,7 @@ export default function PartenairesScreen() {
   const postsFor = useCallback((id: string) => allPosts.filter(p => p.partenaire_id === id), [allPosts]);
 
   const marques = useMemo(() => partenaires.filter(p => p.categorie !== 'education_promenade'), [partenaires]);
-  const prestataires = useMemo(() => {
+  const prestatairesAll = useMemo(() => {
     const list = partenaires.filter(p => p.categorie === 'education_promenade' && p.lieu_id);
     if (!userCoords) return list;
     // Ceux sans coordonnees (geocodage de la ville echoue a l'inscription)
@@ -693,6 +708,14 @@ export default function PartenairesScreen() {
       return da - db;
     });
   }, [partenaires, userCoords, prestataireCoords]);
+  const presentServices = useMemo(
+    () => [...new Set(prestatairesAll.flatMap(p => p.type_service || []))],
+    [prestatairesAll],
+  );
+  const prestataires = useMemo(
+    () => serviceFilter ? prestatairesAll.filter(p => (p.type_service || []).includes(serviceFilter)) : prestatairesAll,
+    [prestatairesAll, serviceFilter],
+  );
 
   // allPosts is already sorted created_at desc (see load()), so keeping only the
   // first occurrence per brand gives its most recent post — max 1 card/brand in the carousel.
@@ -763,6 +786,26 @@ export default function PartenairesScreen() {
             >
               <Text style={[s.macroTabBtnText, macroTab === 'prestataires' && s.macroTabBtnTextActive]}>Promeneurs &amp; Éducateurs</Text>
             </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {macroTab === 'prestataires' && presentServices.length > 1 ? (
+          <View style={s.serviceFilterRow}>
+            <TouchableOpacity
+              style={[s.serviceFilterChip, serviceFilter === null && s.serviceFilterChipActive]}
+              onPress={() => setServiceFilter(null)}
+            >
+              <Text style={[s.serviceFilterChipText, serviceFilter === null && s.serviceFilterChipTextActive]}>Tout</Text>
+            </TouchableOpacity>
+            {presentServices.map(t => (
+              <TouchableOpacity
+                key={t}
+                style={[s.serviceFilterChip, serviceFilter === t && s.serviceFilterChipActive]}
+                onPress={() => setServiceFilter(t)}
+              >
+                <Text style={[s.serviceFilterChipText, serviceFilter === t && s.serviceFilterChipTextActive]}>{TYPE_SERVICE_LABELS[t] || t}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         ) : null}
 
@@ -881,6 +924,19 @@ const s = StyleSheet.create({
   },
   macroTabBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
   macroTabBtnTextActive: { color: colors.bordeaux },
+
+  serviceFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginHorizontal: 28, marginBottom: 16 },
+  serviceFilterChip: {
+    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white,
+  },
+  serviceFilterChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  serviceFilterChipText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMid },
+  serviceFilterChipTextActive: { color: colors.ivory },
+
+  serviceBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 },
+  serviceBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(61,26,26,0.06)' },
+  serviceBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.bordeaux },
 
   // Grid
   grid: { paddingHorizontal: 28, gap: 12 },
