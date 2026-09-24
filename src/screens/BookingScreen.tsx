@@ -231,9 +231,9 @@ export default function BookingScreen() {
             <DateTimePicker
               value={date}
               mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              display={Platform.OS === 'ios' ? 'inline' : 'default'}
               minimumDate={new Date()}
-              onChange={(_, d) => { setShowDatePicker(Platform.OS === 'ios'); if (d) setDate(d); }}
+              onChange={(_, d) => { setShowDatePicker(false); if (d) setDate(d); }}
             />
           )}
 
