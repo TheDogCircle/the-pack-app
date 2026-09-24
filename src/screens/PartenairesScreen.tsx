@@ -6,6 +6,7 @@ import {
   Alert, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, trackEvent } from '../lib/supabase';
@@ -482,10 +483,11 @@ function BrandCard({
 // ── Prestataire card (promeneur / éducateur) ─────────────────────────────────
 
 function PrestataireCard({
-  partenaire, ville, cardWidth, onPress,
+  partenaire, ville, distanceKm, cardWidth, onPress,
 }: {
-  partenaire: Partenaire; ville: string | null; cardWidth: number; onPress: () => void;
+  partenaire: Partenaire; ville: string | null; distanceKm: number | null; cardWidth: number; onPress: () => void;
 }) {
+  const distLabel = distanceKm !== null ? ` · à ${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}` : '';
   return (
     <TouchableOpacity style={[s.card, { width: cardWidth }]} onPress={onPress} activeOpacity={0.88}>
       <View style={s.cardCover}>
@@ -497,7 +499,7 @@ function PrestataireCard({
       </View>
       <View style={s.cardBody}>
         <Text style={s.cardName} numberOfLines={1}>{partenaire.nom}</Text>
-        {ville ? <Text style={s.cardDesc} numberOfLines={1}>📍 {ville}</Text> : null}
+        {ville ? <Text style={s.cardDesc} numberOfLines={1}>📍 {ville}{distLabel}</Text> : null}
         <View style={s.cardArrow}>
           <Text style={s.cardArrowText}>Réserver</Text>
           <Ionicons name="arrow-forward" size={12} color={colors.terra} />
@@ -561,6 +563,8 @@ export default function PartenairesScreen() {
   const [showCandidature, setShowCandidature] = useState(false);
   const [macroTab, setMacroTab] = useState<'marques' | 'prestataires'>('marques');
   const [prestataireVilles, setPrestataireVilles] = useState<Record<string, string>>({});
+  const [prestataireCoords, setPrestataireCoords] = useState<Record<string, { lat: number; lng: number }>>({});
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => { init(); }, [session?.user?.id]);
 
@@ -636,12 +640,37 @@ export default function PartenairesScreen() {
     // que de lever le filtre actif=eq.true utilise partout ailleurs sur la carte.
     const prestaLieuIds = (parts as any[]).filter(p => p.categorie === 'education_promenade' && p.lieu_id).map(p => p.lieu_id);
     if (prestaLieuIds.length) {
-      const { data: lieuxData } = await supabase.from('lieux').select('id,ville').in('id', prestaLieuIds);
+      const { data: lieuxData } = await supabase.from('lieux').select('id,ville,lat,lng').in('id', prestaLieuIds);
       const villes: Record<string, string> = {};
-      (lieuxData || []).forEach((l: any) => { if (l.ville) villes[l.id] = l.ville; });
+      const coords: Record<string, { lat: number; lng: number }> = {};
+      (lieuxData || []).forEach((l: any) => {
+        if (l.ville) villes[l.id] = l.ville;
+        if (l.lat && l.lng) coords[l.id] = { lat: l.lat, lng: l.lng };
+      });
       setPrestataireVilles(villes);
+      setPrestataireCoords(coords);
+      locateUserForSort();
     }
     setLoading(false);
+  }
+
+  // Distance a vol d'oiseau (haversine, km) pour trier les prestataires par
+  // proximite. Echec/refus de localisation = liste non triee (ordre par
+  // defaut), pas d'erreur bloquante.
+  function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180, dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  async function locateUserForSort() {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const loc = await Location.getCurrentPositionAsync({});
+      setUserCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+    } catch (_) { /* localisation indisponible : tri par proximite desactive, pas d'erreur affichee */ }
   }
 
   const cardGap = 12;
@@ -650,7 +679,20 @@ export default function PartenairesScreen() {
   const postsFor = useCallback((id: string) => allPosts.filter(p => p.partenaire_id === id), [allPosts]);
 
   const marques = useMemo(() => partenaires.filter(p => p.categorie !== 'education_promenade'), [partenaires]);
-  const prestataires = useMemo(() => partenaires.filter(p => p.categorie === 'education_promenade' && p.lieu_id), [partenaires]);
+  const prestataires = useMemo(() => {
+    const list = partenaires.filter(p => p.categorie === 'education_promenade' && p.lieu_id);
+    if (!userCoords) return list;
+    // Ceux sans coordonnees (geocodage de la ville echoue a l'inscription)
+    // passent en fin de liste plutot que d'etre masques.
+    return [...list].sort((a, b) => {
+      const da = a.lieu_id && prestataireCoords[a.lieu_id] ? distanceKm(userCoords.lat, userCoords.lng, prestataireCoords[a.lieu_id].lat, prestataireCoords[a.lieu_id].lng) : null;
+      const db = b.lieu_id && prestataireCoords[b.lieu_id] ? distanceKm(userCoords.lat, userCoords.lng, prestataireCoords[b.lieu_id].lat, prestataireCoords[b.lieu_id].lng) : null;
+      if (da === null && db === null) return 0;
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da - db;
+    });
+  }, [partenaires, userCoords, prestataireCoords]);
 
   // allPosts is already sorted created_at desc (see load()), so keeping only the
   // first occurrence per brand gives its most recent post — max 1 card/brand in the carousel.
@@ -766,6 +808,7 @@ export default function PartenairesScreen() {
                     key={p.id}
                     partenaire={p}
                     ville={p.lieu_id ? prestataireVilles[p.lieu_id] || null : null}
+                    distanceKm={p.lieu_id && userCoords && prestataireCoords[p.lieu_id] ? distanceKm(userCoords.lat, userCoords.lng, prestataireCoords[p.lieu_id].lat, prestataireCoords[p.lieu_id].lng) : null}
                     cardWidth={cardWidth}
                     onPress={() => navigation.navigate('Booking', { lieuId: p.lieu_id, lieuNom: p.nom })}
                   />
