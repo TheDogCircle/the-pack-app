@@ -16,6 +16,8 @@ import type { RootStackParamList } from '../navigation';
 type Prestation = { id: string; nom: string; description: string | null; duree: number; prix: number };
 type BookingRoute = RouteProp<RootStackParamList, 'Booking'>;
 
+type CartItem = { key: string; prestation: Prestation; date: Date; slot: string };
+
 function toDateStr(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -42,6 +44,7 @@ export default function BookingScreen() {
   const [prenom, setPrenom] = useState('');
   const [tel, setTel] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [cart, setCart] = useState<CartItem[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -80,21 +83,39 @@ export default function BookingScreen() {
     ? computeSlots(toDateStr(date), selectedPrestation.duree, disponibilites, reservations)
     : [];
 
+  function addToCart() {
+    if (!selectedPrestation || !selectedSlot) return;
+    setCart(c => [...c, { key: `${Date.now()}-${Math.random()}`, prestation: selectedPrestation, date, slot: selectedSlot }]);
+    setSelectedSlot(null);
+  }
+
+  function removeFromCart(key: string) {
+    setCart(c => c.filter(i => i.key !== key));
+  }
+
+  const currentAsItem: CartItem | null = selectedPrestation && selectedSlot
+    ? { key: '__current__', prestation: selectedPrestation, date, slot: selectedSlot }
+    : null;
+  const allItems = currentAsItem ? [...cart, currentAsItem] : cart;
+  const totalPrix = allItems.reduce((sum, i) => sum + Number(i.prestation.prix), 0);
+
   async function handleReserve() {
-    if (!selectedPrestation || !selectedSlot || !prenom.trim()) {
-      Alert.alert('Formulaire incomplet', 'Choisis une prestation, un créneau, et indique ton prénom.');
+    if (!allItems.length || !prenom.trim()) {
+      Alert.alert('Formulaire incomplet', 'Choisis au moins une prestation et un créneau, et indique ton prénom.');
       return;
     }
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('create-payment-intent', {
+      const { data, error } = await supabase.functions.invoke('create-cart-reservations', {
         body: {
           lieu_id: lieuId,
-          prestation_id: selectedPrestation.id,
-          date: toDateStr(date),
-          heure_debut: `${selectedSlot}:00`,
           client_prenom: prenom.trim(),
           client_tel: tel.trim() || undefined,
+          items: allItems.map(i => ({
+            prestation_id: i.prestation.id,
+            date: toDateStr(i.date),
+            heure_debut: `${i.slot}:00`,
+          })),
         },
       });
       if (error) throw error;
@@ -102,7 +123,7 @@ export default function BookingScreen() {
 
       const { error: initError } = await initPaymentSheet({
         merchantDisplayName: 'The Pack La Meute',
-        paymentIntentClientSecret: data.client_secret,
+        paymentIntentClientSecret: data.first.client_secret,
         defaultBillingDetails: { name: prenom.trim() },
       });
       if (initError) throw new Error(initError.message);
@@ -115,11 +136,26 @@ export default function BookingScreen() {
         return;
       }
 
-      Alert.alert(
-        'Demande envoyée !',
-        `Ta demande pour le ${date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${selectedSlot} a été transmise au prestataire. Ta carte est autorisée mais pas encore débitée — tu ne paies que s'il confirme le créneau.`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      let finalizeFailed: { reservation_id: string; error: string }[] = [];
+      if (data.pending_reservation_ids?.length) {
+        const { data: finalizeData, error: finalizeError } = await supabase.functions.invoke('finalize-cart-payments', {
+          body: { first_reservation_id: data.first.reservation_id, pending_reservation_ids: data.pending_reservation_ids },
+        });
+        if (!finalizeError && !finalizeData?.error) {
+          finalizeFailed = finalizeData?.failed || [];
+        }
+      }
+
+      const totalRequested = allItems.length;
+      const preFailed = data.failed?.length || 0;
+      const totalFailed = preFailed + finalizeFailed.length;
+      const totalOk = totalRequested - totalFailed;
+
+      const summary = totalFailed === 0
+        ? `Tes ${totalRequested > 1 ? `${totalRequested} demandes ont` : 'demande a'} été transmises au prestataire. Ta carte est autorisée mais pas encore débitée — tu ne paies que s'il confirme chaque créneau.`
+        : `${totalOk}/${totalRequested} demande(s) transmise(s) au prestataire. ${totalFailed} n'ont pas pu être envoyées (créneau indisponible entre-temps ou problème de paiement).`;
+
+      Alert.alert('Demande envoyée !', summary, [{ text: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
       Alert.alert('Erreur', e.message || 'Impossible de finaliser la réservation pour le moment.');
     } finally {
@@ -145,7 +181,28 @@ export default function BookingScreen() {
         </View>
       ) : (
         <>
-          <Text style={styles.sectionLabel}>Prestation</Text>
+          {cart.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>Panier ({cart.length})</Text>
+              <View style={{ gap: 8, marginBottom: 8 }}>
+                {cart.map(item => (
+                  <View key={item.key} style={styles.cartItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cartItemNom}>{item.prestation.nom}</Text>
+                      <Text style={styles.cartItemMeta}>
+                        {item.date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} à {item.slot} · {Number(item.prestation.prix).toFixed(0)} €
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => removeFromCart(item.key)} style={styles.cartItemRemove}>
+                      <Ionicons name="close" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          <Text style={styles.sectionLabel}>{cart.length > 0 ? 'Ajouter une autre prestation' : 'Prestation'}</Text>
           <View style={{ gap: 8 }}>
             {prestations.map((p) => (
               <TouchableOpacity
@@ -202,25 +259,36 @@ export default function BookingScreen() {
             </View>
           )}
 
+          {selectedSlot && (
+            <TouchableOpacity style={styles.addCartBtn} onPress={addToCart}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.terra} />
+              <Text style={styles.addCartBtnText}>Ajouter au panier et réserver une autre prestation</Text>
+            </TouchableOpacity>
+          )}
+
           <Text style={styles.sectionLabel}>Ton prénom</Text>
           <TextInput style={styles.input} value={prenom} onChangeText={setPrenom} placeholder="Prénom" placeholderTextColor={colors.textMuted} />
 
           <Text style={styles.sectionLabel}>Téléphone (optionnel)</Text>
           <TextInput style={styles.input} value={tel} onChangeText={setTel} placeholder="06…" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" />
 
-          {selectedPrestation && (
+          {allItems.length > 0 && (
             <View style={styles.summaryBox}>
-              <Text style={styles.summaryLabel}>Montant (débité seulement si le prestataire confirme)</Text>
-              <Text style={styles.summaryPrix}>{Number(selectedPrestation.prix).toFixed(2)} €</Text>
+              <Text style={styles.summaryLabel}>
+                {allItems.length > 1 ? `Total ${allItems.length} prestations (débité seulement si confirmées)` : 'Montant (débité seulement si le prestataire confirme)'}
+              </Text>
+              <Text style={styles.summaryPrix}>{totalPrix.toFixed(2)} €</Text>
             </View>
           )}
 
           <TouchableOpacity
-            style={[styles.submitBtn, (!selectedSlot || submitting) && styles.submitBtnDisabled]}
-            disabled={!selectedSlot || submitting}
+            style={[styles.submitBtn, (!allItems.length || submitting) && styles.submitBtnDisabled]}
+            disabled={!allItems.length || submitting}
             onPress={handleReserve}
           >
-            {submitting ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.submitBtnText}>Envoyer la demande</Text>}
+            {submitting
+              ? <ActivityIndicator color={colors.ivory} />
+              : <Text style={styles.submitBtnText}>{allItems.length > 1 ? `Envoyer les ${allItems.length} demandes` : 'Envoyer la demande'}</Text>}
           </TouchableOpacity>
         </>
       )}
@@ -257,6 +325,18 @@ const styles = StyleSheet.create({
   slotText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.bordeaux },
   slotTextActive: { color: colors.ivory, fontFamily: 'DMSans_500Medium' },
   slotTextDisabled: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  addCartBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    marginTop: 12, paddingVertical: 8, paddingHorizontal: 4,
+  },
+  addCartBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  cartItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12,
+  },
+  cartItemNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  cartItemMeta: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  cartItemRemove: { padding: 4 },
   input: {
     backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
     padding: 12, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux,
@@ -265,7 +345,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginTop: 24, padding: 16, backgroundColor: 'rgba(196,105,58,0.08)', borderRadius: 12,
   },
-  summaryLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
+  summaryLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux, flex: 1, marginRight: 8 },
   summaryPrix: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.terra },
   submitBtn: {
     marginTop: 16, backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 15,
