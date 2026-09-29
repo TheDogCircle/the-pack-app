@@ -1126,10 +1126,10 @@ export default function CarteScreen() {
     const recent: DiscoverLieu[] = (rRecent.data || []) as DiscoverLieu[];
     const nearby = nearbyRaw.slice(0, 15);
 
-    // Educateurs : uniquement les plans pro/premium (reservation en ligne active), tries
+    // Educateurs : uniquement les plans avec reservation en ligne active, tries
     // par distance si on a la position, sinon par note.
     let educateursRaw: DiscoverLieu[] = ((rEducateurs.data || []) as any[])
-      .filter(l => ['pro', 'premium'].includes(l.plan)) as DiscoverLieu[];
+      .filter(l => ['essentiel', 'pro', 'premium', 'gestion', 'visibilite'].includes(l.plan)) as DiscoverLieu[];
     if (userLat && userLng) {
       educateursRaw = educateursRaw
         .map(l => ({ ...l, distance: l.lat && l.lng ? haversine(userLat!, userLng!, l.lat, l.lng) : undefined }))
@@ -2841,7 +2841,7 @@ export default function CarteScreen() {
                     <Ionicons name="navigate" size={16} color={colors.ivory} />
                     <Text style={styles.actionPrimaryText}>Itinéraire</Text>
                   </TouchableOpacity>
-                  {!selectedLieu.ferme && selectedLieu.cat === 'educateur' && ['pro', 'premium'].includes(selectedLieu.plan || '') ? (
+                  {!selectedLieu.ferme && selectedLieu.cat === 'educateur' && ['essentiel', 'pro', 'premium', 'gestion', 'visibilite'].includes(selectedLieu.plan || '') ? (
                     <TouchableOpacity
                       style={styles.actionReserver}
                       onPress={() => {
