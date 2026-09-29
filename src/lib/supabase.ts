@@ -47,7 +47,7 @@ const APP_SESSION_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function trackEvent(
   eventType: 'page_view' | 'click',
   page: string,
-  opts: { target_type?: string; target_id?: string; action?: string } = {}
+  opts: { target_type?: string; target_id?: string; action?: string; affiliate?: boolean } = {}
 ) {
   supabase
     .from('analytics_events')

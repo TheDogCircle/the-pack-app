@@ -39,6 +39,7 @@ type Post = {
 type Partenaire = {
   id: string; nom: string; description: string | null;
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
+  lien_affiliation: string | null;
   instagram_url: string | null; tiktok_url: string | null;
   categorie: string | null; lieu_id: string | null;
   type_service: string[] | null;
@@ -279,8 +280,8 @@ function BrandModal({
         {/* Body */}
         <View style={s.body}>
           <View style={s.linksRow}>
-            {partenaire.site_web ? (
-              <TouchableOpacity style={s.siteLink} onPress={() => { trackEvent('click', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id, action: 'website' }); Linking.openURL(partenaire.site_web!); }}>
+            {(partenaire.lien_affiliation || partenaire.site_web) ? (
+              <TouchableOpacity style={s.siteLink} onPress={() => { const url = partenaire.lien_affiliation || partenaire.site_web!; trackEvent('click', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id, action: 'website', affiliate: !!partenaire.lien_affiliation }); Linking.openURL(url); }}>
                 <Ionicons name="globe-outline" size={14} color={colors.terra} />
                 <Text style={s.siteLinkText}>Site web</Text>
               </TouchableOpacity>
