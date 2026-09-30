@@ -17,6 +17,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
+import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
@@ -1513,6 +1514,7 @@ export default function CarteScreen() {
 
   async function openFiche(lieu: Lieu) {
     trackEvent('page_view', 'carte_fiche', { target_type: 'lieu', target_id: lieu.id });
+    track('place_viewed', { lieu_id: lieu.id });
     Keyboard.dismiss();
     setLightboxIdx(null);
     setSheetLoading(true);
@@ -1685,6 +1687,7 @@ export default function CarteScreen() {
         { user_id: userId, lieu_id: selectedLieu.id, liste },
         { onConflict: 'user_id,lieu_id' }
       );
+      track('place_saved', { lieu_id: selectedLieu.id, liste });
       setFavListe(liste);
     }
     setFavLoading(false);

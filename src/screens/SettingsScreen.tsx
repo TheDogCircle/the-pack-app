@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import { savePushToken } from '../lib/notifications';
 import { normalizePhone } from '../lib/phone';
@@ -345,6 +346,7 @@ export default function SettingsScreen() {
         statut_amoureux: dogStatut || null,
         date_naissance: dn,
       });
+      track('dog_added', { source: 'settings' });
     }
 
     const { data: updated } = await supabase.from('chiens')

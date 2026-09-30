@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import { RACES } from '../constants/races';
@@ -243,6 +244,7 @@ export default function OnboardingScreen() {
       statut_amoureux: statutAmoureux || null,
       date_naissance: dogBirth || null,
     });
+    track('dog_added', { source: 'onboarding' });
 
     // Insert extra dogs
     if (extraDogs.length > 0) {
@@ -257,6 +259,7 @@ export default function OnboardingScreen() {
           date_naissance: d.dateNaissance || null,
         }))
       );
+      extraDogs.forEach(() => track('dog_added', { source: 'onboarding' }));
     }
 
     setSaving(false);

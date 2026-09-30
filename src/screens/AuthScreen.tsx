@@ -7,6 +7,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 
@@ -46,7 +47,10 @@ export default function AuthScreen() {
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) Alert.alert('Erreur', error.message);
-        else Alert.alert('Vérifie ta boîte mail', "Un lien de confirmation t'a été envoyé.");
+        else {
+          track('signup_completed');
+          Alert.alert('Vérifie ta boîte mail', "Un lien de confirmation t'a été envoyé.");
+        }
       }
     } finally {
       setLoading(false);
