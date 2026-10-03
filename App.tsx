@@ -22,7 +22,7 @@ import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
 import { STRIPE_PUBLISHABLE_KEY } from './src/lib/stripeConfig';
 import SplashLoader from './src/components/SplashLoader';
-import { track, startTrackingFlushLoop } from './src/lib/tracking';
+import { trackAppOpen, startTrackingFlushLoop } from './src/lib/tracking';
 
 async function checkForOTAUpdate() {
   try {
@@ -45,13 +45,13 @@ export default function App() {
   useEffect(() => {
     checkForOTAUpdate();
     startTrackingFlushLoop();
-    track('app_open');
+    trackAppOpen();
 
     // Efface le badge dès que l'app revient au premier plan
     const appStateSub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (appStateRef.current.match(/inactive|background/) && next === 'active') {
         clearBadge();
-        track('app_open');
+        trackAppOpen();
       }
       appStateRef.current = next;
     });

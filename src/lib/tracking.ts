@@ -102,3 +102,18 @@ export function startTrackingFlushLoop(): void {
   flushInterval = setInterval(flushTrackQueue, FLUSH_INTERVAL_MS);
   flushTrackQueue();
 }
+
+// app_open etait compte deux fois par lancement : le useEffect de App.tsx
+// l'appelle directement au montage, et l'ecouteur AppState peut aussi se
+// declencher une fois de plus pendant la sequence de demarrage (transition
+// rapide background->active le temps que l'app finisse de charger). Un
+// garde-fou de 3s suffit -- deux vrais lancements ne peuvent pas se produire
+// aussi rapproches.
+const APP_OPEN_DEBOUNCE_MS = 3000;
+let lastAppOpenAt = 0;
+export function trackAppOpen(): void {
+  const now = Date.now();
+  if (now - lastAppOpenAt < APP_OPEN_DEBOUNCE_MS) return;
+  lastAppOpenAt = now;
+  track('app_open');
+}
