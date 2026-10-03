@@ -141,11 +141,18 @@ Deno.serve(async (req) => {
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
         const sub = event.data.object as Stripe.Subscription
+        // unit_amount/interval viennent directement de l'objet Subscription
+        // standard inclus dans l'evenement (sub.items.data[0].price) -- pas
+        // d'appel API necessaire, donc pas de probleme avec le decalage
+        // cle test/live mentionne plus haut dans ce fichier.
+        const price = sub.items?.data?.[0]?.price
         await supabaseAdmin
           .from('lieux')
           .update({
             subscription_status: sub.status,
             subscription_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+            subscription_amount_cents: price?.unit_amount ?? null,
+            subscription_interval: price?.recurring?.interval ?? null,
           })
           .eq('stripe_subscription_id', sub.id)
         break
