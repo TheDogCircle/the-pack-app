@@ -33,6 +33,8 @@ function deepLinkData(type: string | null, value: string | null): Record<string,
   if (type === 'lieu') { data.targetType = 'lieu'; data.lieuId = value }
   else if (type === 'event') { data.targetType = 'event'; data.eventId = value }
   else if (type === 'profil') { data.targetType = 'profil'; data.userId = value }
+  else if (type === 'partenaire') { data.targetType = 'partenaire'; data.partenaireId = value }
+  else if (type === 'partenaires') { data.targetType = 'partenaires' }
   return data
 }
 
