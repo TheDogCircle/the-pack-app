@@ -26,6 +26,8 @@ import BookingScreen from '../screens/BookingScreen';
 import MesReservationsScreen from '../screens/MesReservationsScreen';
 import AnniversairesScreen from '../screens/AnniversairesScreen';
 import CarnetSanteScreen from '../screens/CarnetSanteScreen';
+import ContactScreen from '../screens/ContactScreen';
+import ContactDetailScreen from '../screens/ContactDetailScreen';
 import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
@@ -42,6 +44,8 @@ export type RootStackParamList = {
   Anniversaires: undefined;
   Activite: undefined;
   CarnetSante: { chienId: string; chienNom: string };
+  Contact: undefined;
+  ContactDetail: { ticketId: string };
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -321,6 +325,10 @@ export default function Navigation() {
       }
     } else if (data.type === 'reservation') {
       navigationRef.navigate('MesReservations' as any);
+    } else if (data.type === 'ticket_reply') {
+      if (data.ticketId) {
+        navigationRef.navigate('ContactDetail' as any, { ticketId: data.ticketId } as any);
+      }
     } else if (data.type === 'new_reservation') {
       // Pas d'ecran de gestion des reservations cote pro dans l'app mobile :
       // la gestion se fait sur l'espace pro web.
@@ -586,6 +594,30 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: 'Activité',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Contact"
+          component={ContactScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: "Contacter l'équipe",
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="ContactDetail"
+          component={ContactDetailScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Ma demande',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}

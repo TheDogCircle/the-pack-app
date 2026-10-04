@@ -791,6 +791,16 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Aide */}
+      <View style={styles.section}>
+        <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Aide</Text></View>
+        <TouchableOpacity style={[styles.menuRow, { borderBottomWidth: 0 }]} onPress={() => navigation.navigate('Contact' as any)}>
+          <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.bordeaux} />
+          <Text style={styles.menuRowText}>Contacter l'équipe</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+
       {/* Compte */}
       <View style={styles.section}>
         <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Mon compte</Text></View>
