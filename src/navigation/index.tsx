@@ -285,7 +285,7 @@ export default function Navigation() {
   // (ex: app ouverte a froid en tapant sur la notif, la nav n'est pas encore montee)
   const [pendingNotifData, setPendingNotifData] = useState<any | null>(null);
 
-  function applyNotificationData(data: any) {
+  async function applyNotificationData(data: any) {
     if (!data) return;
     // data.lieu_id en secours : admin.html a longtemps envoye cette cle en snake_case
     // pour "suggestion_validee" (corrige cote emetteur), mais un ancien envoi en vol au
@@ -369,6 +369,20 @@ export default function Navigation() {
         navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
       } else if (data.targetType === 'profil' && data.userId) {
         navigationRef.navigate('ProfilPublic' as any, { userId: data.userId, prenom: '' } as any);
+      } else if (data.targetType === 'carnet_sante') {
+        // Pas d'id de chien dans le payload (une campagne vise plusieurs
+        // destinataires, chacun avec ses propres chiens) : on ouvre le carnet
+        // du PREMIER chien du destinataire qui tape, meme logique que
+        // ProfilScreen.goToCarnetSante().
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: chiens } = user
+          ? await supabase.from('chiens').select('id,nom').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1)
+          : { data: null };
+        if (chiens?.length) {
+          navigationRef.navigate('CarnetSante' as any, { chienId: chiens[0].id, chienNom: chiens[0].nom } as any);
+        } else {
+          navigationRef.navigate('Tabs' as any, { screen: 'Profil' } as any);
+        }
       }
     }
   }

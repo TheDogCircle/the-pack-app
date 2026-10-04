@@ -28,13 +28,20 @@ async function sendBatch(messages: Record<string, unknown>[]) {
   return tickets
 }
 
-function deepLinkData(type: string | null, value: string | null): Record<string, unknown> {
+function deepLinkData(type: string | null, value: string | null, extra: string | null = null): Record<string, unknown> {
   const data: Record<string, unknown> = { type: 'broadcast' }
   if (type === 'lieu') { data.targetType = 'lieu'; data.lieuId = value }
   else if (type === 'event') { data.targetType = 'event'; data.eventId = value }
   else if (type === 'profil') { data.targetType = 'profil'; data.userId = value }
-  else if (type === 'partenaire') { data.targetType = 'partenaire'; data.partenaireId = value }
-  else if (type === 'partenaires') { data.targetType = 'partenaires' }
+  else if (type === 'carnet_sante') { data.targetType = 'carnet_sante' }
+  else if (type === 'partenaire' || type === 'partenaires') {
+    // deep_link_value porte le partenaire_id (connu qu'on soit parti de "une marque
+    // precise" ou d'une offre choisie directement dans "offres du moment" -- cf admin
+    // notifications-push.html) ; deep_link_extra porte la partenaire_posts.id si une
+    // offre precise a ete choisie. Sans valeur du tout, on ouvre juste l'onglet general.
+    if (value) { data.targetType = 'partenaire'; data.partenaireId = value; if (extra) data.postId = extra }
+    else { data.targetType = 'partenaires' }
+  }
   return data
 }
 
@@ -66,7 +73,7 @@ async function processCampaign(supabaseAdmin: any, campaignId: string) {
     sentTodayCount.set(r.user_id, (sentTodayCount.get(r.user_id) ?? 0) + 1)
   }
 
-  const dataPayload = deepLinkData(campaign.deep_link_type, campaign.deep_link_value)
+  const dataPayload = deepLinkData(campaign.deep_link_type, campaign.deep_link_value, campaign.deep_link_extra)
   const messages: Record<string, unknown>[] = []
   const sendRows: { campaign_id: string; user_id: string; status: string; expo_ticket_id?: string | null }[] = []
 
@@ -147,14 +154,15 @@ Deno.serve(async (req) => {
       let body = payload.body
       let deepLinkType = payload.deep_link_type ?? null
       let deepLinkValue = payload.deep_link_value ?? null
+      let deepLinkExtra = payload.deep_link_extra ?? null
       if (payload.campaign_id) {
         const { data: c } = await supabaseAdmin.from('notification_campaigns').select('*').eq('id', payload.campaign_id).maybeSingle()
-        if (c) { title = c.title; body = c.body; deepLinkType = c.deep_link_type; deepLinkValue = c.deep_link_value }
+        if (c) { title = c.title; body = c.body; deepLinkType = c.deep_link_type; deepLinkValue = c.deep_link_value; deepLinkExtra = c.deep_link_extra }
       }
 
       const tickets = await sendBatch([{
         to: testToken, title: title || '(test)', body: body || '',
-        data: deepLinkData(deepLinkType, deepLinkValue), sound: 'default', badge: 1,
+        data: deepLinkData(deepLinkType, deepLinkValue, deepLinkExtra), sound: 'default', badge: 1,
       }])
       return new Response(JSON.stringify({ sent: true, tickets }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
