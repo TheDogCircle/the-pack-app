@@ -104,6 +104,23 @@ async function processCampaign(supabaseAdmin: any, campaignId: string) {
   }
 }
 
+// 'test' et 'send' sont tous deux reserves aux moderateurs+ -- 'test' envoie
+// uniquement a TEST_PUSH_TOKEN (jamais a un vrai membre) mais sans cette
+// garde, n'importe qui connaissant l'URL de la fonction (la cle anon est
+// publique, deja presente cote client) pouvait spammer le telephone de
+// Marine avec un contenu arbitraire sans passer par l'admin. Trouve en
+// recette Phase 7.
+async function requireModerator(supabaseAdmin: any, req: Request) {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) throw new Error('Non autorisé')
+  const token = authHeader.replace('Bearer ', '')
+  const { data: { user: caller }, error: authErr } = await supabaseAdmin.auth.getUser(token)
+  if (authErr || !caller) throw new Error('Non autorisé')
+  const { data: callerRole } = await supabaseAdmin.from('admin_roles').select('role').eq('user_id', caller.id).maybeSingle()
+  if (!['moderator', 'super_admin'].includes(callerRole?.role ?? '')) throw new Error('Réservé aux modérateurs et plus')
+  return { caller, authHeader }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -118,6 +135,8 @@ Deno.serve(async (req) => {
     const mode = payload.mode as 'test' | 'send' | 'cron'
 
     if (mode === 'test') {
+      await requireModerator(supabaseAdmin, req)
+
       // Envoi exclusivement au telephone de test (TEST_PUSH_TOKEN) -- jamais
       // a un vrai destinataire, meme si une campaign_id est fournie pour
       // pre-remplir le contenu. Consigne explicite de Marine.
@@ -141,19 +160,31 @@ Deno.serve(async (req) => {
     }
 
     if (mode === 'send') {
-      const authHeader = req.headers.get('Authorization')
-      if (!authHeader) throw new Error('Non autorisé')
-      const token = authHeader.replace('Bearer ', '')
-      const { data: { user: caller }, error: authErr } = await supabaseAdmin.auth.getUser(token)
-      if (authErr || !caller) throw new Error('Non autorisé')
-      const { data: callerRole } = await supabaseAdmin.from('admin_roles').select('role').eq('user_id', caller.id).maybeSingle()
-      if (!['moderator', 'super_admin'].includes(callerRole?.role ?? '')) throw new Error('Réservé aux modérateurs et plus')
+      const { authHeader } = await requireModerator(supabaseAdmin, req)
 
       if (isQuietHoursParis()) {
         throw new Error("Heures calmes en cours (22h-8h) — utilise \"Planifier\" pour un envoi différé plutôt qu'un envoi immédiat.")
       }
 
       const result = await processCampaign(supabaseAdmin, payload.campaign_id)
+
+      // processCampaign ecrit le statut 'envoyee' via la service role (necessaire
+      // pour le reste du traitement), donc le trigger generique trg_log_admin_action
+      // ne logge rien ici : son check interne is_admin('viewer') lit auth.uid(),
+      // toujours nul sous service role. On logge donc explicitement l'action avec
+      // un client scope sur le JWT de l'appelant, meme pattern que
+      // admin-refund-reservation. Trouve en recette Phase 7.
+      const supabaseCaller = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      )
+      await supabaseCaller.rpc('log_admin_action', {
+        p_action: 'send_campaign', p_entity_type: 'notification_campaigns', p_entity_id: payload.campaign_id,
+        p_before: null, p_after: { sent: result.sent, skipped_cap: result.skipped_cap },
+        p_reason: null,
+      })
+
       return new Response(JSON.stringify(result), { headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 

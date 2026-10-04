@@ -65,15 +65,13 @@ export async function savePushToken(userId: string): Promise<void> {
 
     // device_tokens (Phase 7) : support multi-appareils pour le nouvel outil
     // de campagne admin -- en plus de profils.push_token (inchange, toujours
-    // utilise par les notifications produit existantes). Meme raison de
-    // reattribution que ci-dessus : un token change de proprietaire si un
-    // autre compte l'a utilise avant sur ce meme appareil.
+    // utilise par les notifications produit existantes). Reattribution via
+    // une fonction dediee (claim_device_token) et non un upsert direct : la
+    // RLS (user_id = auth.uid()) bloquerait silencieusement la reprise de la
+    // ligne d'un autre compte ayant utilise ce meme appareil avant.
     const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : null;
     const appVersion = Constants.expoConfig?.version ?? null;
-    await supabase.from('device_tokens').upsert(
-      { user_id: userId, token, platform, app_version: appVersion, enabled: true, last_seen_at: new Date().toISOString() },
-      { onConflict: 'token' }
-    );
+    await supabase.rpc('claim_device_token', { p_token: token, p_platform: platform, p_app_version: appVersion });
   } catch {}
 }
 
