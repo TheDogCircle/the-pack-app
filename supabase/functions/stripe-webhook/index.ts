@@ -153,6 +153,10 @@ Deno.serve(async (req) => {
             subscription_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
             subscription_amount_cents: price?.unit_amount ?? null,
             subscription_interval: price?.recurring?.interval ?? null,
+            // Pose uniquement a la creation (jamais ecrase par un update
+            // ulterieur) -- sert de point de depart pour le NPS "30j apres
+            // l'abonnement" (Phase 6 lot 5).
+            ...(event.type === 'customer.subscription.created' ? { subscription_started_at: new Date().toISOString() } : {}),
           })
           .eq('stripe_subscription_id', sub.id)
         break

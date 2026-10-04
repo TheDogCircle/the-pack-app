@@ -32,6 +32,7 @@ import IdeesScreen from '../screens/IdeesScreen';
 import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
+import NpsPromptModal, { NpsPending } from '../components/NpsPromptModal';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -277,6 +278,7 @@ export default function Navigation() {
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [missingFields, setMissingFields] = useState<MissingFields | null>(null);
+  const [npsPending, setNpsPending] = useState<NpsPending | null>(null);
   // Stores a profil userId to navigate to once NavigationContainer is ready
   const [pendingProfilId, setPendingProfilId] = useState<string | null>(null);
   // Stores a notification's data payload to apply once NavigationContainer is ready
@@ -455,9 +457,18 @@ export default function Navigation() {
     savePushToken(session.user.id);
     clearBadge();
 
+    // Verifie un prompt NPS en attente (Phase 6 lot 5) -- a la connexion et a
+    // chaque retour au premier plan, pas seulement sur tap de notification
+    // (plus fiable : ne depend pas de la livraison du push).
+    async function checkNpsPrompt() {
+      const { data } = await supabase.rpc('nps_prompt_pending');
+      if (data?.[0]) setNpsPending(data[0]);
+    }
+    checkNpsPrompt();
+
     // Renouvelle le token et efface la pastille chaque fois que l'app revient au premier plan
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') { savePushToken(session.user.id); clearBadge(); }
+      if (state === 'active') { savePushToken(session.user.id); clearBadge(); checkNpsPrompt(); }
     });
 
     setOnboardingChecked(false);
@@ -647,6 +658,9 @@ export default function Navigation() {
         missing={missingFields}
         onSaved={() => { setMissingFields(null); }}
       />
+    )}
+    {session && !needsOnboarding && !missingFields && npsPending && (
+      <NpsPromptModal pending={npsPending} onDone={() => setNpsPending(null)} />
     )}
     </>
   );
