@@ -74,6 +74,10 @@ async function processCampaign(supabaseAdmin: any, campaignId: string) {
   }
 
   const dataPayload = deepLinkData(campaign.deep_link_type, campaign.deep_link_value, campaign.deep_link_extra)
+  // campaignId : permet au client de marquer sa propre ligne notification_campaign_sends
+  // comme ouverte au tap (cf mark_campaign_notification_opened), pour que l'admin
+  // puisse voir combien de destinataires ont reellement ouvert, pas juste recu l'envoi.
+  dataPayload.campaignId = campaignId
   const messages: Record<string, unknown>[] = []
   const sendRows: { campaign_id: string; user_id: string; status: string; expo_ticket_id?: string | null }[] = []
 

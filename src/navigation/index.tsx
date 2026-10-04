@@ -273,6 +273,34 @@ function parseProfilLink(url: string): string | null {
   return m ? m[1] : null;
 }
 
+function HighlightBanner({
+  highlight, topOffset, onDismiss,
+}: { highlight: { title: string; body: string }; topOffset: number; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(t);
+  }, [highlight, onDismiss]);
+
+  return (
+    <View style={[highlightStyles.wrap, { top: topOffset + 8 }]} pointerEvents="box-none">
+      <TouchableOpacity style={highlightStyles.card} activeOpacity={0.9} onPress={onDismiss}>
+        {!!highlight.title && <Text style={highlightStyles.title} numberOfLines={2}>{highlight.title}</Text>}
+        {!!highlight.body && <Text style={highlightStyles.body} numberOfLines={3}>{highlight.body}</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const highlightStyles = StyleSheet.create({
+  wrap: { position: 'absolute', left: 12, right: 12, zIndex: 999, elevation: 999 },
+  card: {
+    backgroundColor: colors.bordeaux, borderRadius: 14, padding: 14,
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+  },
+  title: { color: colors.ivory, fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, marginBottom: 2 },
+  body: { color: colors.ivory, fontSize: 13, opacity: 0.9 },
+});
+
 export default function Navigation() {
   const { session, loading } = useSession();
   const [onboardingChecked, setOnboardingChecked] = useState(false);
@@ -284,6 +312,12 @@ export default function Navigation() {
   // Stores a notification's data payload to apply once NavigationContainer is ready
   // (ex: app ouverte a froid en tapant sur la notif, la nav n'est pas encore montee)
   const [pendingNotifData, setPendingNotifData] = useState<any | null>(null);
+  // Bannière rappelant le contenu du push une fois sur l'écran cible (demande de
+  // Marine : le texte de la notif disparaît sinon complètement après le tap, sans
+  // rien pour expliquer pourquoi on est arrivé là -- utile pour une fonctionnalité
+  // pas encore vue, ex: le carnet de santé).
+  const [highlight, setHighlight] = useState<{ title: string; body: string } | null>(null);
+  const insets = useSafeAreaInsets();
 
   async function applyNotificationData(data: any) {
     if (!data) return;
@@ -387,8 +421,9 @@ export default function Navigation() {
     }
   }
 
-  function handleNotificationResponse(data: any) {
+  function handleNotificationResponse(content: any) {
     clearBadge();
+    const data = content?.data;
     supabase.from('push_debug_logs').insert({
       to_token: 'TAP', title: 'notif_tap',
       detail: JSON.stringify({ data, navReady: navigationRef.isReady() }),
@@ -405,6 +440,18 @@ export default function Navigation() {
           user_id: sess?.session?.user?.id ?? null,
         }).then(() => {}, () => {});
       });
+    }
+    // Ouverture d'une campagne B2B (admin > Notifications push) : log dedie
+    // (notification_campaign_sends.opened_at), notifLogId ci-dessus ne couvre
+    // que les 7 notifs produit historiques, pas cet outil.
+    if (data.type === 'broadcast' && data.campaignId) {
+      supabase.rpc('mark_campaign_notification_opened', { p_campaign_id: data.campaignId }).then(() => {}, () => {});
+    }
+    // Bannière de rappel sur l'ecran cible -- seulement pour les campagnes
+    // (broadcast), pas pour les 7 notifs produit qui ont deja leur propre
+    // contexte visuel evident (une photo likee ouvre directement la photo).
+    if (data.type === 'broadcast' && (content?.title || content?.body)) {
+      setHighlight({ title: content.title || '', body: content.body || '' });
     }
     if (navigationRef.isReady()) applyNotificationData(data);
     else setPendingNotifData(data);
@@ -435,7 +482,7 @@ export default function Navigation() {
         to_token: 'LASTRESP', title: 'getLastNotificationResponseAsync',
         detail: JSON.stringify({ hasResponse: !!response, data: response?.notification?.request?.content?.data ?? null }),
       }).then(() => {}, () => {});
-      if (response) handleNotificationResponse(response.notification.request.content.data as any);
+      if (response) handleNotificationResponse(response.notification.request.content as any);
     }, err => {
       supabase.from('push_debug_logs').insert({
         to_token: 'LASTRESP_ERR', title: 'getLastNotificationResponseAsync failed',
@@ -447,7 +494,7 @@ export default function Navigation() {
     let notifSub: { remove: () => void } | null = null;
     try {
       notifSub = Notifications.addNotificationResponseReceivedListener(response => {
-        handleNotificationResponse(response.notification.request.content.data as any);
+        handleNotificationResponse(response.notification.request.content as any);
       });
       supabase.from('push_debug_logs').insert({
         to_token: 'LISTENER_OK', title: 'addNotificationResponseReceivedListener registered',
@@ -677,6 +724,9 @@ export default function Navigation() {
     )}
     {session && !needsOnboarding && !missingFields && npsPending && (
       <NpsPromptModal pending={npsPending} onDone={() => setNpsPending(null)} />
+    )}
+    {highlight && (
+      <HighlightBanner highlight={highlight} topOffset={insets.top} onDismiss={() => setHighlight(null)} />
     )}
     </>
   );
