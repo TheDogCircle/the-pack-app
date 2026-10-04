@@ -39,6 +39,23 @@ async function checkForOTAUpdate() {
   } catch (_) {}
 }
 
+// Sans ca, quelqu'un qui ne quitte jamais vraiment l'app (la laisse juste en
+// arriere-plan -- le cas le plus frequent) ne redemarre jamais a froid, donc
+// ne recupere jamais la mise a jour telechargee par checkForOTAUpdate ci-dessus.
+// Contrairement au lancement a froid, un retour au premier plan n'a pas de
+// contexte de notification fraichement tapee a perdre : on peut recharger
+// sans risque. Question posee par Marine en testant le carnet de sante.
+async function checkAndApplyOTAUpdateOnResume() {
+  try {
+    if (!Updates.isEnabled) return;
+    const update = await Updates.checkForUpdateAsync();
+    if (update.isAvailable) {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    }
+  } catch (_) {}
+}
+
 export default function App() {
   const appStateRef = useRef(AppState.currentState);
 
@@ -52,6 +69,7 @@ export default function App() {
       if (appStateRef.current.match(/inactive|background/) && next === 'active') {
         clearBadge();
         trackAppOpen();
+        checkAndApplyOTAUpdateOnResume();
       }
       appStateRef.current = next;
     });
