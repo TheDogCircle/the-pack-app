@@ -62,6 +62,18 @@ export async function savePushToken(userId: string): Promise<void> {
     // messages des qu'il envoie dans une conversation ou l'autre compte est membre.
     await supabase.from('profils').update({ push_token: null }).eq('push_token', token).neq('id', userId);
     await supabase.from('profils').update({ push_token: token }).eq('id', userId);
+
+    // device_tokens (Phase 7) : support multi-appareils pour le nouvel outil
+    // de campagne admin -- en plus de profils.push_token (inchange, toujours
+    // utilise par les notifications produit existantes). Meme raison de
+    // reattribution que ci-dessus : un token change de proprietaire si un
+    // autre compte l'a utilise avant sur ce meme appareil.
+    const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : null;
+    const appVersion = Constants.expoConfig?.version ?? null;
+    await supabase.from('device_tokens').upsert(
+      { user_id: userId, token, platform, app_version: appVersion, enabled: true, last_seen_at: new Date().toISOString() },
+      { onConflict: 'token' }
+    );
   } catch {}
 }
 

@@ -367,6 +367,8 @@ export default function Navigation() {
         navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
       } else if (data.targetType === 'partenaires') {
         navigationRef.navigate('Tabs' as any, { screen: 'Services' } as any);
+      } else if (data.targetType === 'profil' && data.userId) {
+        navigationRef.navigate('ProfilPublic' as any, { userId: data.userId, prenom: '' } as any);
       }
     }
   }
