@@ -127,6 +127,12 @@ export default function ContactScreen() {
           <Text style={styles.newBtnText}>Nouvelle demande</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.ideesBtn} onPress={() => (navigation as any).navigate('Idees')}>
+          <Ionicons name="bulb-outline" size={18} color={colors.terra} />
+          <Text style={styles.ideesBtnText}>Voir et voter pour les idées de la communauté</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {!tickets.length ? (
           <View style={styles.emptyBox}>
             <Ionicons name="chatbubble-ellipses-outline" size={28} color={colors.textMuted} />
@@ -210,6 +216,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 13,
   },
   newBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
+  ideesBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    paddingVertical: 12, paddingHorizontal: 14,
+  },
+  ideesBtnText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   card: {
     backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
     padding: 16, gap: 6,

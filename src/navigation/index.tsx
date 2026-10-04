@@ -28,6 +28,7 @@ import AnniversairesScreen from '../screens/AnniversairesScreen';
 import CarnetSanteScreen from '../screens/CarnetSanteScreen';
 import ContactScreen from '../screens/ContactScreen';
 import ContactDetailScreen from '../screens/ContactDetailScreen';
+import IdeesScreen from '../screens/IdeesScreen';
 import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
@@ -46,6 +47,7 @@ export type RootStackParamList = {
   CarnetSante: { chienId: string; chienNom: string };
   Contact: undefined;
   ContactDetail: { ticketId: string };
+  Idees: undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -329,6 +331,8 @@ export default function Navigation() {
       if (data.ticketId) {
         navigationRef.navigate('ContactDetail' as any, { ticketId: data.ticketId } as any);
       }
+    } else if (data.type === 'idee_livree') {
+      navigationRef.navigate('Idees' as any);
     } else if (data.type === 'new_reservation') {
       // Pas d'ecran de gestion des reservations cote pro dans l'app mobile :
       // la gestion se fait sur l'espace pro web.
@@ -618,6 +622,18 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: 'Ma demande',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Idees"
+          component={IdeesScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Idées de la communauté',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}
