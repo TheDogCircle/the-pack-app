@@ -17,10 +17,30 @@ const CORS = {
 // (from/subject/text) -- mappage fait sur la base du format usuel des
 // webhooks email (Postmark/SendGrid/Resend se ressemblent), A VERIFIER et
 // ajuster avec un vrai payload de test une fois l'inbound active.
+//
+// Securite (trouve en recette) : cette fonction est deja deployee et donc
+// deja joignable publiquement des maintenant, meme si rien n'y pointe
+// encore cote Resend -- n'importe qui connaissant l'URL pouvait creer des
+// tickets arbitraires, y compris en usurpant l'email "from" pour les
+// rattacher au compte d'un vrai utilisateur. Protege par un secret partage
+// (INBOUND_EMAIL_SECRET) a definir dans les secrets du projet Supabase et
+// a configurer comme parametre de l'URL webhook cote Resend quand l'inbound
+// sera active. Si Resend fournit un vrai mecanisme de signature a ce
+// moment-la, le remplacer par une verification de signature plutot que ce
+// secret statique.
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
+    const expectedSecret = Deno.env.get('INBOUND_EMAIL_SECRET')
+    const providedSecret = new URL(req.url).searchParams.get('secret') ?? req.headers.get('x-webhook-secret')
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      return new Response(JSON.stringify({ error: 'Non autorisé' }), {
+        status: 401,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      })
+    }
+
     const payload = await req.json()
     console.log('[inbound-email-ticket] payload recu:', JSON.stringify(payload).slice(0, 2000))
 
@@ -41,7 +61,11 @@ Deno.serve(async (req) => {
     // Rattache au compte existant si l'email correspond a un utilisateur
     // connu (auth.users), sinon ticket sans requester_id -- un admin pourra
     // quand meme repondre par email en dehors du flux normal pour l'instant.
-    const { data: authUser } = await supabaseAdmin.auth.admin.listUsers()
+    // Meme limite connue que lookup-user (Phase 0) : listUsers() ne pagine
+    // pas au-dela de perPage, un email au-dela de cette limite ne sera pas
+    // retrouve -- acceptable pour l'instant (fonction non branchee), a
+    // revoir si la base d'utilisateurs grandit avant que ce soit active.
+    const { data: authUser } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 })
     const matchedUser = authUser?.users?.find(u => u.email?.toLowerCase() === fromEmail.toLowerCase())
 
     const { data: ticket, error } = await supabaseAdmin.from('tickets').insert({
