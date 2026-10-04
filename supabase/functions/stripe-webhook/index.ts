@@ -162,8 +162,54 @@ Deno.serve(async (req) => {
         const sub = event.data.object as Stripe.Subscription
         await supabaseAdmin
           .from('lieux')
-          .update({ subscription_status: 'canceled' })
+          .update({ subscription_status: 'canceled', subscription_canceled_at: new Date().toISOString() })
           .eq('stripe_subscription_id', sub.id)
+        break
+      }
+
+      // Factures d'abonnement pro -- memes contraintes que les evenements
+      // customer.subscription.* ci-dessus : aucun appel API Stripe, on ne lit
+      // que le payload de l'Invoice deja fourni par l'evenement. Rattachement
+      // au compte (lieux ou partenaires, cf schema Phase 5) via
+      // stripe_subscription_customer_id ; si aucun match, la facture est tout
+      // de meme stockee (customer_table/customer_id a null) plutot que perdue.
+      case 'invoice.paid':
+      case 'invoice.payment_failed':
+      case 'invoice.voided': {
+        const invoice = event.data.object as Stripe.Invoice
+        const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id
+        if (!customerId) break
+
+        let customerTable: 'lieux' | 'partenaires' | null = null
+        let customerRowId: string | null = null
+        const { data: lieu } = await supabaseAdmin
+          .from('lieux').select('id').eq('stripe_subscription_customer_id', customerId).maybeSingle()
+        if (lieu) {
+          customerTable = 'lieux'
+          customerRowId = lieu.id
+        } else {
+          const { data: partenaire } = await supabaseAdmin
+            .from('partenaires').select('id').eq('stripe_subscription_customer_id', customerId).maybeSingle()
+          if (partenaire) {
+            customerTable = 'partenaires'
+            customerRowId = partenaire.id
+          }
+        }
+
+        const status = event.type === 'invoice.voided' ? 'void' : (invoice.status ?? (event.type === 'invoice.paid' ? 'paid' : 'open'))
+        await supabaseAdmin.from('stripe_invoices').upsert({
+          stripe_invoice_id: invoice.id,
+          stripe_customer_id: customerId,
+          customer_table: customerTable,
+          customer_id: customerRowId,
+          amount_cents: event.type === 'invoice.paid' ? invoice.amount_paid : invoice.amount_due,
+          currency: invoice.currency ?? 'eur',
+          status,
+          hosted_invoice_url: invoice.hosted_invoice_url ?? null,
+          invoice_pdf_url: invoice.invoice_pdf ?? null,
+          invoice_created_at: new Date(invoice.created * 1000).toISOString(),
+          paid_at: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() : null,
+        }, { onConflict: 'stripe_invoice_id' })
         break
       }
     }
