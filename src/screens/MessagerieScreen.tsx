@@ -548,31 +548,33 @@ export default function MessagerieScreen({
     setCreateModal(true);
   }
 
-  async function findExistingDM(otherId: string): Promise<Conversation | null> {
-    const [{ data: mine }, { data: theirs }] = await Promise.all([
-      supabase.from('conversation_members').select('conversation_id').eq('user_id', myUserId!),
-      supabase.from('conversation_members').select('conversation_id').eq('user_id', otherId),
-    ]);
-    const mySet = new Set((mine || []).map((r: any) => r.conversation_id));
-    const shared = (theirs || []).map((r: any) => r.conversation_id).filter((id: string) => mySet.has(id));
-    for (const cid of shared) {
-      const match = conversations.find(c => c.id === cid);
-      if (!match || match.type === 'groupe') continue;
-      const { count } = await supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', cid);
-      if (count === 2) return match;
-    }
-    return null;
-  }
-
   async function createConversation() {
     if (!myUserId || !selectedMembers.length) return;
     setCreating(true);
     if (convMode === 'direct') {
-      const existing = await findExistingDM(selectedMembers[0]);
-      if (existing) { setCreating(false); setCreateModal(false); openConversation(existing); return; }
+      // find_or_create_dm (audit de securite) : l'ancienne version lisait
+      // directement conversation_members.user_id = l'autre utilisateur pour
+      // trouver un DM existant en commun -- plus possible depuis que la RLS
+      // (totalement absente avant) protege correctement ces tables.
+      const { data: convId, error } = await supabase.rpc('find_or_create_dm', { p_other_id: selectedMembers[0] });
+      setCreating(false); setCreateModal(false);
+      if (error || !convId) { Alert.alert('Erreur', error?.message || ''); return; }
+      const match = conversations.find(c => c.id === convId);
+      if (match) { openConversation(match); return; }
+      const otherContact = contacts.find(c => c.id === selectedMembers[0]);
+      openConversation({
+        id: convId, nom: null, created_by: myUserId,
+        members: [
+          { user_id: myUserId, prenom: 'Moi', avatar_url: null },
+          { user_id: selectedMembers[0], prenom: otherContact?.prenom || 'Membre', avatar_url: otherContact?.avatar_url || null },
+        ],
+        last_message: null,
+      });
+      await loadConversations();
+      return;
     }
     const { data: conv, error } = await supabase.from('conversations').insert({
-      nom: convMode === 'groupe' ? (groupName.trim() || null) : null, created_by: myUserId, actif: true,
+      nom: groupName.trim() || null, created_by: myUserId, actif: true,
     }).select().single();
     if (error || !conv) { Alert.alert('Erreur', error?.message || ''); setCreating(false); return; }
     await supabase.from('conversation_members').insert([...new Set([myUserId, ...selectedMembers])].map(uid => ({ conversation_id: conv.id, user_id: uid })));
