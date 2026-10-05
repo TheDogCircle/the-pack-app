@@ -418,7 +418,11 @@ export default function SettingsScreen() {
         { text: 'Annuler', style: 'cancel' },
         { text: 'Supprimer', style: 'destructive', onPress: async () => {
           if (!userId) return;
-          const { error } = await supabase.from('profils').delete().eq('id', userId);
+          // delete-user (edge function) plutot qu'un DELETE direct sur profils :
+          // supprime aussi le compte Supabase Auth lui-meme (identifiants de
+          // connexion), promis sur supprimer-compte.html mais jamais fait avant
+          // -- un DELETE sur profils seul ne supprimait pas le compte Auth.
+          const { error } = await supabase.functions.invoke('delete-user', { body: { userId } });
           if (error) { Alert.alert('Erreur', 'Impossible de supprimer le compte. Réessaie ou contacte le support.'); return; }
           await supabase.auth.signOut();
         }},
