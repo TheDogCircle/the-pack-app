@@ -10,6 +10,17 @@ export default function NpsPromptModal({ pending, onDone }: { pending: NpsPendin
   const [submitting, setSubmitting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
+  async function markHandled() {
+    // Sans ca, nps_prompt_pending() continue de renvoyer cette meme ligne
+    // nps_prompts_sent (responded_at jamais mis a jour) -- la question
+    // reapparaissait a chaque relance de l'app, meme apres y avoir repondu.
+    await supabase.rpc('mark_nps_prompt_responded', {
+      p_contexte: pending.contexte,
+      p_pro_account_type: pending.pro_account_type,
+      p_pro_account_id: pending.pro_account_id,
+    });
+  }
+
   async function submit(n: number) {
     setScore(n);
     setSubmitting(true);
@@ -21,12 +32,19 @@ export default function NpsPromptModal({ pending, onDone }: { pending: NpsPendin
       score: n,
       contexte: pending.contexte,
     });
+    await markHandled();
     setSubmitting(false);
     setTimeout(onDone, 900);
   }
 
+  function dismiss() {
+    setDismissed(true);
+    markHandled();
+    onDone();
+  }
+
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => setDismissed(true)}>
+    <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
       {dismissed ? null : (
         <View style={styles.overlay}>
           <View style={styles.card}>
@@ -43,7 +61,7 @@ export default function NpsPromptModal({ pending, onDone }: { pending: NpsPendin
                     </TouchableOpacity>
                   ))}
                 </View>
-                <TouchableOpacity onPress={() => setDismissed(true)}>
+                <TouchableOpacity onPress={dismiss}>
                   <Text style={styles.later}>Plus tard</Text>
                 </TouchableOpacity>
               </>
