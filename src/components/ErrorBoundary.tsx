@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
+import { Sentry } from '../lib/sentry';
 
 type Props = { children: React.ReactNode; label: string; onClose?: () => void };
 type State = { error: Error | null };
@@ -14,6 +15,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack } }, tags: { boundary: this.props.label } });
     supabase.from('push_debug_logs').insert({
       to_token: 'RENDER_CRASH',
       title: this.props.label,

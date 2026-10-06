@@ -13,6 +13,7 @@ import { mapNavigation } from '../lib/mapNavigation';
 import SplashLoader from '../components/SplashLoader';
 
 import { useSession } from '../hooks/useSession';
+import { setSentryUser } from '../lib/sentry';
 import AuthScreen from '../screens/AuthScreen';
 import CarteScreen from '../screens/CarteScreen';
 import FeedScreen from '../screens/FeedScreen';
@@ -303,6 +304,10 @@ const highlightStyles = StyleSheet.create({
 
 export default function Navigation() {
   const { session, loading } = useSession();
+
+  useEffect(() => {
+    setSentryUser(session?.user?.id ?? null);
+  }, [session?.user?.id]);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [missingFields, setMissingFields] = useState<MissingFields | null>(null);

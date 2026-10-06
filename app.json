@@ -95,7 +95,8 @@
         {
           "enableGooglePay": false
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {

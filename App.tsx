@@ -25,6 +25,11 @@ import SplashLoader from './src/components/SplashLoader';
 import UpdateRequiredScreen from './src/components/UpdateRequiredScreen';
 import { trackAppOpen, startTrackingFlushLoop } from './src/lib/tracking';
 import { checkAppVersion, getStoreUrl } from './src/lib/versionCheck';
+import { initSentry, Sentry } from './src/lib/sentry';
+
+// Au plus tot, avant le premier rendu -- recommandation Sentry, pour capter
+// aussi les erreurs qui surviennent pendant le montage initial.
+initSentry();
 
 async function checkForOTAUpdate() {
   try {
@@ -58,7 +63,7 @@ async function checkAndApplyOTAUpdateOnResume() {
   } catch (_) {}
 }
 
-export default function App() {
+function App() {
   const appStateRef = useRef(AppState.currentState);
   // 'checking' pendant l'appel reseau -- jamais bloquant au-dela du premier
   // rendu, voir checkAppVersion() (fail-open sur erreur/reseau indisponible).
@@ -123,3 +128,7 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+// Sentry.wrap : capture les erreurs non attrapees par un ErrorBoundary React
+// + ajoute des breadcrumbs de navigation/touches automatiques.
+export default Sentry.wrap(App);
