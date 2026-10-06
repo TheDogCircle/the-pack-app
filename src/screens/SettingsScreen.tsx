@@ -142,6 +142,7 @@ export default function SettingsScreen() {
 
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [exportingData, setExportingData] = useState(false);
 
   useEffect(() => { init(); }, []);
 
@@ -408,6 +409,23 @@ export default function SettingsScreen() {
       { text: 'Annuler', style: 'cancel' },
       { text: 'Déconnecter', style: 'destructive', onPress: () => supabase.auth.signOut() },
     ]);
+  }
+
+  async function exportMyData() {
+    if (!userId || exportingData) return;
+    setExportingData(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('export-user-data', { body: {} });
+      if (error || data?.error) {
+        Alert.alert('Erreur', data?.error || "Impossible de générer l'export. Réessaie plus tard.");
+        return;
+      }
+      Alert.alert('Export envoyé', "Vérifie tes emails : un lien de téléchargement valable 7 jours vient de t'être envoyé.");
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || 'Une erreur est survenue.');
+    } finally {
+      setExportingData(false);
+    }
   }
 
   async function confirmDeleteAccount() {
@@ -812,6 +830,11 @@ export default function SettingsScreen() {
           <Ionicons name="log-out-outline" size={20} color={colors.bordeaux} />
           <Text style={styles.menuRowText}>Se déconnecter</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.menuRow} onPress={exportMyData} disabled={exportingData}>
+          <Ionicons name="download-outline" size={20} color={colors.bordeaux} />
+          <Text style={styles.menuRowText}>Exporter mes données</Text>
+          {exportingData ? <ActivityIndicator size="small" color={colors.bordeaux} /> : <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />}
         </TouchableOpacity>
         <TouchableOpacity style={[styles.menuRow, { borderBottomWidth: 0 }]} onPress={confirmDeleteAccount}>
           <Ionicons name="trash-outline" size={20} color="#C62828" />
