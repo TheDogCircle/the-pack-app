@@ -82,7 +82,8 @@ Deno.serve(async (req) => {
 
     try {
       const [profilRes, chiensRes, favorisRes, evFavRes, avisRes, photosRes, videosRes,
-        messagesRes, convMembersRes, reservationsRes, evOrgRes, participationsRes] = await Promise.all([
+        messagesRes, convMembersRes, reservationsRes, evOrgRes, participationsRes,
+        photoLikesRes, followingRes, followersRes, baladesRes] = await Promise.all([
         admin.from('profils').select('*').eq('id', targetUserId).single(),
         admin.from('chiens').select('*').eq('user_id', targetUserId),
         admin.from('favoris').select('*').eq('user_id', targetUserId),
@@ -95,6 +96,10 @@ Deno.serve(async (req) => {
         admin.from('reservations').select('*').eq('user_id', targetUserId),
         admin.from('evenements').select('*').eq('organisateur_id', targetUserId),
         admin.from('participations').select('*, evenements(titre, date_heure)').eq('user_id', targetUserId),
+        admin.from('photo_likes').select('*').eq('user_id', targetUserId),
+        admin.from('follows').select('*').eq('follower_id', targetUserId),
+        admin.from('follows').select('*').eq('following_id', targetUserId),
+        admin.from('balades').select('*').eq('user_id', targetUserId),
       ])
 
       const profil = profilRes.data
@@ -129,7 +134,11 @@ Deno.serve(async (req) => {
         reservations: reservationsRes.data || [],
         evenements_organises: evOrgRes.data || [],
         evenements_inscriptions: evenementsInscriptions,
-        abonnements: { note: "Aucun abonnement individuel payant n'existe sur notre plateforme à ce jour." },
+        photos_aimees: photoLikesRes.data || [],
+        abonnements_suivis: followingRes.data || [],
+        abonnes: followersRes.data || [],
+        balades: baladesRes.data || [],
+        abonnement_payant: { note: "Aucun abonnement individuel payant n'existe sur notre plateforme à ce jour." },
         consentements: { note: "Aucun consentement explicite distinct n'est tracé pour les comptes utilisateur standard à ce jour." },
         connexion: {
           compte_cree_le: authUser?.created_at ?? null,
@@ -152,6 +161,10 @@ Deno.serve(async (req) => {
       zip.file('conversations.csv', toCSV(conversations))
       zip.file('reservations.csv', toCSV(reservationsRes.data || []))
       zip.file('evenements_organises.csv', toCSV(evOrgRes.data || []))
+      zip.file('photos_aimees.csv', toCSV(photoLikesRes.data || []))
+      zip.file('abonnements_suivis.csv', toCSV(followingRes.data || []))
+      zip.file('abonnes.csv', toCSV(followersRes.data || []))
+      zip.file('balades.csv', toCSV(baladesRes.data || []))
       zip.file('evenements_inscriptions.csv', toCSV(evenementsInscriptions))
       zip.file('README.txt', [
         'The Pack Club -- export de vos données personnelles',
@@ -160,10 +173,12 @@ Deno.serve(async (req) => {
         'Ce fichier contient donnees.json (export complet structuré) et un CSV',
         'lisible par catégorie (profil, chiens, carnet_de_sante, lieux_enregistres,',
         'avis, photos, videos, messages, conversations, reservations,',
-        'evenements_organises, evenements_inscriptions).',
+        'evenements_organises, evenements_inscriptions, photos_aimees,',
+        'abonnements_suivis, abonnes, balades).',
         '',
-        "Abonnements : aucun abonnement individuel payant n'existe sur notre",
-        'plateforme à ce jour.',
+        "Abonnement payant : aucun abonnement individuel payant n'existe sur",
+        "notre plateforme à ce jour (abonnements_suivis/abonnes ci-dessus",
+        "concernent les comptes que vous suivez, pas un paiement).",
         '',
         "Consentements : aucun consentement explicite distinct n'est tracé pour",
         'les comptes utilisateur standard à ce jour.',
