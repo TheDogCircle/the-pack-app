@@ -1635,6 +1635,25 @@ export default function CarteScreen() {
     }
   }
 
+  function reportContent(contentType: 'photo' | 'avis', contentId: string) {
+    if (!userId) { showLoginPrompt(); return; }
+    Alert.alert('Signaler ce contenu', 'Pourquoi signalez-vous ce contenu ?', [
+      { text: 'Contenu inapproprié', onPress: () => submitReport(contentType, contentId, 'Contenu inapproprié') },
+      { text: 'Spam', onPress: () => submitReport(contentType, contentId, 'Spam') },
+      { text: 'Faux profil / usurpation', onPress: () => submitReport(contentType, contentId, 'Faux profil / usurpation') },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  }
+
+  async function submitReport(contentType: string, contentId: string, reason: string) {
+    const { error } = await supabase.rpc('report_content', { p_content_type: contentType, p_content_id: contentId, p_reason: reason });
+    if (error) {
+      Alert.alert('Erreur', error.message.includes('propre contenu') ? 'Vous ne pouvez pas signaler votre propre contenu.' : "Une erreur est survenue.");
+      return;
+    }
+    Alert.alert('Signalement envoyé', 'Merci, notre équipe va l\'examiner.');
+  }
+
   function closeFiche() {
     const returnCallback = mapNavigation.consumeReturn();
     setLightboxIdx(null);
@@ -2915,6 +2934,9 @@ export default function CarteScreen() {
                               <Ionicons key={i} name={i <= a.note ? 'star' : 'star-outline'} size={11} color={colors.terra} />
                             ))}
                           </View>
+                          <TouchableOpacity style={{ padding: 4, marginLeft: 4 }} onPress={() => reportContent('avis', a.id)}>
+                            <Ionicons name="flag-outline" size={14} color={colors.textMuted} />
+                          </TouchableOpacity>
                         </View>
                         {a.commentaire ? <Text style={styles.ficheAvisComment}>{a.commentaire}</Text> : null}
                         <Text style={styles.ficheAvisDate}>{new Date(a.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</Text>
@@ -3670,6 +3692,14 @@ export default function CarteScreen() {
           <TouchableOpacity style={styles.lightboxClose} onPress={() => setLightboxIdx(null)}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
+          {lightboxIdx !== null && photos[lightboxIdx] && (
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 54, left: 20, padding: 8 }}
+              onPress={() => reportContent('photo', photos[lightboxIdx]!.id)}
+            >
+              <Ionicons name="flag-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          )}
           {photos.length > 1 && lightboxIdx !== null && (
             <View style={styles.lightboxCounter}>
               <Text style={styles.lightboxCounterText}>{lightboxIdx + 1}/{photos.length}</Text>

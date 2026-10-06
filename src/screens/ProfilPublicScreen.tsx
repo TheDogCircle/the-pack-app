@@ -156,6 +156,25 @@ export default function ProfilPublicScreen() {
     }
   }
 
+  function reportProfile() {
+    if (!myId) return;
+    Alert.alert('Signaler ce profil', 'Pourquoi signalez-vous ce profil ?', [
+      { text: 'Faux profil / usurpation', onPress: () => submitReportProfile('Faux profil / usurpation') },
+      { text: 'Comportement inapproprié', onPress: () => submitReportProfile('Comportement inapproprié') },
+      { text: 'Spam', onPress: () => submitReportProfile('Spam') },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  }
+
+  async function submitReportProfile(reason: string) {
+    const { error } = await supabase.rpc('report_content', { p_content_type: 'profil', p_content_id: userId, p_reason: reason });
+    if (error) {
+      Alert.alert('Erreur', error.message.includes('propre contenu') ? 'Vous ne pouvez pas signaler votre propre profil.' : 'Une erreur est survenue.');
+      return;
+    }
+    Alert.alert('Signalement envoyé', "Merci, notre équipe va l'examiner.");
+  }
+
   async function openFollowersModal() {
     setFollowModal(true);
     setFollowListLoading(true);
@@ -263,6 +282,9 @@ export default function ProfilPublicScreen() {
                   <Text style={[styles.followBtnText, styles.followBtnTextActive]}>Message</Text>
                 </>
               )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reportBtn} onPress={reportProfile}>
+              <Ionicons name="flag-outline" size={16} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
         )}
@@ -504,6 +526,7 @@ const styles = StyleSheet.create({
   },
   followBtnActive: { backgroundColor: 'rgba(245,239,224,0.1)', borderWidth: 1, borderColor: colors.terra + '66' },
   messageBtn: { backgroundColor: 'rgba(245,239,224,0.1)', borderWidth: 1, borderColor: colors.terra + '66' },
+  reportBtn: { width: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: 'rgba(245,239,224,0.1)', borderWidth: 1, borderColor: 'rgba(245,239,224,0.15)' },
   followBtnText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 14 },
   followBtnTextActive: { color: colors.terra },
   dogRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
