@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Alert, Linking } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -22,7 +22,9 @@ import Navigation from './src/navigation';
 import { clearBadge } from './src/lib/notifications';
 import { STRIPE_PUBLISHABLE_KEY } from './src/lib/stripeConfig';
 import SplashLoader from './src/components/SplashLoader';
+import UpdateRequiredScreen from './src/components/UpdateRequiredScreen';
 import { trackAppOpen, startTrackingFlushLoop } from './src/lib/tracking';
+import { checkAppVersion, getStoreUrl } from './src/lib/versionCheck';
 
 async function checkForOTAUpdate() {
   try {
@@ -58,11 +60,25 @@ async function checkAndApplyOTAUpdateOnResume() {
 
 export default function App() {
   const appStateRef = useRef(AppState.currentState);
+  // 'checking' pendant l'appel reseau -- jamais bloquant au-dela du premier
+  // rendu, voir checkAppVersion() (fail-open sur erreur/reseau indisponible).
+  const [versionBlocked, setVersionBlocked] = useState(false);
 
   useEffect(() => {
     checkForOTAUpdate();
     startTrackingFlushLoop();
     trackAppOpen();
+
+    checkAppVersion().then((result) => {
+      setVersionBlocked(result.blocked);
+      if (!result.blocked && result.updateAvailable) {
+        Alert.alert(
+          'Mise à jour disponible',
+          'Une nouvelle version de The Pack La Meute est disponible.',
+          [{ text: 'Plus tard', style: 'cancel' }, { text: 'Mettre à jour', onPress: () => Linking.openURL(getStoreUrl()) }]
+        );
+      }
+    });
 
     // Efface le badge dès que l'app revient au premier plan
     const appStateSub = AppState.addEventListener('change', (next: AppStateStatus) => {
@@ -94,6 +110,7 @@ export default function App() {
   });
 
   if (!fontsLoaded) return <SplashLoader />;
+  if (versionBlocked) return <UpdateRequiredScreen />;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
