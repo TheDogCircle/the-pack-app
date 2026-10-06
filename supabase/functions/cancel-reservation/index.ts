@@ -6,6 +6,31 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+const FROM_EMAIL = 'The Pack Club <reservations@thepackclub.fr>'
+
+// Memes helpers que notify-reservation (declenchee a la creation) -- ici on
+// notifie sur l'annulation, toujours les deux parties (client + pro), peu
+// importe laquelle des deux a declenche l'annulation.
+async function sendEmail(to: string, subject: string, html: string) {
+  if (!RESEND_API_KEY) { console.log('RESEND_API_KEY not set, skipping email'); return }
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_API_KEY}` },
+    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+  })
+  const body = await res.json()
+  console.log('Resend response', res.status, JSON.stringify(body))
+}
+
+async function sendPush(token: string, title: string, body: string, data?: Record<string, unknown>) {
+  await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ to: token, title, body, data, sound: 'default', badge: 1 }),
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -29,7 +54,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, lieu_id, user_id, date, heure_debut, statut, statut_paiement, montant_ht, stripe_payment_intent_id, lieux(manager_user_id)')
+      .select('id, lieu_id, user_id, prestation_id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, client_prenom, client_tel, stripe_payment_intent_id, lieux(manager_user_id, nom, ville)')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -40,6 +65,87 @@ Deno.serve(async (req) => {
     const isPro = !!managerUserId && managerUserId === caller.id
     if (!isClient && !isPro) throw new Error('Non autorisé sur cette réservation')
 
+    // Notifie push + email les deux parties (client et pro) qu'une reservation
+    // vient d'etre annulee -- appelee juste avant chaque `return` ci-dessous,
+    // une fois le statut vraiment mis a jour en base.
+    async function notifyCancellation(montantRembourse: number | null) {
+      const lieu = (resa as any).lieux
+      const lieuNom = lieu?.nom || 'l\'établissement'
+      const lieuVille = lieu?.ville || ''
+      const { data: prest } = resa.prestation_id
+        ? await supabaseAdmin.from('prestations').select('nom').eq('id', resa.prestation_id).maybeSingle()
+        : { data: null as { nom: string } | null }
+      const prestNom = prest?.nom || 'Prestation'
+      const dateStr = new Date(resa.date + 'T' + resa.heure_debut).toLocaleDateString('fr-FR', {
+        weekday: 'long', day: 'numeric', month: 'long',
+      })
+      const heureStr = `${resa.heure_debut?.slice(0, 5)} – ${resa.heure_fin?.slice(0, 5)}`
+      const remboursementLigne = montantRembourse
+        ? `<tr><td style="padding:8px 0;color:#8A6B5A">Montant remboursé</td><td style="padding:8px 0;font-weight:500">${montantRembourse.toFixed(2)} €</td></tr>`
+        : ''
+
+      if (resa.user_id) {
+        const { data: clientProfil } = await supabaseAdmin.from('profils')
+          .select('push_token, prenom').eq('id', resa.user_id).maybeSingle()
+        if (clientProfil?.push_token) {
+          await sendPush(
+            clientProfil.push_token,
+            'Rendez-vous annulé',
+            `Votre RDV chez ${lieuNom} le ${dateStr} à ${resa.heure_debut?.slice(0, 5)} a été annulé.${montantRembourse ? ` ${montantRembourse.toFixed(2)} € remboursés.` : ''}`,
+            { type: 'reservation', reservationId: resa.id },
+          )
+        }
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(resa.user_id)
+        const clientEmail = authUser?.user?.email
+        if (clientEmail) {
+          await sendEmail(clientEmail, `Rendez-vous annulé — ${lieuNom}`, `
+            <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#3D1A1A">
+              <h2 style="color:#C4693A">Votre rendez-vous a été annulé</h2>
+              <p>Bonjour ${clientProfil?.prenom || resa.client_prenom || ''},</p>
+              <p>Votre rendez-vous chez <strong>${lieuNom}</strong>${lieuVille ? ` (${lieuVille})` : ''} a été annulé.</p>
+              <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#8A6B5A">Prestation</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:500">${prestNom}</td></tr>
+                <tr><td style="padding:8px 0;${montantRembourse ? 'border-bottom:1px solid #eee;' : ''}color:#8A6B5A">Date</td><td style="padding:8px 0;${montantRembourse ? 'border-bottom:1px solid #eee;' : ''}font-weight:500">${dateStr} · ${heureStr}</td></tr>
+                ${remboursementLigne}
+              </table>
+              <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+              <p style="font-size:12px;color:#aaa">The Pack Club · La carte dog-friendly de France</p>
+            </div>
+          `)
+        }
+      }
+
+      if (managerUserId) {
+        const { data: proProfil } = await supabaseAdmin.from('profils')
+          .select('push_token').eq('id', managerUserId).maybeSingle()
+        if (proProfil?.push_token) {
+          await sendPush(
+            proProfil.push_token,
+            'Rendez-vous annulé',
+            `Le RDV de ${resa.client_prenom || 'un client'} pour ${prestNom} le ${dateStr} a été annulé.`,
+            { type: 'new_reservation', reservationId: resa.id },
+          )
+        }
+        const { data: proAuth } = await supabaseAdmin.auth.admin.getUserById(managerUserId)
+        const proEmail = proAuth?.user?.email
+        if (proEmail) {
+          await sendEmail(proEmail, `Rendez-vous annulé — ${resa.client_prenom || 'Client'}`, `
+            <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#3D1A1A">
+              <h2 style="color:#C4693A">Une réservation a été annulée</h2>
+              <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#8A6B5A">Client</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:500">${resa.client_prenom || '—'}${resa.client_tel ? ' · ' + resa.client_tel : ''}</td></tr>
+                <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#8A6B5A">Prestation</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:500">${prestNom}</td></tr>
+                <tr><td style="padding:8px 0;color:#8A6B5A">Date</td><td style="padding:8px 0;font-weight:500">${dateStr} · ${heureStr}</td></tr>
+              </table>
+              <a href="https://thepacklameute.fr/espace-pro.html" style="display:inline-block;background:#C4693A;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;margin-top:8px">Voir mes réservations →</a>
+              <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+              <p style="font-size:12px;color:#aaa">The Pack Club · Espace Pro</p>
+            </div>
+          `)
+        }
+      }
+    }
+
     if (resa.statut === 'annulee' || resa.statut === 'terminee') {
       throw new Error('Cette réservation ne peut plus être annulée')
     }
@@ -47,6 +153,7 @@ Deno.serve(async (req) => {
     // Reservation non payee (flux web gratuit historique) : simple annulation, pas de Stripe.
     if (!resa.stripe_payment_intent_id || resa.statut_paiement === 'non_requis') {
       await supabaseAdmin.from('reservations').update({ statut: 'annulee' }).eq('id', reservation_id)
+      await notifyCancellation(null)
       return new Response(JSON.stringify({ cancelled: true, refunded: false }), {
         headers: { ...CORS, 'Content-Type': 'application/json' },
       })
@@ -58,6 +165,7 @@ Deno.serve(async (req) => {
     if (resa.statut_paiement === 'en_attente') {
       await stripe.paymentIntents.cancel(resa.stripe_payment_intent_id)
       await supabaseAdmin.from('reservations').update({ statut: 'annulee', statut_paiement: 'echoue' }).eq('id', reservation_id)
+      await notifyCancellation(null)
       return new Response(JSON.stringify({ cancelled: true, refunded: false }), {
         headers: { ...CORS, 'Content-Type': 'application/json' },
       })
@@ -89,6 +197,7 @@ Deno.serve(async (req) => {
         .from('reservations')
         .update({ statut: 'annulee', montant_rembourse: 0 })
         .eq('id', reservation_id)
+      await notifyCancellation(0)
 
       return new Response(JSON.stringify({
         cancelled: true, refunded: false, montant_rembourse: 0, refund_percent: 0,
@@ -119,6 +228,7 @@ Deno.serve(async (req) => {
         montant_rembourse: montantRembourse,
       })
       .eq('id', reservation_id)
+    await notifyCancellation(montantRembourse)
 
     return new Response(JSON.stringify({
       cancelled: true,
