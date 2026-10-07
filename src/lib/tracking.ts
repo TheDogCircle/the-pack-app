@@ -71,6 +71,22 @@ export async function track(eventName: string, properties?: Record<string, unkno
   await writeQueue(queue);
 }
 
+// Pour les connexions OAuth (Google, Apple) : signInWithIdToken/setSession ne
+// disent pas si le compte vient d'etre cree ou existait deja. On le detecte en
+// comparant created_at et last_sign_in_at de l'utilisateur, quasi identiques
+// uniquement au tout premier login.
+export function trackSignupIfNew(
+  user: { created_at?: string; last_sign_in_at?: string } | null | undefined,
+  method: string,
+): void {
+  if (!user?.created_at || !user.last_sign_in_at) return;
+  const createdMs = new Date(user.created_at).getTime();
+  const lastSignInMs = new Date(user.last_sign_in_at).getTime();
+  if (Math.abs(lastSignInMs - createdMs) < 10000) {
+    track('signup_completed', { method });
+  }
+}
+
 export async function flushTrackQueue(): Promise<void> {
   const queue = await readQueue();
   if (!queue.length) return;

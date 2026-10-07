@@ -7,7 +7,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
-import { track } from '../lib/tracking';
+import { track, trackSignupIfNew } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 
@@ -48,7 +48,7 @@ export default function AuthScreen() {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) Alert.alert('Erreur', error.message);
         else {
-          track('signup_completed');
+          track('signup_completed', { method: 'email' });
           Alert.alert('Vérifie ta boîte mail', "Un lien de confirmation t'a été envoyé.");
         }
       }
@@ -75,8 +75,9 @@ export default function AuthScreen() {
         const access_token = params.get('access_token');
         const refresh_token = params.get('refresh_token') ?? '';
         if (access_token) {
-          const { error: sessErr } = await supabase.auth.setSession({ access_token, refresh_token });
+          const { data: sessData, error: sessErr } = await supabase.auth.setSession({ access_token, refresh_token });
           if (sessErr) Alert.alert('Erreur Google', sessErr.message);
+          else trackSignupIfNew(sessData.session?.user, 'google');
         } else {
           Alert.alert('Erreur Google', 'Aucun token reçu. Réessaie.');
         }
@@ -99,11 +100,12 @@ export default function AuthScreen() {
         Alert.alert('Erreur Apple', 'Aucun token reçu.');
         return;
       }
-      const { error } = await supabase.auth.signInWithIdToken({
+      const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: credential.identityToken,
       });
       if (error) Alert.alert('Erreur Apple', error.message);
+      else trackSignupIfNew(data.session?.user, 'apple');
     } catch (e: any) {
       if (e.code !== 'ERR_REQUEST_CANCELED') {
         Alert.alert('Erreur', e.message);
