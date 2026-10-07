@@ -1301,21 +1301,12 @@ export default function CarteScreen() {
       Alert.alert('Permission requise', "Autorise la géolocalisation dans les réglages pour suivre ta balade.");
       return;
     }
-    if (Platform.OS === 'android') {
-      // Pas encore de suivi arriere-plan sur Android (voir baladeTracking.ts) :
-      // la balade s'arrete d'etre enregistree si l'app passe en arriere-plan.
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (bg.status !== 'granted') {
       Alert.alert(
         'Suivi limité au premier plan',
-        "Sur Android, ta balade s'arrête d'être enregistrée si tu verrouilles ton téléphone ou changes d'application. Garde l'app ouverte pendant ta balade.",
+        "Sans l'autorisation \"Toujours\", ta balade s'arrêtera d'être enregistrée si tu verrouilles ton téléphone ou changes d'application. Tu peux l'activer dans les réglages.",
       );
-    } else {
-      const bg = await Location.requestBackgroundPermissionsAsync();
-      if (bg.status !== 'granted') {
-        Alert.alert(
-          'Suivi limité au premier plan',
-          "Sans l'autorisation \"Toujours\", ta balade s'arrêtera d'être enregistrée si tu verrouilles ton téléphone ou changes d'application. Tu peux l'activer dans les réglages.",
-        );
-      }
     }
     setFabOpen(false);
     const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });

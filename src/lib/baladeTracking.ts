@@ -1,7 +1,6 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 export const BALADE_TASK_NAME = 'thepack-balade-tracking';
 const TRACE_KEY = 'thepack_balade_trace';
@@ -47,28 +46,13 @@ async function appendLocations(locations: Location.LocationObject[]) {
 // suspendue. Le seul canal fiable pour persister les points recus dans ce
 // contexte est le stockage local (AsyncStorage) — l'etat React du composant
 // CarteScreen n'existe pas forcement au moment ou ce callback s'execute.
-// iOS uniquement (voir registerLocationUpdates) : Android n'a pas encore la
-// declaration Play Store FOREGROUND_SERVICE_LOCATION (necessite une video de
-// demonstration), donc pas de vrai suivi arriere-plan pour le moment.
 TaskManager.defineTask(BALADE_TASK_NAME, async ({ data, error }) => {
   if (error) return;
   const locations = (data as any)?.locations as Location.LocationObject[] | undefined;
   await appendLocations(locations ?? []);
 });
 
-// Suivi premier-plan uniquement, utilise sur Android (voir commentaire ci-dessus).
-// S'arrete si l'app passe en arriere-plan ou l'ecran se verrouille.
-let androidWatchSub: Location.LocationSubscription | null = null;
-
 async function registerLocationUpdates() {
-  if (Platform.OS === 'android') {
-    androidWatchSub?.remove();
-    androidWatchSub = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
-      (loc) => { appendLocations([loc]); }
-    );
-    return;
-  }
   await Location.startLocationUpdatesAsync(BALADE_TASK_NAME, {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 3000,
@@ -97,11 +81,6 @@ export async function resumeBaladeBackgroundTracking() {
 }
 
 export async function stopBaladeBackgroundTracking() {
-  if (Platform.OS === 'android') {
-    androidWatchSub?.remove();
-    androidWatchSub = null;
-    return;
-  }
   const running = await TaskManager.isTaskRegisteredAsync(BALADE_TASK_NAME).catch(() => false);
   if (running) await Location.stopLocationUpdatesAsync(BALADE_TASK_NAME).catch(() => {});
 }

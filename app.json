@@ -61,8 +61,8 @@
         {
           "locationWhenInUsePermission": "The Pack utilise ta position pour afficher les lieux dog-friendly près de toi et te proposer les balades de la meute.",
           "locationAlwaysAndWhenInUsePermission": "The Pack continue d'enregistrer le trajet de ta balade même si ton téléphone est verrouillé ou que tu changes d'application, comme sur Strava.",
-          "isAndroidBackgroundLocationEnabled": false,
-          "isAndroidForegroundServiceEnabled": false
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
