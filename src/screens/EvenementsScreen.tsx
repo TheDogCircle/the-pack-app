@@ -184,7 +184,7 @@ export default function EvenementsScreen() {
       if (found) { setSelectedEvent(found); return current; }
       // Pas dans la liste actuelle (filtre different) : on va le chercher directement
       supabase.from('evenements')
-        .select('*, profils(prenom, username, avatar_url)')
+        .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
         .eq('id', pendingId).maybeSingle()
         .then(({ data }) => { if (data) setSelectedEvent(data as Evenement); });
       return current;
@@ -220,7 +220,7 @@ export default function EvenementsScreen() {
       const endWeek = new Date(Date.now() + 7 * 86400000).toISOString();
 
       let q = supabase.from('evenements')
-        .select('*, profils(prenom, username, avatar_url)')
+        .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
         .eq('valide', true).eq('actif', true)
         .gte('date_heure', now)
         .order('date_heure', { ascending: true });
@@ -284,7 +284,7 @@ export default function EvenementsScreen() {
     mine.forEach(e => byId.set(e.id, e));
     try {
       const { data: ownAll } = await supabase.from('evenements')
-        .select('*, profils(prenom, username, avatar_url)')
+        .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
         .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`)
         .is('site_web', null)
         .gte('date_heure', now);
@@ -294,7 +294,7 @@ export default function EvenementsScreen() {
     } catch {}
     try {
       const { data: favRows } = await supabase.from('evenements_favoris')
-        .select('event_id, evenements(*, profils(prenom, username, avatar_url))')
+        .select('event_id, evenements(*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url))')
         .eq('user_id', userId);
       (favRows || []).forEach((f: any) => {
         if (!f.evenements || f.evenements.date_heure < now) return;

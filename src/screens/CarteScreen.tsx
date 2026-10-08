@@ -2083,7 +2083,7 @@ export default function CarteScreen() {
     const now = new Date().toISOString();
     const { data } = await supabase
       .from('evenements')
-      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils(prenom,username)')
+      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils!evenements_organisateur_id_fkey(prenom,username)')
       .eq('valide', true).eq('actif', true)
       .gte('date_heure', now)
       .not('lat', 'is', null)
