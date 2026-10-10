@@ -34,6 +34,21 @@ export default function AuthScreen() {
     }
   }, []);
 
+  async function handleForgotPassword() {
+    if (!email) {
+      Alert.alert('Email requis', "Entre d'abord ton email ci-dessus, puis retape sur « Mot de passe oublié ».");
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://thepackclub.fr/reset-password.html',
+    });
+    if (error) {
+      Alert.alert('Erreur', error.message);
+      return;
+    }
+    Alert.alert('Email envoyé', `Un lien pour choisir un nouveau mot de passe a été envoyé à ${email}.`);
+  }
+
   async function handleSubmit() {
     if (!email || !password) {
       Alert.alert('Champs manquants', "Remplis l'email et le mot de passe.");
@@ -198,6 +213,12 @@ export default function AuthScreen() {
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
           />
 
+          {mode === 'login' && (
+            <TouchableOpacity onPress={handleForgotPassword} style={styles.forgotLink}>
+              <Text style={styles.forgotLinkText}>Mot de passe oublié ?</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={[styles.btn, loading && styles.btnDisabled]}
             onPress={handleSubmit}
@@ -273,6 +294,8 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 14, fontSize: 15, color: colors.bordeaux,
     borderWidth: 1, borderColor: colors.border,
   },
+  forgotLink: { alignItems: 'flex-end', marginTop: -4 },
+  forgotLinkText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   btn: { backgroundColor: colors.terra, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 4 },
   btnDisabled: { opacity: 0.6 },
   btnText: { fontFamily: 'DMSans_500Medium', color: colors.ivory, fontSize: 15, fontWeight: '600' },
