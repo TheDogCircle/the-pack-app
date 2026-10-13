@@ -209,6 +209,10 @@ type LieuFull = Lieu & {
   manager_user_id: string | null; google_photo_url: string | null;
   plan: string | null;
   ferme?: boolean | null;
+  // Phase Pro 3 : profil pro / badge verifie
+  facebook_url: string | null; certifications: string[] | null;
+  zone_rayon_km: number | null; zone_polygon: { type: string; coordinates: number[][][] } | null;
+  photo_profil_url: string | null; certifie_at: string | null;
 };
 // react-native-maps prend un instantane statique du contenu des marqueurs
 // personnalises (tracksViewChanges) plutot que de les re-rendre en continu, pour la
@@ -643,6 +647,12 @@ export default function CarteScreen() {
   const [avisNote, setAvisNote] = useState(0);
   const [avisComment, setAvisComment] = useState('');
   const [avisLoading, setAvisLoading] = useState(false);
+  // Phase Pro 3 : contacter le pro -- cree/reutilise une conversation
+  // conversations.lieu_id, meme table que la messagerie communautaire
+  // (MessagerieScreen.tsx), jamais une messagerie parallele.
+  const [contactModal, setContactModal] = useState(false);
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactLoading, setContactLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Lieu[]>([]);
   const [cityResults, setCityResults] = useState<CityResult[]>([]);
@@ -2004,6 +2014,44 @@ export default function CarteScreen() {
     Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
   }
 
+  // Phase Pro 3 : "Contacter" sur la fiche publique. Reutilise conversations/
+  // messages/conversation_members (meme tables que MessagerieScreen.tsx) --
+  // une seule conversation type='pro_client' par (lieu, client), retrouvee
+  // telle quelle si elle existe deja. L'equipe du lieu la voit grace aux
+  // policies posees en migration (conversations_lieu_staff_select), sans
+  // avoir besoin d'etre ajoutee comme conversation_member a chaque fois.
+  async function submitContact() {
+    if (!userId) { showLoginPrompt(); return; }
+    if (!selectedLieu || !contactMessage.trim()) return;
+    setContactLoading(true);
+    try {
+      const { data: existingMember } = await supabase
+        .from('conversation_members').select('conversation_id').eq('user_id', userId);
+      const myConvIds = (existingMember || []).map((m: any) => m.conversation_id);
+      let convId: string | null = null;
+      if (myConvIds.length) {
+        const { data: existingConv } = await supabase
+          .from('conversations').select('id').eq('lieu_id', selectedLieu.id).in('id', myConvIds).maybeSingle();
+        convId = existingConv?.id || null;
+      }
+      if (!convId) {
+        const { data: newConv, error: convErr } = await supabase
+          .from('conversations').insert({ lieu_id: selectedLieu.id, type: 'pro_client', created_by: userId, nom: null })
+          .select('id').single();
+        if (convErr) throw convErr;
+        convId = newConv.id;
+        await supabase.from('conversation_members').insert({ conversation_id: convId, user_id: userId });
+      }
+      await supabase.from('messages').insert({ conversation_id: convId, user_id: userId, contenu: contactMessage.trim() });
+      setContactModal(false); setContactMessage('');
+      Alert.alert('Message envoyé', 'Retrouve la conversation dans Messages.');
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || "Impossible d'envoyer le message.");
+    } finally {
+      setContactLoading(false);
+    }
+  }
+
   async function useMyLocation() {
     setProposeGeoLoading(true);
     try {
@@ -2744,6 +2792,12 @@ export default function CarteScreen() {
                   <Text style={styles.certInlineText}>Certifié The Pack</Text>
                 </View>
               )}
+              {(selectedLieu as any).certifie_at && (
+                <View style={[styles.certInlineBadge, { backgroundColor: 'rgba(196,160,82,0.14)' }]}>
+                  <Ionicons name="shield-checkmark" size={11} color="#c4a052" />
+                  <Text style={[styles.certInlineText, { color: '#8a6a28' }]}>Vérifié par The Pack</Text>
+                </View>
+              )}
             </View>
             {(selectedLieu.adresse || selectedLieu.ville) ? (
               <Text style={styles.ficheInfoAdresse} numberOfLines={1}>
@@ -2841,6 +2895,34 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 ) : null}
 
+                {(selectedLieu as any).facebook_url ? (
+                  <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL((selectedLieu as any).facebook_url)}>
+                    <Ionicons name="logo-facebook" size={15} color={colors.textMuted} />
+                    <Text style={[styles.infoText, { color: colors.terra }]} numberOfLines={1}>
+                      {(selectedLieu as any).facebook_url.replace(/^https?:\/\/(www\.)?facebook\.com\//, '').replace(/\/$/, '')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {(selectedLieu as any).zone_rayon_km ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="navigate-circle-outline" size={15} color={colors.textMuted} />
+                    <Text style={styles.infoText}>Se déplace dans un rayon de {(selectedLieu as any).zone_rayon_km} km</Text>
+                  </View>
+                ) : ((selectedLieu as any).zone_polygon ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="navigate-circle-outline" size={15} color={colors.textMuted} />
+                    <Text style={styles.infoText}>Zone d'intervention définie — voir sur la carte</Text>
+                  </View>
+                ) : null)}
+
+                {(selectedLieu as any).certifications?.length ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="ribbon-outline" size={15} color={colors.textMuted} />
+                    <Text style={styles.infoText}>{(selectedLieu as any).certifications.join(' · ')}</Text>
+                  </View>
+                ) : null}
+
                 {/* Actions */}
                 <View style={styles.actions}>
                   <TouchableOpacity
@@ -2890,6 +2972,15 @@ export default function CarteScreen() {
                       {myAvis ? 'Mon avis' : 'Avis'}
                     </Text>
                   </TouchableOpacity>
+                  {!selectedLieu.ferme && (selectedLieu as any).manager_user_id ? (
+                    <TouchableOpacity
+                      style={styles.actionSecondary}
+                      onPress={() => { if (!userId) { showLoginPrompt(); return; } setContactMessage(''); setContactModal(true); }}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.ivory} />
+                      <Text style={styles.actionSecondaryText} numberOfLines={1}>Contacter</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity style={styles.actionShare} onPress={shareLieuWhatsapp}>
                     <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
                   </TouchableOpacity>
@@ -3069,6 +3160,32 @@ export default function CarteScreen() {
               />
               <TouchableOpacity style={[styles.avisSubmit, (!avisNote || avisLoading) && styles.avisSubmitDisabled]} onPress={submitAvis} disabled={!avisNote || avisLoading}>
                 {avisLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Publier mon avis</Text>}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        )}
+
+        {contactModal && (
+          <KeyboardAvoidingView style={StyleSheet.absoluteFillObject} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setContactModal(false)} activeOpacity={1} />
+            <View style={[styles.modalCard, { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Contacter</Text>
+                <TouchableOpacity onPress={() => setContactModal(false)}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSubtitle} numberOfLines={1}>{selectedLieu?.nom}</Text>
+              <TextInput
+                style={styles.avisInput}
+                placeholder="Votre message…"
+                placeholderTextColor={colors.textMuted}
+                value={contactMessage}
+                onChangeText={setContactMessage}
+                multiline numberOfLines={4} textAlignVertical="top"
+              />
+              <TouchableOpacity style={[styles.avisSubmit, (!contactMessage.trim() || contactLoading) && styles.avisSubmitDisabled]} onPress={submitContact} disabled={!contactMessage.trim() || contactLoading}>
+                {contactLoading ? <ActivityIndicator color={colors.ivory} /> : <Text style={styles.avisSubmitText}>Envoyer</Text>}
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
