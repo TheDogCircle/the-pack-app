@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { resolveOfferPrice, applyRemiseMembre } from '../_shared/offerPricing.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
 
     // Client Stripe : reutilise celui deja enregistre sur le profil, sinon
     // en cree un (necessaire pour reutiliser la carte hors-session ensuite).
-    const { data: profil } = await supabaseAdmin.from('profils').select('stripe_customer_id').eq('id', caller.id).maybeSingle()
+    const { data: profil } = await supabaseAdmin.from('profils').select('stripe_customer_id, ambassadeur').eq('id', caller.id).maybeSingle()
     let customerId = profil?.stripe_customer_id || null
     if (!customerId) {
       const customer = await stripe.customers.create({ email: caller.email || undefined, metadata: { user_id: caller.id } })
@@ -81,21 +82,19 @@ Deno.serve(async (req) => {
     }
 
     const panierId = crypto.randomUUID()
-    const inserted: { reservation_id: string; prestation_id: string; prix: number; percent: number }[] = []
-    const failed: { prestation_id: string; date: string; heure_debut: string; error: string }[] = []
+    const inserted: { reservation_id: string; offer_id: string; prix_cents: number; percent: number }[] = []
+    const failed: { offer_id: string; date: string; heure_debut: string; error: string }[] = []
 
     for (const item of items) {
       try {
-        const { prestation_id, date, heure_debut, chien_id } = item
-        if (!prestation_id || !date || !heure_debut) throw new Error('Champs manquants')
+        const { offer_id, gabarit, type_poil, duree_minutes, date, heure_debut, chien_id } = item
+        if (!offer_id || !date || !heure_debut) throw new Error('Champs manquants')
 
-        const { data: prestation, error: prestaErr } = await supabaseAdmin
-          .from('prestations').select('id, lieu_id, prix, duree, actif').eq('id', prestation_id).maybeSingle()
-        if (prestaErr) throw prestaErr
-        if (!prestation || prestation.lieu_id !== lieu_id || !prestation.actif) throw new Error('Prestation introuvable')
-        if (!prestation.prix || prestation.prix <= 0) throw new Error('Prestation sans tarif défini')
+        const resolved = await resolveOfferPrice(supabaseAdmin, offer_id, lieu_id, { gabarit, typePoil: type_poil, dureeMinutes: duree_minutes })
+        if (!resolved.legacyPrestationId) throw new Error('Configuration de l\'offre incomplète')
+        const prixCents = applyRemiseMembre(resolved.prixCents, resolved.options, !!profil?.ambassadeur)
 
-        const heure_fin = addMinutes(heure_debut, prestation.duree)
+        const heure_fin = addMinutes(heure_debut, resolved.dureeMinutes)
         const jour = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7
         const { data: dispo, error: dispoErr } = await supabaseAdmin
           .from('disponibilites').select('heure_debut, heure_fin').eq('lieu_id', lieu_id).eq('jour', jour).maybeSingle()
@@ -113,9 +112,10 @@ Deno.serve(async (req) => {
         const { data: reservation, error: insertErr } = await supabaseAdmin
           .from('reservations')
           .insert({
-            lieu_id, prestation_id, panier_id: panierId, chien_id: chien_id || null,
+            lieu_id, prestation_id: resolved.legacyPrestationId, offer_id, offer_price_id: resolved.offerPrice.id,
+            panier_id: panierId, chien_id: chien_id || null,
             user_id: caller.id, client_prenom, client_tel: client_tel || null, client_email: caller.email || null,
-            date, heure_debut, heure_fin, statut: 'en_attente', statut_paiement: 'en_attente', montant_ht: prestation.prix,
+            date, heure_debut, heure_fin, statut: 'en_attente', statut_paiement: 'en_attente', montant_ht: prixCents / 100,
           })
           .select('id').single()
         if (insertErr) {
@@ -123,9 +123,9 @@ Deno.serve(async (req) => {
           throw insertErr
         }
 
-        inserted.push({ reservation_id: reservation.id, prestation_id, prix: Number(prestation.prix), percent })
+        inserted.push({ reservation_id: reservation.id, offer_id, prix_cents: prixCents, percent })
       } catch (itemErr) {
-        failed.push({ prestation_id: item.prestation_id, date: item.date, heure_debut: item.heure_debut, error: itemErr.message })
+        failed.push({ offer_id: item.offer_id, date: item.date, heure_debut: item.heure_debut, error: itemErr.message })
       }
     }
 
@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
     }
 
     const first = inserted[0]
-    const amountCents = Math.round(first.prix * 100)
+    const amountCents = first.prix_cents
     const commissionCents = Math.round(amountCents * (first.percent / 100))
 
     let paymentIntent
@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
         setup_future_usage: 'off_session',
         application_fee_amount: commissionCents,
         transfer_data: { destination: lieu.stripe_account_id },
-        metadata: { reservation_id: first.reservation_id, lieu_id, prestation_id: first.prestation_id, panier_id: panierId },
+        metadata: { reservation_id: first.reservation_id, lieu_id, offer_id: first.offer_id, panier_id: panierId },
       })
     } catch (stripeErr) {
       await supabaseAdmin.from('reservations').delete().in('id', inserted.map(i => i.reservation_id))

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { resolveOfferPrice, applyRemiseMembre, getBookingRules, checkDelaiMin, computeAcompteCents } from '../_shared/offerPricing.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -36,23 +37,19 @@ Deno.serve(async (req) => {
     const { data: { user: caller }, error: authErr } = await supabaseAdmin.auth.getUser(token)
     if (authErr || !caller) throw new Error('Non autorisé')
 
-    const { lieu_id, prestation_id, date, heure_debut, client_prenom, client_tel } = await req.json()
-    if (!lieu_id || !prestation_id || !date || !heure_debut || !client_prenom) {
+    // Phase Pro 4 : offer_id remplace prestation_id cote client -- gabarit/
+    // type_poil/duree_minutes selectionnent la variante de prix (offer_prices)
+    // quand l'offre en a plusieurs (cf resolveOfferPrice).
+    const { lieu_id, offer_id, gabarit, type_poil, duree_minutes, date, heure_debut, client_prenom, client_tel } = await req.json()
+    if (!lieu_id || !offer_id || !date || !heure_debut || !client_prenom) {
       throw new Error('Champs manquants')
     }
 
-    const [{ data: lieu, error: lieuErr }, { data: prestation, error: prestaErr }] = await Promise.all([
-      supabaseAdmin.from('lieux').select('id, nom, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle(),
-      supabaseAdmin.from('prestations').select('id, lieu_id, prix, duree, actif').eq('id', prestation_id).maybeSingle(),
-    ])
+    const { data: lieu, error: lieuErr } = await supabaseAdmin
+      .from('lieux').select('id, nom, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
-    if (prestaErr) throw prestaErr
     if (!lieu) throw new Error('Lieu introuvable')
-    // org_has_feature() (socle commun) remplace l'ancien check
-    // ['pro','premium'].includes(lieu.plan) -- vocabulaire remonte a avant le
-    // rebranchement, ne matchait plus 'essentiel' (bug reel trouve en
-    // auditant : un pro Essentiel ne pouvait pas accepter de paiement en
-    // ligne alors que c'est promis dans son offre).
+
     const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', lieu_id).eq('statut', 'approved').maybeSingle()
     const { data: canReserve } = place?.org_id
       ? await supabaseAdmin.rpc('org_has_feature', { p_org_id: place.org_id, p_feature: 'reservation_paiement_en_ligne' })
@@ -61,10 +58,12 @@ Deno.serve(async (req) => {
     if (!lieu.stripe_account_id || !lieu.stripe_charges_enabled) {
       throw new Error("Ce prestataire n'a pas encore activé les paiements en ligne")
     }
-    if (!prestation || prestation.lieu_id !== lieu_id || !prestation.actif) throw new Error('Prestation introuvable')
-    if (!prestation.prix || prestation.prix <= 0) throw new Error('Prestation sans tarif défini')
 
-    const heure_fin = addMinutes(heure_debut, prestation.duree)
+    const resolved = await resolveOfferPrice(supabaseAdmin, offer_id, lieu_id, { gabarit, typePoil: type_poil, dureeMinutes: duree_minutes })
+    const heure_fin = addMinutes(heure_debut, resolved.dureeMinutes)
+
+    const rules = await getBookingRules(supabaseAdmin, place?.org_id ?? null)
+    checkDelaiMin(date, heure_debut, rules)
 
     // Verifie la disponibilite cote serveur (le calcul de carte.html est purement client).
     // disponibilites.jour suit la convention 0=lundi...6=dimanche (cf. espace-pro.html),
@@ -99,17 +98,29 @@ Deno.serve(async (req) => {
       percent = settings?.value?.percent ?? 20
     }
 
+    const { data: profil } = await supabaseAdmin.from('profils').select('ambassadeur, stripe_customer_id').eq('id', caller.id).maybeSingle()
+    const totalCents = applyRemiseMembre(resolved.prixCents, resolved.options, !!profil?.ambassadeur)
+    const acompteCents = computeAcompteCents(totalCents, rules)
+    const soldeACharger = acompteCents < totalCents
+    // L'offre peut imposer sa propre confirmation manuelle meme si
+    // l'organisation autorise la confirmation automatique par defaut.
+    const autoConfirm = !resolved.offer.confirmation_manuelle && rules.confirmation_auto
+
+    if (!resolved.legacyPrestationId) throw new Error('Configuration de l\'offre incomplète (contactez le support)')
+
     const { data: reservation, error: insertErr } = await supabaseAdmin
       .from('reservations')
       .insert({
-        lieu_id, prestation_id,
+        lieu_id, prestation_id: resolved.legacyPrestationId, offer_id, offer_price_id: resolved.offerPrice.id,
         user_id: caller.id,
         client_prenom, client_tel: client_tel || null,
         client_email: caller.email || null,
         date, heure_debut, heure_fin,
         statut: 'en_attente',
         statut_paiement: 'en_attente',
-        montant_ht: prestation.prix,
+        montant_ht: totalCents / 100,
+        acompte_cents: acompteCents,
+        solde_statut: soldeACharger ? 'a_charger' : 'non_applicable',
       })
       .select('id')
       .single()
@@ -119,25 +130,40 @@ Deno.serve(async (req) => {
       throw insertErr
     }
 
-    const amountCents = Math.round(Number(prestation.prix) * 100)
-    const commissionCents = Math.round(amountCents * (percent / 100))
+    // Client Stripe uniquement necessaire si un solde devra etre charge hors-
+    // session plus tard (cf confirm-reservation) -- sinon comportement
+    // inchange (simple autorisation, un seul paiement).
+    let customerId: string | undefined
+    if (soldeACharger) {
+      customerId = profil?.stripe_customer_id || undefined
+      if (!customerId) {
+        const customer = await stripe.customers.create({ email: caller.email || undefined, metadata: { user_id: caller.id } })
+        customerId = customer.id
+        await supabaseAdmin.from('profils').update({ stripe_customer_id: customerId }).eq('id', caller.id)
+      }
+    }
+
+    const commissionCents = Math.round(acompteCents * (percent / 100))
 
     let paymentIntent
     try {
-      // capture_method: 'manual' -- la carte est autorisee (montant bloque) mais
-      // jamais debitee a cette etape : la reservation reste une simple demande
-      // tant que le prestataire ne l'a pas confirmee (cf. confirm-reservation,
-      // qui declenche le capture reel). Sans confirmation sous quelques jours,
-      // l'autorisation expire automatiquement cote Stripe, rien n'est jamais
-      // preleve.
+      // Sans acompte et confirmation manuelle (cas le plus courant, comportement
+      // inchange par rapport a avant cette phase) : capture_method 'manual',
+      // la carte est autorisee mais jamais debitee tant que le prestataire
+      // n'a pas confirme (cf confirm-reservation). Un acompte est toujours
+      // capture immediatement (il engage le client des la reservation, meme
+      // si le prestataire n'a pas encore repondu) ; une confirmation
+      // automatique capture aussi tout de suite. Carte enregistree via
+      // setup_future_usage des qu'un solde devra etre charge hors-session.
       paymentIntent = await stripe.paymentIntents.create({
-        amount: amountCents,
+        amount: acompteCents,
         currency: 'eur',
         payment_method_types: ['card'],
-        capture_method: 'manual',
+        capture_method: (soldeACharger || autoConfirm) ? 'automatic' : 'manual',
+        ...(soldeACharger ? { customer: customerId, setup_future_usage: 'off_session' } : {}),
         application_fee_amount: commissionCents,
         transfer_data: { destination: lieu.stripe_account_id },
-        metadata: { reservation_id: reservation.id, lieu_id, prestation_id },
+        metadata: { reservation_id: reservation.id, lieu_id, offer_id },
       })
     } catch (stripeErr) {
       await supabaseAdmin.from('reservations').delete().eq('id', reservation.id)

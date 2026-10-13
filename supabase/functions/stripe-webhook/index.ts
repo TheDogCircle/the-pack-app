@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { chargeSolde } from '../_shared/offerPricing.ts'
 
 Deno.serve(async (req) => {
   // Cle API utilisee uniquement pour les appels reservation/Connect (test mode).
@@ -98,6 +99,8 @@ Deno.serve(async (req) => {
             : null
           await supabaseAdmin.from('forfaits_achetes').insert({
             forfait_id: pi.metadata.forfait_id,
+            offer_id: pi.metadata.offer_id || null,
+            offer_price_id: pi.metadata.offer_price_id || null,
             lieu_id: pi.metadata.lieu_id,
             user_id: pi.metadata.user_id,
             nb_seances_total: Number(pi.metadata.nb_seances),
@@ -110,15 +113,53 @@ Deno.serve(async (req) => {
 
         const commission = (pi.application_fee_amount ?? 0) / 100
 
+        // Acompte (Phase Pro 4) : ce succeeded peut n'etre que le depot, pas
+        // le paiement complet -- determine si la reservation doit rester
+        // en_attente (confirmation manuelle du prestataire requise) ou si
+        // elle se confirme tout de suite (offre + organisation autorisent la
+        // confirmation automatique), auquel cas le solde est charge ici.
+        const { data: resaCheck } = await supabaseAdmin
+          .from('reservations').select('id, offer_id, solde_statut').eq('stripe_payment_intent_id', pi.id).maybeSingle()
+
+        let depositOnly = false
+        if (resaCheck?.solde_statut === 'a_charger' && resaCheck.offer_id) {
+          const { data: offer } = await supabaseAdmin.from('offers').select('confirmation_manuelle, lieu_id').eq('id', resaCheck.offer_id).maybeSingle()
+          if (offer) {
+            const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', offer.lieu_id).eq('statut', 'approved').maybeSingle()
+            const { data: rules } = place?.org_id
+              ? await supabaseAdmin.from('org_booking_rules').select('confirmation_auto').eq('org_id', place.org_id).maybeSingle()
+              : { data: null }
+            depositOnly = !(!offer.confirmation_manuelle && rules?.confirmation_auto)
+          }
+        }
+
         const { data: resa, error } = await supabaseAdmin
           .from('reservations')
-          .update({ statut: 'confirmee', statut_paiement: 'paye', montant_commission: commission })
+          .update(depositOnly
+            ? { statut_paiement: 'acompte_paye' }
+            : { statut: 'confirmee', statut_paiement: 'paye', montant_commission: commission })
           .eq('stripe_payment_intent_id', pi.id)
-          .select('*')
+          .select('*, lieux(stripe_account_id, commission_rate_percent)')
           .maybeSingle()
         if (error) throw error
 
-        if (resa) {
+        if (resa && !depositOnly && resa.solde_statut === 'a_charger') {
+          // Confirmation automatique avec acompte : le solde est du tout de
+          // suite, pas d'attente d'une confirmation manuelle separee. Cumule
+          // sa commission avec celle (deja ecrite ci-dessus) de l'acompte.
+          try {
+            const soldePi = await chargeSolde(stripe, supabaseAdmin, resa)
+            if (soldePi?.application_fee_amount) {
+              await supabaseAdmin.from('reservations')
+                .update({ montant_commission: commission + soldePi.application_fee_amount / 100 })
+                .eq('id', resa.id)
+            }
+          } catch (e) {
+            console.error('chargeSolde (auto):', e.message)
+          }
+        }
+
+        if (resa && !depositOnly) {
           const notifyUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/notify-reservation`
           await fetch(notifyUrl, {
             method: 'POST',

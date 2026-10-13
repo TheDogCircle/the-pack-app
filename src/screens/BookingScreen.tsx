@@ -13,11 +13,33 @@ import { colors } from '../lib/theme';
 import { computeSlots, Disponibilite, ReservationSlot } from '../utils/availability';
 import type { RootStackParamList } from '../navigation';
 
-type Prestation = { id: string; nom: string; description: string | null; duree: number; prix: number };
+// Phase Pro 4 : offers/offer_prices remplace le modele plat prestations (un
+// seul prix, une seule duree). gabarit_poil et duree ont plusieurs variantes
+// de prix (offer_prices) -- resolues cote client une fois gabarit/type de
+// poil/duree choisis, cf resolveOfferPrice().
+type OfferPrice = { id: string; gabarit: string | null; type_poil: string | null; duree_minutes: number | null; prix_cents: number };
+type Offer = { id: string; nom: string; description: string | null; type: string; legacy_prestation_id: string | null; offer_prices: OfferPrice[] };
 type BookingRoute = RouteProp<RootStackParamList, 'Booking'>;
 
-type CartItem = { key: string; prestation: Prestation; date: Date; slot: string; chienId: string | null };
-type Chien = { id: string; nom: string; race: string | null };
+type CartItem = {
+  key: string; offer: Offer; date: Date; slot: string; chienId: string | null;
+  gabarit: string | null; typePoil: string | null; dureeMinutes: number;
+};
+type Chien = { id: string; nom: string; race: string | null; gabarit: string | null };
+
+const GABARIT_LABELS: Record<string, string> = { petit: 'Petit', moyen: 'Moyen', grand: 'Grand' };
+const POIL_LABELS: Record<string, string> = { ras: 'Ras', mi_long: 'Mi-long', long: 'Long', frise: 'Frisé' };
+
+// Resout la variante (et donc le prix/la duree) a partir des choix de
+// l'utilisateur -- premiere variante compatible, "a partir de" si rien n'est
+// encore choisi (affichage avant selection complete).
+function resolveOfferPrice(offer: Offer, gabarit: string | null, typePoil: string | null, dureeMinutes: number | null): OfferPrice | null {
+  const prices = offer.offer_prices || [];
+  if (!prices.length) return null;
+  if (offer.type === 'gabarit_poil') return prices.find(p => p.gabarit === gabarit && p.type_poil === typePoil) || null;
+  if (offer.type === 'duree') return prices.find(p => p.duree_minutes === dureeMinutes) || null;
+  return prices[0];
+}
 
 type Forfait = { id: string; nom: string; nb_seances: number; prix: number; prestation_id: string | null; validite_jours: number | null };
 type ForfaitAchete = {
@@ -40,8 +62,11 @@ export default function BookingScreen() {
   const { lieuId, lieuNom } = route.params;
 
   const [loading, setLoading] = useState(true);
-  const [prestations, setPrestations] = useState<Prestation[]>([]);
-  const [selectedPrestation, setSelectedPrestation] = useState<Prestation | null>(null);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
+  const [selectedGabarit, setSelectedGabarit] = useState<string | null>(null);
+  const [selectedTypePoil, setSelectedTypePoil] = useState<string | null>(null);
+  const [selectedDureeMinutes, setSelectedDureeMinutes] = useState<number | null>(null);
   const [disponibilites, setDisponibilites] = useState<Disponibilite[]>([]);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -53,6 +78,7 @@ export default function BookingScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [forfaits, setForfaits] = useState<Forfait[]>([]);
+  const [forfaitOfferIds, setForfaitOfferIds] = useState<Record<string, string>>({});
   const [mesForfaits, setMesForfaits] = useState<ForfaitAchete[]>([]);
   const [purchasingForfaitId, setPurchasingForfaitId] = useState<string | null>(null);
   const [usingForfait, setUsingForfait] = useState(false);
@@ -63,26 +89,56 @@ export default function BookingScreen() {
   const [submittingDevis, setSubmittingDevis] = useState(false);
 
   const loadForfaits = useCallback(async () => {
-    const [{ data: fs }, mesRes] = await Promise.all([
+    const [{ data: fs }, { data: forfaitOffers }, mesRes] = await Promise.all([
       supabase.from('forfaits').select('id,nom,nb_seances,prix,prestation_id,validite_jours').eq('lieu_id', lieuId).eq('actif', true),
+      supabase.from('offers').select('id,legacy_forfait_id').eq('lieu_id', lieuId).eq('type', 'forfait'),
       session
         ? supabase.from('forfaits_achetes').select('id,forfait_id,nb_seances_total,nb_seances_utilisees,date_expiration,forfaits(nom,prestation_id)').eq('lieu_id', lieuId).eq('user_id', session.user.id)
         : Promise.resolve({ data: [] }),
     ]);
     setForfaits(fs || []);
+    const map: Record<string, string> = {};
+    (forfaitOffers || []).forEach((o: any) => { if (o.legacy_forfait_id) map[o.legacy_forfait_id] = o.id; });
+    setForfaitOfferIds(map);
     setMesForfaits(((mesRes as any).data || []) as ForfaitAchete[]);
   }, [lieuId, session]);
 
+  // Selectionne automatiquement l'unique variante disponible quand gabarit/
+  // poil/duree n'ont qu'un seul choix possible (evite une etape inutile pour
+  // une offre 'duree' qui n'a qu'une seule duree, par ex.).
+  useEffect(() => {
+    if (!selectedOffer) return;
+    const prices = selectedOffer.offer_prices || [];
+    if (selectedOffer.type === 'gabarit_poil') {
+      const gabarits = [...new Set(prices.map(p => p.gabarit))];
+      const poils = [...new Set(prices.map(p => p.type_poil))];
+      if (gabarits.length === 1) setSelectedGabarit(gabarits[0]);
+      if (poils.length === 1) setSelectedTypePoil(poils[0]);
+    } else if (selectedOffer.type === 'duree') {
+      const durees = [...new Set(prices.map(p => p.duree_minutes))];
+      if (durees.length === 1) setSelectedDureeMinutes(durees[0]);
+    }
+  }, [selectedOffer]);
+
+  // Reprend le gabarit deja renseigne sur le profil du chien selectionne,
+  // pour ne pas redemander une info deja connue.
+  useEffect(() => {
+    if (!selectedChienId) return;
+    const chien = chiens.find(c => c.id === selectedChienId);
+    if (chien?.gabarit) setSelectedGabarit(chien.gabarit);
+  }, [selectedChienId, chiens]);
+
   useEffect(() => {
     (async () => {
-      const [{ data: prestas }, { data: dispos }, profilRes, chiensRes] = await Promise.all([
-        supabase.from('prestations').select('id,nom,description,duree,prix').eq('lieu_id', lieuId).eq('actif', true).order('prix'),
+      const [{ data: offs }, { data: dispos }, profilRes, chiensRes] = await Promise.all([
+        supabase.from('offers').select('id,nom,description,type,legacy_prestation_id,offer_prices(*)')
+          .eq('lieu_id', lieuId).eq('statut', 'en_ligne').eq('reservable_en_ligne', true).neq('type', 'forfait'),
         supabase.from('disponibilites').select('jour,heure_debut,heure_fin').eq('lieu_id', lieuId),
         session ? supabase.from('profils').select('prenom, telephone').eq('id', session.user.id).maybeSingle() : Promise.resolve({ data: null }),
-        session ? supabase.from('chiens').select('id,nom,race').eq('user_id', session.user.id).order('created_at') : Promise.resolve({ data: [] }),
+        session ? supabase.from('chiens').select('id,nom,race,gabarit').eq('user_id', session.user.id).order('created_at') : Promise.resolve({ data: [] }),
       ]);
-      setPrestations(prestas || []);
-      setSelectedPrestation((prestas && prestas[0]) || null);
+      setOffers((offs as any) || []);
+      setSelectedOffer((offs && offs[0]) as any || null);
       setDisponibilites(dispos || []);
       const profil = (profilRes as any)?.data;
       if (profil?.prenom) setPrenom(profil.prenom);
@@ -101,9 +157,15 @@ export default function BookingScreen() {
     if (f.date_expiration && f.date_expiration < today) return false;
     return true;
   });
-  const matchingCredit = selectedPrestation
-    ? creditsUtilisables.find(f => !f.forfaits?.prestation_id || f.forfaits.prestation_id === selectedPrestation.id)
+  const matchingCredit = selectedOffer
+    ? creditsUtilisables.find(f => !f.forfaits?.prestation_id || f.forfaits.prestation_id === selectedOffer.legacy_prestation_id)
     : null;
+
+  const resolvedPrice = selectedOffer ? resolveOfferPrice(selectedOffer, selectedGabarit, selectedTypePoil, selectedDureeMinutes) : null;
+  const resolvedDureeMinutes = resolvedPrice?.duree_minutes ?? 60;
+  // Variante pas encore completement choisie (ex: gabarit_poil sans gabarit
+  // selectionne) -- pas de prix a afficher, pas de creneau a chercher.
+  const variantIncomplete = !!selectedOffer && !resolvedPrice;
 
   const loadReservationsForDate = useCallback(async (d: Date) => {
     setSlotsLoading(true);
@@ -121,13 +183,16 @@ export default function BookingScreen() {
 
   useEffect(() => { loadReservationsForDate(date); }, [date, loadReservationsForDate]);
 
-  const slots = selectedPrestation
-    ? computeSlots(toDateStr(date), selectedPrestation.duree, disponibilites, reservations)
+  const slots = (selectedOffer && !variantIncomplete)
+    ? computeSlots(toDateStr(date), resolvedDureeMinutes, disponibilites, reservations)
     : [];
 
   function addToCart() {
-    if (!selectedPrestation || !selectedSlot) return;
-    setCart(c => [...c, { key: `${Date.now()}-${Math.random()}`, prestation: selectedPrestation, date, slot: selectedSlot, chienId: selectedChienId }]);
+    if (!selectedOffer || !selectedSlot || variantIncomplete) return;
+    setCart(c => [...c, {
+      key: `${Date.now()}-${Math.random()}`, offer: selectedOffer, date, slot: selectedSlot, chienId: selectedChienId,
+      gabarit: selectedGabarit, typePoil: selectedTypePoil, dureeMinutes: resolvedDureeMinutes,
+    }]);
     setSelectedSlot(null);
   }
 
@@ -136,9 +201,11 @@ export default function BookingScreen() {
   }
 
   async function purchaseForfait(forfait: Forfait) {
+    const offerId = forfaitOfferIds[forfait.id];
+    if (!offerId) { Alert.alert('Erreur', 'Ce forfait est mal configuré, contacte le prestataire.'); return; }
     setPurchasingForfaitId(forfait.id);
     try {
-      const { data, error } = await supabase.functions.invoke('purchase-forfait', { body: { forfait_id: forfait.id } });
+      const { data, error } = await supabase.functions.invoke('purchase-forfait', { body: { offer_id: offerId } });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
@@ -167,7 +234,7 @@ export default function BookingScreen() {
   }
 
   async function handleUseForfait() {
-    if (!matchingCredit || !selectedPrestation || !selectedSlot || !prenom.trim()) {
+    if (!matchingCredit || !selectedOffer?.legacy_prestation_id || !selectedSlot || !prenom.trim()) {
       Alert.alert('Formulaire incomplet', 'Choisis une prestation, un créneau, et indique ton prénom.');
       return;
     }
@@ -176,7 +243,7 @@ export default function BookingScreen() {
       const { data, error } = await supabase.functions.invoke('create-forfait-reservation', {
         body: {
           forfait_achete_id: matchingCredit.id,
-          prestation_id: selectedPrestation.id,
+          prestation_id: selectedOffer.legacy_prestation_id,
           date: toDateStr(date),
           heure_debut: `${selectedSlot}:00`,
           client_prenom: prenom.trim(),
@@ -230,11 +297,14 @@ export default function BookingScreen() {
     }
   }
 
-  const currentAsItem: CartItem | null = selectedPrestation && selectedSlot
-    ? { key: '__current__', prestation: selectedPrestation, date, slot: selectedSlot, chienId: selectedChienId }
+  const currentAsItem: CartItem | null = (selectedOffer && selectedSlot && !variantIncomplete)
+    ? { key: '__current__', offer: selectedOffer, date, slot: selectedSlot, chienId: selectedChienId, gabarit: selectedGabarit, typePoil: selectedTypePoil, dureeMinutes: resolvedDureeMinutes }
     : null;
   const allItems = currentAsItem ? [...cart, currentAsItem] : cart;
-  const totalPrix = allItems.reduce((sum, i) => sum + Number(i.prestation.prix), 0);
+  function itemPrixCents(i: CartItem): number {
+    return resolveOfferPrice(i.offer, i.gabarit, i.typePoil, i.dureeMinutes)?.prix_cents ?? 0;
+  }
+  const totalPrix = allItems.reduce((sum, i) => sum + itemPrixCents(i) / 100, 0);
 
   async function handleReserve() {
     if (!allItems.length || !prenom.trim()) {
@@ -249,7 +319,10 @@ export default function BookingScreen() {
           client_prenom: prenom.trim(),
           client_tel: tel.trim() || undefined,
           items: allItems.map(i => ({
-            prestation_id: i.prestation.id,
+            offer_id: i.offer.id,
+            gabarit: i.gabarit,
+            type_poil: i.typePoil,
+            duree_minutes: i.dureeMinutes,
             date: toDateStr(i.date),
             heure_debut: `${i.slot}:00`,
             chien_id: i.chienId,
@@ -355,7 +428,7 @@ export default function BookingScreen() {
         </>
       )}
 
-      {!prestations.length ? (
+      {!offers.length ? (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>Aucune prestation disponible à la réservation pour le moment.</Text>
         </View>
@@ -368,9 +441,9 @@ export default function BookingScreen() {
                 {cart.map(item => (
                   <View key={item.key} style={styles.cartItem}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.cartItemNom}>{item.prestation.nom}</Text>
+                      <Text style={styles.cartItemNom}>{item.offer.nom}</Text>
                       <Text style={styles.cartItemMeta}>
-                        {item.date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} à {item.slot} · {Number(item.prestation.prix).toFixed(0)} €
+                        {item.date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} à {item.slot} · {(itemPrixCents(item) / 100).toFixed(0)} €
                       </Text>
                     </View>
                     <TouchableOpacity onPress={() => removeFromCart(item.key)} style={styles.cartItemRemove}>
@@ -384,21 +457,60 @@ export default function BookingScreen() {
 
           <Text style={styles.sectionLabel}>{cart.length > 0 ? 'Ajouter une autre prestation' : 'Prestation'}</Text>
           <View style={{ gap: 8 }}>
-            {prestations.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.prestaCard, selectedPrestation?.id === p.id && styles.prestaCardActive]}
-                onPress={() => { setSelectedPrestation(p); setSelectedSlot(null); }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.prestaNom}>{p.nom}</Text>
-                  {!!p.description && <Text style={styles.prestaDesc}>{p.description}</Text>}
-                  <Text style={styles.prestaMeta}>{p.duree} min</Text>
-                </View>
-                <Text style={styles.prestaPrix}>{Number(p.prix).toFixed(0)} €</Text>
-              </TouchableOpacity>
-            ))}
+            {offers.map((o) => {
+              const prices = o.offer_prices || [];
+              const isMultiVariant = ['gabarit_poil', 'duree'].includes(o.type) && prices.length > 1;
+              const minPrice = prices.reduce((min, p) => Math.min(min, p.prix_cents), prices[0]?.prix_cents ?? 0);
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  style={[styles.prestaCard, selectedOffer?.id === o.id && styles.prestaCardActive]}
+                  onPress={() => { setSelectedOffer(o); setSelectedSlot(null); setSelectedGabarit(null); setSelectedTypePoil(null); setSelectedDureeMinutes(null); }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.prestaNom}>{o.nom}</Text>
+                    {!!o.description && <Text style={styles.prestaDesc}>{o.description}</Text>}
+                    {!isMultiVariant && !!prices[0]?.duree_minutes && <Text style={styles.prestaMeta}>{prices[0].duree_minutes} min</Text>}
+                  </View>
+                  <Text style={styles.prestaPrix}>{isMultiVariant ? `dès ${(minPrice / 100).toFixed(0)} €` : `${(minPrice / 100).toFixed(0)} €`}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          {selectedOffer?.type === 'gabarit_poil' && (
+            <>
+              <Text style={styles.sectionLabel}>Gabarit de ton chien</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                {[...new Set((selectedOffer.offer_prices || []).map(p => p.gabarit))].map(g => (
+                  <TouchableOpacity key={g} style={[styles.dogChip, selectedGabarit === g && styles.dogChipActive]} onPress={() => setSelectedGabarit(g)}>
+                    <Text style={[styles.dogChipText, selectedGabarit === g && styles.dogChipTextActive]}>{GABARIT_LABELS[g || ''] || g}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.sectionLabel}>Type de poil</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {[...new Set((selectedOffer.offer_prices || []).filter(p => !selectedGabarit || p.gabarit === selectedGabarit).map(p => p.type_poil))].map(tp => (
+                  <TouchableOpacity key={tp} style={[styles.dogChip, selectedTypePoil === tp && styles.dogChipActive]} onPress={() => setSelectedTypePoil(tp)}>
+                    <Text style={[styles.dogChipText, selectedTypePoil === tp && styles.dogChipTextActive]}>{POIL_LABELS[tp || ''] || tp}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {selectedOffer?.type === 'duree' && (selectedOffer.offer_prices || []).length > 1 && (
+            <>
+              <Text style={styles.sectionLabel}>Durée</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {(selectedOffer.offer_prices || []).map(p => (
+                  <TouchableOpacity key={p.id} style={[styles.dogChip, selectedDureeMinutes === p.duree_minutes && styles.dogChipActive]} onPress={() => setSelectedDureeMinutes(p.duree_minutes)}>
+                    <Text style={[styles.dogChipText, selectedDureeMinutes === p.duree_minutes && styles.dogChipTextActive]}>{p.duree_minutes} min · {(p.prix_cents / 100).toFixed(0)} €</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
 
           <Text style={styles.sectionLabel}>Date</Text>
           <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
@@ -418,7 +530,9 @@ export default function BookingScreen() {
           )}
 
           <Text style={styles.sectionLabel}>Créneau</Text>
-          {slotsLoading ? (
+          {variantIncomplete ? (
+            <Text style={styles.emptyText}>Choisis d'abord le gabarit et le type de poil de ton chien.</Text>
+          ) : slotsLoading ? (
             <ActivityIndicator color={colors.terra} style={{ marginVertical: 12 }} />
           ) : !slots.length ? (
             <Text style={styles.emptyText}>Fermé ce jour-là.</Text>

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { resolveOfferPrice } from '../_shared/offerPricing.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -11,7 +12,8 @@ const CORS = {
 // client achete un credit de seances, ce n'est pas une reservation sur un
 // creneau precis). La ligne forfaits_achetes n'est creee qu'a la
 // confirmation du paiement par le webhook Stripe (payment_intent.succeeded,
-// metadata.kind === 'forfait_achat'), pas ici.
+// metadata.kind === 'forfait_achat'), pas ici. Pas d'acompte sur un forfait
+// (paye en totalite par construction).
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -30,22 +32,21 @@ Deno.serve(async (req) => {
     const { data: { user: caller }, error: authErr } = await supabaseAdmin.auth.getUser(token)
     if (authErr || !caller) throw new Error('Non autorisé')
 
-    const { forfait_id } = await req.json()
-    if (!forfait_id) throw new Error('forfait_id manquant')
+    const { offer_id } = await req.json()
+    if (!offer_id) throw new Error('offer_id manquant')
 
-    const { data: forfait, error: forfaitErr } = await supabaseAdmin
-      .from('forfaits').select('id, lieu_id, nb_seances, prix, validite_jours, actif').eq('id', forfait_id).maybeSingle()
-    if (forfaitErr) throw forfaitErr
-    if (!forfait || !forfait.actif) throw new Error('Forfait introuvable')
+    const { data: offerRow, error: offerErr } = await supabaseAdmin.from('offers').select('lieu_id, type').eq('id', offer_id).maybeSingle()
+    if (offerErr) throw offerErr
+    if (!offerRow) throw new Error('Offre introuvable')
+    if (offerRow.type !== 'forfait') throw new Error("Cette offre n'est pas un forfait")
+
+    const resolved = await resolveOfferPrice(supabaseAdmin, offer_id, offerRow.lieu_id, {})
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
-      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', forfait.lieu_id).maybeSingle()
+      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', offerRow.lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
     if (!lieu) throw new Error('Lieu introuvable')
-    // org_has_feature() (socle commun) remplace l'ancien check
-    // ['pro','premium'].includes(lieu.plan) -- meme correctif que
-    // create-payment-intent (vocabulaire de plan obsolete).
-    const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', forfait.lieu_id).eq('statut', 'approved').maybeSingle()
+    const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', offerRow.lieu_id).eq('statut', 'approved').maybeSingle()
     const { data: canReserve } = place?.org_id
       ? await supabaseAdmin.rpc('org_has_feature', { p_org_id: place.org_id, p_feature: 'reservation_paiement_en_ligne' })
       : { data: false }
@@ -53,6 +54,7 @@ Deno.serve(async (req) => {
     if (!lieu.stripe_account_id || !lieu.stripe_charges_enabled) {
       throw new Error("Ce prestataire n'a pas encore activé les paiements en ligne")
     }
+    if (!resolved.legacyForfaitId) throw new Error('Configuration de l\'offre incomplète (contactez le support)')
 
     let percent = lieu.commission_rate_percent
     if (percent === null || percent === undefined) {
@@ -60,7 +62,7 @@ Deno.serve(async (req) => {
       percent = settings?.value?.percent ?? 20
     }
 
-    const amountCents = Math.round(Number(forfait.prix) * 100)
+    const amountCents = resolved.prixCents
     const commissionCents = Math.round(amountCents * (percent / 100))
 
     const paymentIntent = await stripe.paymentIntents.create({
@@ -71,12 +73,14 @@ Deno.serve(async (req) => {
       transfer_data: { destination: lieu.stripe_account_id },
       metadata: {
         kind: 'forfait_achat',
-        forfait_id: forfait.id,
-        lieu_id: forfait.lieu_id,
+        offer_id,
+        offer_price_id: resolved.offerPrice.id,
+        forfait_id: resolved.legacyForfaitId,
+        lieu_id: offerRow.lieu_id,
         user_id: caller.id,
-        nb_seances: String(forfait.nb_seances),
-        prix: String(forfait.prix),
-        validite_jours: forfait.validite_jours ? String(forfait.validite_jours) : '',
+        nb_seances: String(resolved.offerPrice.nb_seances || 1),
+        prix: String(amountCents / 100),
+        validite_jours: resolved.offerPrice.validite_jours ? String(resolved.offerPrice.validite_jours) : '',
       },
     })
 

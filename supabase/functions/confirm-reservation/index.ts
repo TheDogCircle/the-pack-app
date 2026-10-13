@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { chargeSolde } from '../_shared/offerPricing.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, statut, statut_paiement, stripe_payment_intent_id, forfait_achete_id, lieux(manager_user_id)')
+      .select('id, statut, statut_paiement, stripe_payment_intent_id, forfait_achete_id, montant_ht, acompte_cents, solde_statut, lieux(manager_user_id, stripe_account_id, commission_rate_percent)')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -72,10 +73,25 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (resa.statut_paiement !== 'en_attente') throw new Error('Le paiement de cette réservation a déjà été traité')
+    // Avec un acompte (Phase Pro 4), le paiement initial est deja capture
+    // automatiquement des la reservation (cf create-payment-intent) -- le
+    // statut attendu ici est 'acompte_paye', pas 'en_attente'. Sans acompte,
+    // comportement inchange : seule une premiere capture est autorisee.
+    const acomptePending = resa.solde_statut === 'a_charger' && resa.statut_paiement === 'acompte_paye'
+    if (!acomptePending && resa.statut_paiement !== 'en_attente') {
+      throw new Error('Le paiement de cette réservation a déjà été traité')
+    }
 
-    const paymentIntent = await stripe.paymentIntents.capture(resa.stripe_payment_intent_id)
-    const commission = (paymentIntent.application_fee_amount ?? 0) / 100
+    let commission: number
+    if (acomptePending) {
+      // L'acompte est deja capture ; seul le solde reste a charger hors-session.
+      const soldePi = await chargeSolde(stripe, supabaseAdmin, resa)
+      const depositPi = await stripe.paymentIntents.retrieve(resa.stripe_payment_intent_id)
+      commission = ((depositPi.application_fee_amount ?? 0) + (soldePi?.application_fee_amount ?? 0)) / 100
+    } else {
+      const paymentIntent = await stripe.paymentIntents.capture(resa.stripe_payment_intent_id)
+      commission = (paymentIntent.application_fee_amount ?? 0) / 100
+    }
 
     await supabaseAdmin
       .from('reservations')
