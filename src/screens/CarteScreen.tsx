@@ -2036,11 +2036,17 @@ export default function CarteScreen() {
       }
       if (!convId) {
         const { data: newConv, error: convErr } = await supabase
-          .from('conversations').insert({ lieu_id: selectedLieu.id, type: 'pro_client', created_by: userId, nom: null })
+          .from('conversations').insert({ lieu_id: selectedLieu.id, type: 'pro_client', created_by: userId, nom: null, lu_par_pro: false })
           .select('id').single();
         if (convErr) throw convErr;
         convId = newConv.id;
         await supabase.from('conversation_members').insert({ conversation_id: convId, user_id: userId });
+      } else {
+        // Thread existant : un nouveau message client doit repasser le
+        // thread a "non lu" pour le pro, meme s'il avait deja repondu une
+        // fois (sinon le badge de messages non lus reste bloque a jamais
+        // sur les echanges suivants).
+        await supabase.from('conversations').update({ lu_par_pro: false }).eq('id', convId);
       }
       await supabase.from('messages').insert({ conversation_id: convId, user_id: userId, contenu: contactMessage.trim() });
       setContactModal(false); setContactMessage('');
