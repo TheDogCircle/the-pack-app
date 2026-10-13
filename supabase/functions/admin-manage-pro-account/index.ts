@@ -40,6 +40,19 @@ Deno.serve(async (req) => {
     const { data: callerRole } = await supabaseAdmin.from('admin_roles').select('role').eq('user_id', caller.id).maybeSingle()
     if (callerRole?.role !== 'super_admin') throw new Error('Réservé aux super admins')
 
+    // Client scope sur le JWT de l'appelant (pas le service role) -- utilise
+    // pour toute ecriture qu'un super_admin peut deja faire via sa propre
+    // session (RLS), pour que le declenchement en cascade (triggers d'audit,
+    // creation automatique d'organisation) voie le vrai acteur plutot que
+    // auth.uid() = null. Sans ca, create_organization_for_pro() cree bien
+    // l'organisation (le trigger tourne quel que soit l'appelant), mais rien
+    // n'est trace dans admin_audit_log -- trouve en testant avant de livrer.
+    const supabaseCaller = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    )
+
     const body = await req.json()
     const { mode, sourceTable, entityId } = body
     if (!['lieux', 'partenaires'].includes(sourceTable)) throw new Error('sourceTable invalide')
@@ -68,7 +81,11 @@ Deno.serve(async (req) => {
       }
       if (!found) throw new Error(`Aucun compte avec l'email ${email.trim()} — le pro doit d'abord créer un compte`)
 
-      const { error: updateErr } = await supabaseAdmin.from(sourceTable).update({ manager_user_id: found.id }).eq('id', entityId)
+      // Via supabaseCaller (pas supabaseAdmin) : un super_admin peut deja
+      // ecrire manager_user_id via sa propre RLS, et ca permet au trigger de
+      // synchronisation (create_organization_for_pro) de creer l'organisation
+      // sous le vrai auth.uid() de l'admin, donc d'etre audite normalement.
+      const { error: updateErr } = await supabaseCaller.from(sourceTable).update({ manager_user_id: found.id }).eq('id', entityId)
       if (updateErr) throw updateErr
       await supabaseAdmin.from('profils').upsert({ id: found.id, is_pro: true }, { onConflict: 'id' })
 
@@ -94,16 +111,9 @@ Deno.serve(async (req) => {
       throw new Error('mode invalide')
     }
 
-    // Client scope sur le JWT de l'appelant (pas le service role) pour que
-    // auth.uid() resolve correctement dans log_admin_action -- meme pattern
-    // que admin-refund-reservation. entity_type/entity_id = la fiche
-    // (sourceTable/entityId), pas l'utilisateur, pour que ça apparaisse dans
-    // l'Historique de la fiche admin (renderAuditHistory filtre dessus).
-    const supabaseCaller = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    // entity_type/entity_id = la fiche (sourceTable/entityId), pas
+    // l'utilisateur, pour que ça apparaisse dans l'Historique de la fiche
+    // admin (renderAuditHistory filtre dessus).
     await supabaseCaller.rpc('log_admin_action', {
       p_action: logAction, p_entity_type: sourceTable, p_entity_id: entityId,
       p_before: logBefore, p_after: logAfter, p_reason: logReason,
