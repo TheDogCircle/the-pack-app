@@ -46,6 +46,28 @@ Deno.serve(async (req) => {
     return data?.org_id ?? null
   }
 
+  // Resout le plan (essentiel/premium) a partir du prix Stripe de
+  // l'abonnement -- trouve en recette (2026-10-13) : avant ce correctif,
+  // AUCUN code ne mettait jamais organizations.plan/lieux.plan a jour pour
+  // un vrai abonnement paye via les Payment Links statiques (checkout.session.
+  // completed ne pose que le statut/les IDs, jamais le plan ; seul
+  // activate-lieu-plan le fait, et uniquement pour l'essai gratuit instantane
+  // de l'ecran de choix obligatoire). Un etablissement non-educateur qui
+  // payait reellement Essentiel/Premium via "S'abonner ->" ne recevait donc
+  // jamais ses droits. Se base sur sub.items.data[0].price, deja inclus dans
+  // le payload de l'evenement (meme contrainte test/live que le reste de ce
+  // fichier : pas d'appel API Stripe). Ne resout que le mensuel (offres
+  // n'a qu'une ligne 'month' par plan) -- un abonnement annuel ne matche
+  // aucun prix connu et le plan n'est alors pas touche (pas de valeur
+  // inventee), meme logique que le reste de ce fichier pour un rattachement
+  // non resolu.
+  async function resolvePlanFromPrice(price: Stripe.Price | null | undefined): Promise<string | null> {
+    if (!price?.unit_amount || price.recurring?.interval !== 'month') return null
+    const { data: offres } = await supabaseAdmin
+      .from('offres').select('plan_key, prix_cents').eq('intervalle', 'month').not('prix_cents', 'is', null)
+    return (offres || []).find((o) => o.prix_cents === price.unit_amount)?.plan_key ?? null
+  }
+
   // Notifie l'owner (email) via notify-subscription-event -- meme pattern de
   // fetch interne que notify-reservation plus haut dans ce fichier. Jamais
   // bloquant : un echec d'envoi d'email ne doit pas faire echouer le webhook
@@ -184,6 +206,7 @@ Deno.serve(async (req) => {
         // d'appel API necessaire, donc pas de probleme avec le decalage
         // cle test/live mentionne plus haut dans ce fichier.
         const price = sub.items?.data?.[0]?.price
+        const resolvedPlan = await resolvePlanFromPrice(price)
         const subPatch = {
           subscription_status: sub.status,
           subscription_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
@@ -193,6 +216,12 @@ Deno.serve(async (req) => {
           // ulterieur) -- sert de point de depart pour le NPS "30j apres
           // l'abonnement" (Phase 6 lot 5).
           ...(event.type === 'customer.subscription.created' ? { subscription_started_at: new Date().toISOString() } : {}),
+          // Pose le vrai plan paye (voir resolvePlanFromPrice ci-dessus).
+          // Applique a chaque update, pas seulement a la creation : couvre
+          // aussi le changement de forfait via le portail client Stripe, et
+          // restaure le plan si un paiement est regularise apres qu'un
+          // retour a Decouverte ait deja eu lieu (delai de grace expire).
+          ...(resolvedPlan ? { plan: resolvedPlan } : {}),
         }
 
         // Statut avant mise a jour, pour ne notifier que sur une veritable
