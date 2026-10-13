@@ -48,11 +48,18 @@ Deno.serve(async (req) => {
     }
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
-      .from('lieux').select('id, plan, stripe_account_id, stripe_charges_enabled, commission_rate_percent')
+      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled, commission_rate_percent')
       .eq('id', lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
     if (!lieu) throw new Error('Lieu introuvable')
-    if (!['pro', 'premium'].includes(lieu.plan)) throw new Error("Ce lieu n'a pas accès aux réservations en ligne")
+    // org_has_feature() (socle commun) remplace l'ancien check
+    // ['pro','premium'].includes(lieu.plan) -- meme correctif que
+    // create-payment-intent (vocabulaire de plan obsolete).
+    const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', lieu_id).eq('statut', 'approved').maybeSingle()
+    const { data: canReserve } = place?.org_id
+      ? await supabaseAdmin.rpc('org_has_feature', { p_org_id: place.org_id, p_feature: 'reservation_paiement_en_ligne' })
+      : { data: false }
+    if (!canReserve) throw new Error("Ce lieu n'a pas accès aux réservations en ligne")
     if (!lieu.stripe_account_id || !lieu.stripe_charges_enabled) {
       throw new Error("Ce prestataire n'a pas encore activé les paiements en ligne")
     }

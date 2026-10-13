@@ -42,13 +42,22 @@ Deno.serve(async (req) => {
     }
 
     const [{ data: lieu, error: lieuErr }, { data: prestation, error: prestaErr }] = await Promise.all([
-      supabaseAdmin.from('lieux').select('id, nom, plan, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle(),
+      supabaseAdmin.from('lieux').select('id, nom, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle(),
       supabaseAdmin.from('prestations').select('id, lieu_id, prix, duree, actif').eq('id', prestation_id).maybeSingle(),
     ])
     if (lieuErr) throw lieuErr
     if (prestaErr) throw prestaErr
     if (!lieu) throw new Error('Lieu introuvable')
-    if (!['pro', 'premium'].includes(lieu.plan)) throw new Error("Ce lieu n'a pas accès aux réservations en ligne")
+    // org_has_feature() (socle commun) remplace l'ancien check
+    // ['pro','premium'].includes(lieu.plan) -- vocabulaire remonte a avant le
+    // rebranchement, ne matchait plus 'essentiel' (bug reel trouve en
+    // auditant : un pro Essentiel ne pouvait pas accepter de paiement en
+    // ligne alors que c'est promis dans son offre).
+    const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', lieu_id).eq('statut', 'approved').maybeSingle()
+    const { data: canReserve } = place?.org_id
+      ? await supabaseAdmin.rpc('org_has_feature', { p_org_id: place.org_id, p_feature: 'reservation_paiement_en_ligne' })
+      : { data: false }
+    if (!canReserve) throw new Error("Ce lieu n'a pas accès aux réservations en ligne")
     if (!lieu.stripe_account_id || !lieu.stripe_charges_enabled) {
       throw new Error("Ce prestataire n'a pas encore activé les paiements en ligne")
     }

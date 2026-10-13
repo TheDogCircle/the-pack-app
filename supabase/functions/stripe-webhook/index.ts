@@ -46,6 +46,22 @@ Deno.serve(async (req) => {
     return data?.org_id ?? null
   }
 
+  // Notifie l'owner (email) via notify-subscription-event -- meme pattern de
+  // fetch interne que notify-reservation plus haut dans ce fichier. Jamais
+  // bloquant : un echec d'envoi d'email ne doit pas faire echouer le webhook
+  // (Stripe retente sinon indefiniment un evenement deja traite cote donnees).
+  async function notifySubscriptionEvent(orgId: string, eventName: string): Promise<void> {
+    const notifyUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/notify-subscription-event`
+    await fetch(notifyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      },
+      body: JSON.stringify({ org_id: orgId, event: eventName }),
+    }).catch((e) => console.error('notify-subscription-event call failed:', e.message))
+  }
+
   try {
     switch (event.type) {
       case 'payment_intent.succeeded': {
@@ -178,26 +194,59 @@ Deno.serve(async (req) => {
           // l'abonnement" (Phase 6 lot 5).
           ...(event.type === 'customer.subscription.created' ? { subscription_started_at: new Date().toISOString() } : {}),
         }
+
+        // Statut avant mise a jour, pour ne notifier que sur une veritable
+        // transition (Stripe peut renvoyer plusieurs fois le meme evenement).
+        const { data: existingLieu } = await supabaseAdmin
+          .from('lieux').select('id, subscription_status').eq('stripe_subscription_id', sub.id).maybeSingle()
+        const previousStatus = existingLieu?.subscription_status ?? null
+
         const { data: lieu } = await supabaseAdmin
           .from('lieux').update(subPatch).eq('stripe_subscription_id', sub.id).select('id').maybeSingle()
 
         // Miroir sur organizations (socle commun).
+        let orgId: string | null = null
         if (lieu) {
-          const orgId = await resolveOrgIdForLieu(lieu.id)
+          orgId = await resolveOrgIdForLieu(lieu.id)
           if (orgId) await supabaseAdmin.from('organizations').update(subPatch).eq('id', orgId)
+        }
+
+        // Delai de grace (7 jours, cf. trg_organizations_grace_deadline posee
+        // sur organizations.subscription_status) : ce webhook se contente de
+        // notifier l'owner sur la transition, le passage effectif a
+        // 'decouverte' apres 7 jours est fait par le cron
+        // run_subscription_grace_check(), pas ici.
+        const wasOverdue = previousStatus === 'past_due' || previousStatus === 'unpaid'
+        const isOverdue = sub.status === 'past_due' || sub.status === 'unpaid'
+        if (orgId && isOverdue && !wasOverdue) {
+          await notifySubscriptionEvent(orgId, 'payment_failed')
+        } else if (orgId && sub.status === 'active' && wasOverdue) {
+          await notifySubscriptionEvent(orgId, 'payment_recovered')
         }
         break
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription
-        const cancelPatch = { subscription_status: 'canceled', subscription_canceled_at: new Date().toISOString() }
+        // Resiliation volontaire (effective fin de periode, deja le
+        // comportement Stripe) : contrairement a l'impaye, aucun delai de
+        // grace -- retour immediat a Decouverte sur les trois tables
+        // miroirs, donnees conservees.
+        const cancelPatch = {
+          subscription_status: 'canceled',
+          subscription_canceled_at: new Date().toISOString(),
+          plan: 'decouverte',
+        }
         const { data: lieu } = await supabaseAdmin
           .from('lieux').update(cancelPatch).eq('stripe_subscription_id', sub.id).select('id').maybeSingle()
 
         if (lieu) {
           const orgId = await resolveOrgIdForLieu(lieu.id)
-          if (orgId) await supabaseAdmin.from('organizations').update(cancelPatch).eq('id', orgId)
+          if (orgId) {
+            await supabaseAdmin.from('organizations').update(cancelPatch).eq('id', orgId)
+            await supabaseAdmin.from('partenaires').update({ plan: 'decouverte' }).eq('org_id', orgId)
+            await notifySubscriptionEvent(orgId, 'canceled')
+          }
         }
         break
       }
@@ -259,6 +308,29 @@ Deno.serve(async (req) => {
           invoice_created_at: new Date(invoice.created * 1000).toISOString(),
           paid_at: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() : null,
         }, { onConflict: 'stripe_invoice_id' })
+
+        // Ligne revenue_events (socle commun) -- idempotent par external_ref,
+        // meme garde que reconcile_stripe_invoice (une facture Stripe donnee
+        // ne doit jamais etre comptee deux fois, y compris si Stripe renvoie
+        // l'evenement en double).
+        if (event.type === 'invoice.paid' && orgId) {
+          const { data: existingEvent } = await supabaseAdmin
+            .from('revenue_events').select('id').eq('external_ref', invoice.id).maybeSingle()
+          if (!existingEvent) {
+            await supabaseAdmin.from('revenue_events').insert({
+              org_id: orgId,
+              type: 'subscription',
+              gross_amount_cents: invoice.amount_paid,
+              commission_amount_cents: 0,
+              net_amount_cents: invoice.amount_paid,
+              source: 'stripe_webhook',
+              external_ref: invoice.id,
+              occurred_at: invoice.status_transitions?.paid_at
+                ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+                : new Date().toISOString(),
+            })
+          }
+        }
         break
       }
     }
