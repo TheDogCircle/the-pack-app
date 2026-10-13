@@ -36,6 +36,16 @@ Deno.serve(async (req) => {
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
 
+  // Miroir sur organizations (socle commun, cf docs/socle.md) : un lieu peut
+  // etre gere par au plus une organisation approuvee (org_places.statut) --
+  // si aucune n'existe encore (compte pas migre / pas encore rattache),
+  // simplement aucune ligne a mettre a jour, pas une erreur.
+  async function resolveOrgIdForLieu(lieuId: string): Promise<string | null> {
+    const { data } = await supabaseAdmin
+      .from('org_places').select('org_id').eq('lieu_id', lieuId).eq('statut', 'approved').maybeSingle()
+    return data?.org_id ?? null
+  }
+
   try {
     switch (event.type) {
       case 'payment_intent.succeeded': {
@@ -124,17 +134,29 @@ Deno.serve(async (req) => {
         if (session.mode !== 'subscription' || !session.client_reference_id) break
         const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id
         const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id
-        await supabaseAdmin
-          .from('lieux')
-          .update({
-            stripe_subscription_customer_id: customerId ?? null,
-            stripe_subscription_id: subscriptionId ?? null,
-            // Statut optimiste : checkout.session.completed n'est envoye qu'apres
-            // succes du paiement initial. L'evenement customer.subscription.created
-            // (quasi simultane) corrige/confirme juste apres avec le statut exact.
-            subscription_status: 'active',
-          })
-          .eq('id', session.client_reference_id)
+        const patch = {
+          stripe_subscription_customer_id: customerId ?? null,
+          stripe_subscription_id: subscriptionId ?? null,
+          // Statut optimiste : checkout.session.completed n'est envoye qu'apres
+          // succes du paiement initial. L'evenement customer.subscription.created
+          // (quasi simultane) corrige/confirme juste apres avec le statut exact.
+          subscription_status: 'active',
+        }
+        await supabaseAdmin.from('lieux').update(patch).eq('id', session.client_reference_id)
+
+        // Miroir sur organizations (socle commun). stripe_customer_id existe
+        // deja sur organizations (identifiant Stripe generique de
+        // l'organisation, meme colonne alimentee par la migration de donnees
+        // du socle depuis lieux.stripe_subscription_customer_id) -- pas de
+        // nouvelle colonne, juste la meme valeur mise a jour ici aussi.
+        const orgId = await resolveOrgIdForLieu(session.client_reference_id)
+        if (orgId) {
+          await supabaseAdmin.from('organizations').update({
+            stripe_customer_id: patch.stripe_subscription_customer_id,
+            stripe_subscription_id: patch.stripe_subscription_id,
+            subscription_status: patch.subscription_status,
+          }).eq('id', orgId)
+        }
         break
       }
 
@@ -146,28 +168,37 @@ Deno.serve(async (req) => {
         // d'appel API necessaire, donc pas de probleme avec le decalage
         // cle test/live mentionne plus haut dans ce fichier.
         const price = sub.items?.data?.[0]?.price
-        await supabaseAdmin
-          .from('lieux')
-          .update({
-            subscription_status: sub.status,
-            subscription_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-            subscription_amount_cents: price?.unit_amount ?? null,
-            subscription_interval: price?.recurring?.interval ?? null,
-            // Pose uniquement a la creation (jamais ecrase par un update
-            // ulterieur) -- sert de point de depart pour le NPS "30j apres
-            // l'abonnement" (Phase 6 lot 5).
-            ...(event.type === 'customer.subscription.created' ? { subscription_started_at: new Date().toISOString() } : {}),
-          })
-          .eq('stripe_subscription_id', sub.id)
+        const subPatch = {
+          subscription_status: sub.status,
+          subscription_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+          subscription_amount_cents: price?.unit_amount ?? null,
+          subscription_interval: price?.recurring?.interval ?? null,
+          // Pose uniquement a la creation (jamais ecrase par un update
+          // ulterieur) -- sert de point de depart pour le NPS "30j apres
+          // l'abonnement" (Phase 6 lot 5).
+          ...(event.type === 'customer.subscription.created' ? { subscription_started_at: new Date().toISOString() } : {}),
+        }
+        const { data: lieu } = await supabaseAdmin
+          .from('lieux').update(subPatch).eq('stripe_subscription_id', sub.id).select('id').maybeSingle()
+
+        // Miroir sur organizations (socle commun).
+        if (lieu) {
+          const orgId = await resolveOrgIdForLieu(lieu.id)
+          if (orgId) await supabaseAdmin.from('organizations').update(subPatch).eq('id', orgId)
+        }
         break
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription
-        await supabaseAdmin
-          .from('lieux')
-          .update({ subscription_status: 'canceled', subscription_canceled_at: new Date().toISOString() })
-          .eq('stripe_subscription_id', sub.id)
+        const cancelPatch = { subscription_status: 'canceled', subscription_canceled_at: new Date().toISOString() }
+        const { data: lieu } = await supabaseAdmin
+          .from('lieux').update(cancelPatch).eq('stripe_subscription_id', sub.id).select('id').maybeSingle()
+
+        if (lieu) {
+          const orgId = await resolveOrgIdForLieu(lieu.id)
+          if (orgId) await supabaseAdmin.from('organizations').update(cancelPatch).eq('id', orgId)
+        }
         break
       }
 
@@ -200,12 +231,26 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Resout org_id (socle commun) via le meme match que customerTable/
+        // customerRowId ci-dessus. Omis du upsert si non resolu, pour ne
+        // jamais ecraser un rattachement deja fait a la main
+        // (reconcile_stripe_invoice) -- seul un org_id resolu ici est ecrit.
+        let orgId: string | null = null
+        if (customerTable === 'lieux' && customerRowId) {
+          orgId = await resolveOrgIdForLieu(customerRowId)
+        } else if (customerTable === 'partenaires' && customerRowId) {
+          const { data: partenaire } = await supabaseAdmin
+            .from('partenaires').select('org_id').eq('id', customerRowId).maybeSingle()
+          orgId = partenaire?.org_id ?? null
+        }
+
         const status = event.type === 'invoice.voided' ? 'void' : (invoice.status ?? (event.type === 'invoice.paid' ? 'paid' : 'open'))
         await supabaseAdmin.from('stripe_invoices').upsert({
           stripe_invoice_id: invoice.id,
           stripe_customer_id: customerId,
           customer_table: customerTable,
           customer_id: customerRowId,
+          ...(orgId ? { org_id: orgId } : {}),
           amount_cents: event.type === 'invoice.paid' ? invoice.amount_paid : invoice.amount_due,
           currency: invoice.currency ?? 'eur',
           status,
