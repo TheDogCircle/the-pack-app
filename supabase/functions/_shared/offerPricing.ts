@@ -82,7 +82,11 @@ export async function getBookingRules(supabaseAdmin: any, orgId: string | null):
 // moins de 2h du creneau"). Leve une erreur si trop tard, ne retourne rien.
 export function checkDelaiMin(date: string, heureDebut: string, rules: BookingRules) {
   if (!rules.delai_min_heures) return
-  const slot = new Date(`${date}T${heureDebut}`)
+  // 'Z' explicite -- meme convention que le reste de ce fichier (cf. le calcul
+  // du jour de la semaine dans create-payment-intent) : sans lui, Deno
+  // interprete la chaine comme heure serveur (UTC), decalee de 1-2h par
+  // rapport a l'heure francaise reellement voulue par date/heure_debut.
+  const slot = new Date(`${date}T${heureDebut}Z`)
   const minAllowed = new Date(Date.now() + rules.delai_min_heures * 3_600_000)
   if (slot < minAllowed) throw new Error(`Ce créneau nécessite au moins ${rules.delai_min_heures}h de délai avant la réservation`)
 }
