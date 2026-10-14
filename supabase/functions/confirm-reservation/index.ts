@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
 import { chargeSolde } from '../_shared/offerPricing.ts'
+import { recordBookingRevenue } from '../_shared/revenueEvents.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, statut, statut_paiement, stripe_payment_intent_id, forfait_achete_id, montant_ht, acompte_cents, solde_statut, lieux(manager_user_id, stripe_account_id, commission_rate_percent)')
+      .select('id, lieu_id, statut, statut_paiement, stripe_payment_intent_id, forfait_achete_id, montant_ht, acompte_cents, solde_statut, lieux(manager_user_id, stripe_account_id, commission_rate_percent)')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -97,6 +98,18 @@ Deno.serve(async (req) => {
       .from('reservations')
       .update({ statut: 'confirmee', statut_paiement: 'paye', montant_commission: commission })
       .eq('id', reservation_id)
+
+    // revenue_events (socle commun, Phase Pro 5) : le paiement est reellement
+    // capture/charge a cet instant (transfert Connect + commission executes
+    // par Stripe), c'est le bon moment pour ecrire la ligne -- pas a la
+    // creation du PaymentIntent (create-payment-intent), qui ne fait
+    // qu'autoriser.
+    await recordBookingRevenue(supabaseAdmin, {
+      lieuId: resa.lieu_id,
+      grossCents: Math.round(Number(resa.montant_ht) * 100),
+      commissionCents: Math.round(commission * 100),
+      externalRef: resa.stripe_payment_intent_id,
+    })
 
     return new Response(JSON.stringify({ confirmed: true, captured: true }), {
       headers: { ...CORS, 'Content-Type': 'application/json' },

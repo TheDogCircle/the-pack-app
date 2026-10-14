@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
 import { resolveOfferPrice } from '../_shared/offerPricing.ts'
+import { resolveCommissionPercent } from '../_shared/commission.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
     const resolved = await resolveOfferPrice(supabaseAdmin, offer_id, offerRow.lieu_id, {})
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
-      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', offerRow.lieu_id).maybeSingle()
+      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled').eq('id', offerRow.lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
     if (!lieu) throw new Error('Lieu introuvable')
     const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', offerRow.lieu_id).eq('statut', 'approved').maybeSingle()
@@ -56,11 +57,7 @@ Deno.serve(async (req) => {
     }
     if (!resolved.legacyForfaitId) throw new Error('Configuration de l\'offre incomplète (contactez le support)')
 
-    let percent = lieu.commission_rate_percent
-    if (percent === null || percent === undefined) {
-      const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
-      percent = settings?.value?.percent ?? 20
-    }
+    const percent = await resolveCommissionPercent(supabaseAdmin, offerRow.lieu_id)
 
     const amountCents = resolved.prixCents
     const commissionCents = Math.round(amountCents * (percent / 100))

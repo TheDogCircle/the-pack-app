@@ -6,6 +6,8 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+import { recordRefundRevenue } from '../_shared/revenueEvents.ts'
+
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const FROM_EMAIL = 'The Pack Club <reservations@thepackclub.fr>'
 
@@ -54,7 +56,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, lieu_id, user_id, prestation_id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, client_prenom, client_tel, stripe_payment_intent_id, lieux(manager_user_id, nom, ville)')
+      .select('id, lieu_id, user_id, prestation_id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, montant_commission, client_prenom, client_tel, stripe_payment_intent_id, lieux(manager_user_id, nom, ville)')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -229,6 +231,16 @@ Deno.serve(async (req) => {
       })
       .eq('id', reservation_id)
     await notifyCancellation(montantRembourse)
+
+    // revenue_events (Phase Pro 5) : refund_application_fee rembourse la
+    // commission dans la meme proportion que le montant principal -- pas
+    // d'appel API supplementaire necessaire pour la retrouver.
+    await recordRefundRevenue(supabaseAdmin, {
+      lieuId: resa.lieu_id,
+      refundedGrossCents: refundAmountCents,
+      refundedCommissionCents: Math.round(Number(resa.montant_commission || 0) * 100 * refundPercent),
+      externalRef: refund.id,
+    })
 
     return new Response(JSON.stringify({
       cancelled: true,

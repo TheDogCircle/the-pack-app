@@ -1,6 +1,11 @@
 // Phase Pro 4 : resolution de prix et regles de reservation, partagees entre
 // create-payment-intent, create-cart-reservations et purchase-forfait --
 // jamais dupliquees trois fois (meme convention que _shared/pushTracking.ts).
+// Phase Pro 5 : ajoute conges/temps tampon (congés, buffer) et bascule la
+// commission sur resolveCommissionPercent (organizations.commission_rate,
+// source d'autorite depuis le socle commun -- cf _shared/commission.ts).
+
+import { resolveCommissionPercent } from './commission.ts'
 
 export type ResolvedOffer = {
   offer: any
@@ -65,11 +70,12 @@ export type BookingRules = {
   acompte_seuil_cents: number | null
   annulation_gratuite_heures: number
   confirmation_auto: boolean
+  buffer_minutes: number
 }
 
 const DEFAULT_RULES: BookingRules = {
   delai_min_heures: 0, acompte_pourcentage: 0, acompte_seuil_cents: null,
-  annulation_gratuite_heures: 24, confirmation_auto: false,
+  annulation_gratuite_heures: 24, confirmation_auto: false, buffer_minutes: 0,
 }
 
 export async function getBookingRules(supabaseAdmin: any, orgId: string | null): Promise<BookingRules> {
@@ -89,6 +95,45 @@ export function checkDelaiMin(date: string, heureDebut: string, rules: BookingRu
   const slot = new Date(`${date}T${heureDebut}Z`)
   const minAllowed = new Date(Date.now() + rules.delai_min_heures * 3_600_000)
   if (slot < minAllowed) throw new Error(`Ce créneau nécessite au moins ${rules.delai_min_heures}h de délai avant la réservation`)
+}
+
+// Rejette une reservation sur une date couverte par un conge (fermeture
+// exceptionnelle du lieu) -- verifie en app, meme esprit que checkDelaiMin
+// (regle metier, pas une invariante d'integrite -- celle-ci reste la
+// contrainte d'exclusion Postgres sur reservations.periode).
+export async function checkConges(supabaseAdmin: any, lieuId: string, date: string) {
+  const { data } = await supabaseAdmin
+    .from('conges').select('id').eq('lieu_id', lieuId).lte('date_debut', date).gte('date_fin', date).maybeSingle()
+  if (data) throw new Error('Ce lieu est fermé à cette date')
+}
+
+// Rejette une reservation trop proche (avant ou apres) d'une reservation
+// active existante du meme lieu, selon le temps tampon configure par
+// l'organisation. Meme logique de "heure locale implicite" que checkDelaiMin
+// ('Z' explicite) -- verification best-effort en app (message d'erreur
+// clair) ; le filet de securite dur contre le chevauchement brut reste la
+// contrainte d'exclusion Postgres, qui ne connait pas le tampon.
+// isPlaceBooking : jamais applique a une offre type 'place' -- plusieurs
+// reservations legitimement identiques (meme creneau, meme offre, capacite)
+// seraient sinon vues comme "trop proches" d'elles-memes.
+export async function checkBuffer(supabaseAdmin: any, lieuId: string, date: string, heureDebut: string, heureFin: string, rules: BookingRules, isPlaceBooking = false) {
+  if (!rules.buffer_minutes || isPlaceBooking) return
+  const debut = new Date(`${date}T${heureDebut}Z`)
+  const fin = new Date(`${date}T${heureFin}Z`)
+  const fenetreDebut = new Date(debut.getTime() - rules.buffer_minutes * 60_000)
+  const fenetreFin = new Date(fin.getTime() + rules.buffer_minutes * 60_000)
+  const { data } = await supabaseAdmin
+    .from('reservations')
+    .select('id, heure_debut, heure_fin')
+    .eq('lieu_id', lieuId)
+    .eq('date', date)
+    .in('statut', ['en_attente', 'confirmee'])
+  const conflit = (data || []).some((r: any) => {
+    const rDebut = new Date(`${date}T${r.heure_debut}Z`)
+    const rFin = new Date(`${date}T${r.heure_fin}Z`)
+    return rDebut < fenetreFin && rFin > fenetreDebut
+  })
+  if (conflit) throw new Error(`Un temps tampon de ${rules.buffer_minutes} min est requis entre deux rendez-vous`)
 }
 
 // Montant a capturer immediatement (le reste, s'il y en a un, est charge
@@ -124,6 +169,7 @@ export async function chargeSolde(stripe: any, supabaseAdmin: any, resa: any): P
   }
 
   try {
+    const percent = await resolveCommissionPercent(supabaseAdmin, resa.lieu_id)
     const solde = await stripe.paymentIntents.create({
       amount: soldeCents,
       currency: 'eur',
@@ -131,7 +177,7 @@ export async function chargeSolde(stripe: any, supabaseAdmin: any, resa: any): P
       payment_method: paymentMethodId,
       off_session: true,
       confirm: true,
-      application_fee_amount: Math.round(soldeCents * ((resa.lieux?.commission_rate_percent ?? 20) / 100)),
+      application_fee_amount: Math.round(soldeCents * (percent / 100)),
       transfer_data: { destination: resa.lieux?.stripe_account_id },
       metadata: { reservation_id: resa.id, kind: 'solde_reservation' },
     })

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { recordRefundRevenue } from '../_shared/revenueEvents.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
 
     const { data: resa, error: resaErr } = await supabaseAdmin
       .from('reservations')
-      .select('id, montant_ht, montant_rembourse, stripe_payment_intent_id, statut_paiement')
+      .select('id, lieu_id, montant_ht, montant_commission, montant_rembourse, stripe_payment_intent_id, statut_paiement')
       .eq('id', reservation_id)
       .maybeSingle()
     if (resaErr) throw resaErr
@@ -72,6 +73,17 @@ Deno.serve(async (req) => {
       montant_rembourse: nouveauMontantRembourse,
       ...(integralementRembourse ? { statut_paiement: 'rembourse', statut: 'annulee' } : {}),
     }).eq('id', reservation_id)
+
+    // revenue_events (Phase Pro 5) : meme principe que cancel-reservation --
+    // refund_application_fee rembourse la commission dans la meme proportion
+    // que le montant principal choisi par l'admin.
+    await recordRefundRevenue(supabaseAdmin, {
+      lieuId: resa.lieu_id,
+      refundedGrossCents: demandeCents,
+      refundedCommissionCents: Math.round(Number(resa.montant_commission || 0) * 100 * (demandeCents / totalCents)),
+      externalRef: refund.id,
+      createdBy: caller.id,
+    })
 
     if (ticket_id) {
       await supabaseAdmin.from('ticket_messages').insert({

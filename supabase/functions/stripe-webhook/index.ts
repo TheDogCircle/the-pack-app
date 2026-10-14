@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
 import { chargeSolde } from '../_shared/offerPricing.ts'
+import { recordBookingRevenue } from '../_shared/revenueEvents.ts'
 
 Deno.serve(async (req) => {
   // Cle API utilisee uniquement pour les appels reservation/Connect (test mode).
@@ -85,6 +86,82 @@ Deno.serve(async (req) => {
     }).catch((e) => console.error('notify-subscription-event call failed:', e.message))
   }
 
+  function addMinutesAbo(hhmmss: string, minutes: number): string {
+    const [h, m, s] = hhmmss.split(':').map(Number)
+    const total = h * 60 + m + minutes
+    const hh = Math.floor(total / 60) % 24
+    const mm = total % 60
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(s || 0).padStart(2, '0')}`
+  }
+
+  // Materialise la PROCHAINE reservation d'un abonnement recurrent (Phase
+  // Pro 5) a chaque facture payee -- jamais tout le calendrier d'un coup.
+  // Idempotent via stripe_payment_intent_id (Stripe peut renvoyer le meme
+  // evenement plusieurs fois). La Subscription est en test mode (meme cle
+  // que le reste des paiements Connect de ce fichier, contrairement aux
+  // abonnements SaaS pro traites plus bas) -- un appel API ici est donc sans
+  // risque de decalage test/live.
+  async function materializeAbonnementReservation(invoice: Stripe.Invoice): Promise<void> {
+    const subId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id
+    if (!subId) return
+    const { data: abonnement } = await supabaseAdmin
+      .from('abonnements_reservations').select('*').eq('stripe_subscription_id', subId).maybeSingle()
+    if (!abonnement || abonnement.statut !== 'actif') return
+
+    const paymentIntentId = typeof invoice.payment_intent === 'string' ? invoice.payment_intent : invoice.payment_intent?.id
+    if (paymentIntentId) {
+      const { data: existing } = await supabaseAdmin
+        .from('reservations').select('id').eq('stripe_payment_intent_id', paymentIntentId).maybeSingle()
+      if (existing) return
+    }
+
+    const { data: offer } = await supabaseAdmin.from('offers').select('legacy_prestation_id').eq('id', abonnement.offer_id).maybeSingle()
+    if (!offer?.legacy_prestation_id) {
+      console.error('materializeAbonnementReservation: offre sans miroir legacy_prestation_id', abonnement.offer_id)
+      return
+    }
+    const { data: offerPrice } = await supabaseAdmin.from('offer_prices').select('duree_minutes').eq('id', abonnement.offer_price_id).maybeSingle()
+    const dureeMinutes = offerPrice?.duree_minutes || 60
+
+    // Prochaine occurrence du jour configure (0=lundi...6=dimanche, meme
+    // convention que disponibilites.jour), a partir du debut de periode
+    // facturee.
+    const date = new Date(invoice.period_start * 1000)
+    const currentJour = (date.getUTCDay() + 6) % 7
+    const diff = (abonnement.jour_semaine - currentJour + 7) % 7
+    date.setUTCDate(date.getUTCDate() + diff)
+    const dateStr = date.toISOString().slice(0, 10)
+    const heureFin = addMinutesAbo(abonnement.heure_debut, dureeMinutes)
+
+    let commissionCents = 0
+    if (paymentIntentId) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId)
+        commissionCents = pi.application_fee_amount ?? 0
+      } catch (e) { console.error('retrieve PI abonnement:', e.message) }
+    }
+
+    const { data: profil } = await supabaseAdmin.from('profils').select('prenom').eq('id', abonnement.user_id).maybeSingle()
+
+    const { error } = await supabaseAdmin.from('reservations').insert({
+      lieu_id: abonnement.lieu_id, prestation_id: offer.legacy_prestation_id,
+      offer_id: abonnement.offer_id, offer_price_id: abonnement.offer_price_id,
+      user_id: abonnement.user_id, chien_id: abonnement.chien_id, client_prenom: profil?.prenom || null,
+      date: dateStr, heure_debut: abonnement.heure_debut, heure_fin: heureFin,
+      statut: 'confirmee', statut_paiement: 'paye',
+      montant_ht: invoice.amount_paid / 100, montant_commission: commissionCents / 100,
+      stripe_payment_intent_id: paymentIntentId || null,
+    })
+    if (error) {
+      console.error('materializeAbonnementReservation insert:', error.message)
+      return
+    }
+
+    await recordBookingRevenue(supabaseAdmin, {
+      lieuId: abonnement.lieu_id, grossCents: invoice.amount_paid, commissionCents, externalRef: invoice.id,
+    })
+  }
+
   try {
     switch (event.type) {
       case 'payment_intent.succeeded': {
@@ -107,6 +184,14 @@ Deno.serve(async (req) => {
             prix_paye: Number(pi.metadata.prix),
             stripe_payment_intent_id: pi.id,
             date_expiration: dateExpiration,
+          })
+          // revenue_events (Phase Pro 5) : achat d'un forfait paye en
+          // totalite ici (pas de notion d'acompte sur un forfait).
+          await recordBookingRevenue(supabaseAdmin, {
+            lieuId: pi.metadata.lieu_id,
+            grossCents: Math.round(Number(pi.metadata.prix) * 100),
+            commissionCents: pi.application_fee_amount ?? 0,
+            externalRef: pi.id,
           })
           break
         }
@@ -143,6 +228,7 @@ Deno.serve(async (req) => {
           .maybeSingle()
         if (error) throw error
 
+        let totalCommissionCents = pi.application_fee_amount ?? 0
         if (resa && !depositOnly && resa.solde_statut === 'a_charger') {
           // Confirmation automatique avec acompte : le solde est du tout de
           // suite, pas d'attente d'une confirmation manuelle separee. Cumule
@@ -150,6 +236,7 @@ Deno.serve(async (req) => {
           try {
             const soldePi = await chargeSolde(stripe, supabaseAdmin, resa)
             if (soldePi?.application_fee_amount) {
+              totalCommissionCents += soldePi.application_fee_amount
               await supabaseAdmin.from('reservations')
                 .update({ montant_commission: commission + soldePi.application_fee_amount / 100 })
                 .eq('id', resa.id)
@@ -157,6 +244,19 @@ Deno.serve(async (req) => {
           } catch (e) {
             console.error('chargeSolde (auto):', e.message)
           }
+        }
+
+        // revenue_events (Phase Pro 5) : reservation entierement payee a cet
+        // instant sans intervention du prestataire (confirmation automatique,
+        // avec ou sans acompte) -- l'equivalent du chemin confirm-reservation
+        // pour une confirmation manuelle, qui ecrit deja sa propre ligne.
+        if (resa && !depositOnly) {
+          await recordBookingRevenue(supabaseAdmin, {
+            lieuId: resa.lieu_id,
+            grossCents: Math.round(Number(resa.montant_ht) * 100),
+            commissionCents: totalCommissionCents,
+            externalRef: pi.id,
+          })
         }
 
         if (resa && !depositOnly) {
@@ -331,6 +431,17 @@ Deno.serve(async (req) => {
       case 'invoice.payment_failed':
       case 'invoice.voided': {
         const invoice = event.data.object as Stripe.Invoice
+
+        // Reservation recurrente (Phase Pro 5) -- distincte des factures
+        // d'abonnement SaaS pro traitees plus bas dans ce meme cas. Reperee
+        // via la metadata posee sur la Subscription a sa creation
+        // (create-abonnement-reservation), recopiee par Stripe sur chaque
+        // facture (invoice.subscription_details.metadata) sans appel API.
+        if (invoice.subscription_details?.metadata?.kind === 'abonnement_reservation') {
+          if (event.type === 'invoice.paid') await materializeAbonnementReservation(invoice)
+          break
+        }
+
         const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id
         if (!customerId) break
 

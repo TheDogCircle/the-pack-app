@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
-import { resolveOfferPrice, applyRemiseMembre, getBookingRules, checkDelaiMin, computeAcompteCents } from '../_shared/offerPricing.ts'
+import { resolveOfferPrice, applyRemiseMembre, getBookingRules, checkDelaiMin, checkConges, checkBuffer, computeAcompteCents } from '../_shared/offerPricing.ts'
+import { resolveCommissionPercent } from '../_shared/commission.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
-      .from('lieux').select('id, nom, stripe_account_id, stripe_charges_enabled, commission_rate_percent').eq('id', lieu_id).maybeSingle()
+      .from('lieux').select('id, nom, stripe_account_id, stripe_charges_enabled').eq('id', lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
     if (!lieu) throw new Error('Lieu introuvable')
 
@@ -64,6 +65,8 @@ Deno.serve(async (req) => {
 
     const rules = await getBookingRules(supabaseAdmin, place?.org_id ?? null)
     checkDelaiMin(date, heure_debut, rules)
+    await checkConges(supabaseAdmin, lieu_id, date)
+    await checkBuffer(supabaseAdmin, lieu_id, date, heure_debut, heure_fin, rules, resolved.offer.type === 'place')
 
     // Verifie la disponibilite cote serveur (le calcul de carte.html est purement client).
     // disponibilites.jour suit la convention 0=lundi...6=dimanche (cf. espace-pro.html),
@@ -90,13 +93,7 @@ Deno.serve(async (req) => {
       .eq('statut', 'en_attente')
       .lt('created_at', new Date(Date.now() - ABANDON_MINUTES * 60_000).toISOString())
 
-    // Un taux specifique negocie avec ce partenaire (lieux.commission_rate_percent)
-    // prime sur le taux global -- sinon on retombe sur app_settings.commission_rate.
-    let percent = lieu.commission_rate_percent
-    if (percent === null || percent === undefined) {
-      const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
-      percent = settings?.value?.percent ?? 20
-    }
+    const percent = await resolveCommissionPercent(supabaseAdmin, lieu_id)
 
     const { data: profil } = await supabaseAdmin.from('profils').select('ambassadeur, stripe_customer_id').eq('id', caller.id).maybeSingle()
     const totalCents = applyRemiseMembre(resolved.prixCents, resolved.options, !!profil?.ambassadeur)
@@ -116,6 +113,7 @@ Deno.serve(async (req) => {
         client_prenom, client_tel: client_tel || null,
         client_email: caller.email || null,
         date, heure_debut, heure_fin,
+        is_place_booking: resolved.offer.type === 'place',
         statut: 'en_attente',
         statut_paiement: 'en_attente',
         montant_ht: totalCents / 100,
@@ -126,7 +124,14 @@ Deno.serve(async (req) => {
       .single()
 
     if (insertErr) {
-      if (insertErr.code === '23505') throw new Error('Ce créneau vient d\'être réservé par quelqu\'un d\'autre')
+      // 23505 : ancien index unique (heure_debut exact). 23P01 : nouvelle
+      // contrainte d'exclusion Postgres (chevauchement reel, cf migration
+      // Phase Pro 5 reservations_no_double_booking) -- deux clients qui
+      // reservent le meme crenau en meme temps, un seul passe.
+      if (insertErr.code === '23505' || insertErr.code === '23P01') throw new Error('Ce créneau vient d\'être réservé par quelqu\'un d\'autre')
+      // P0001 : raise exception explicite du trigger check_place_capacity
+      // (offre type 'place', capacite_max atteinte).
+      if (insertErr.code === 'P0001') throw new Error(insertErr.message || 'Capacité atteinte pour ce créneau')
       throw insertErr
     }
 

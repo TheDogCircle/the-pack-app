@@ -17,7 +17,7 @@ import type { RootStackParamList } from '../navigation';
 // seul prix, une seule duree). gabarit_poil et duree ont plusieurs variantes
 // de prix (offer_prices) -- resolues cote client une fois gabarit/type de
 // poil/duree choisis, cf resolveOfferPrice().
-type OfferPrice = { id: string; gabarit: string | null; type_poil: string | null; duree_minutes: number | null; prix_cents: number };
+type OfferPrice = { id: string; gabarit: string | null; type_poil: string | null; duree_minutes: number | null; intervalle: string | null; prix_cents: number };
 type Offer = { id: string; nom: string; description: string | null; type: string; legacy_prestation_id: string | null; offer_prices: OfferPrice[] };
 type BookingRoute = RouteProp<RootStackParamList, 'Booking'>;
 
@@ -29,6 +29,9 @@ type Chien = { id: string; nom: string; race: string | null; gabarit: string | n
 
 const GABARIT_LABELS: Record<string, string> = { petit: 'Petit', moyen: 'Moyen', grand: 'Grand' };
 const POIL_LABELS: Record<string, string> = { ras: 'Ras', mi_long: 'Mi-long', long: 'Long', frise: 'Frisé' };
+// 0=lundi...6=dimanche -- meme convention que disponibilites.jour et
+// abonnements_reservations.jour_semaine cote serveur.
+const JOURS_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
 // Resout la variante (et donc le prix/la duree) a partir des choix de
 // l'utilisateur -- premiere variante compatible, "a partir de" si rien n'est
@@ -52,6 +55,9 @@ function toDateStr(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+function toTimeStr(d: Date) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 export default function BookingScreen() {
@@ -87,6 +93,17 @@ export default function BookingScreen() {
   const [showDevisForm, setShowDevisForm] = useState(false);
   const [devisMessage, setDevisMessage] = useState('');
   const [submittingDevis, setSubmittingDevis] = useState(false);
+
+  // Phase Pro 5 : reservation recurrente (offre type 'abonnement', ex. "5
+  // balades par semaine") -- exclue de `offers` (comme 'forfait') et gere a
+  // part, le flux (jour+heure fixes au lieu d'un creneau ponctuel) est trop
+  // different pour partager addToCart/handleReserve.
+  const [abonnementOffers, setAbonnementOffers] = useState<Offer[]>([]);
+  const [selectedAbonnementOffer, setSelectedAbonnementOffer] = useState<Offer | null>(null);
+  const [abonnementJourSemaine, setAbonnementJourSemaine] = useState<number | null>(null);
+  const [abonnementHeure, setAbonnementHeure] = useState(new Date());
+  const [showAbonnementTimePicker, setShowAbonnementTimePicker] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
 
   const loadForfaits = useCallback(async () => {
     const [{ data: fs }, { data: forfaitOffers }, mesRes] = await Promise.all([
@@ -130,15 +147,18 @@ export default function BookingScreen() {
 
   useEffect(() => {
     (async () => {
-      const [{ data: offs }, { data: dispos }, profilRes, chiensRes] = await Promise.all([
+      const [{ data: offs }, { data: abos }, { data: dispos }, profilRes, chiensRes] = await Promise.all([
         supabase.from('offers').select('id,nom,description,type,legacy_prestation_id,offer_prices(*)')
-          .eq('lieu_id', lieuId).eq('statut', 'en_ligne').eq('reservable_en_ligne', true).neq('type', 'forfait'),
+          .eq('lieu_id', lieuId).eq('statut', 'en_ligne').eq('reservable_en_ligne', true).not('type', 'in', '(forfait,abonnement)'),
+        supabase.from('offers').select('id,nom,description,type,legacy_prestation_id,offer_prices(*)')
+          .eq('lieu_id', lieuId).eq('statut', 'en_ligne').eq('reservable_en_ligne', true).eq('type', 'abonnement'),
         supabase.from('disponibilites').select('jour,heure_debut,heure_fin').eq('lieu_id', lieuId),
         session ? supabase.from('profils').select('prenom, telephone').eq('id', session.user.id).maybeSingle() : Promise.resolve({ data: null }),
         session ? supabase.from('chiens').select('id,nom,race,gabarit').eq('user_id', session.user.id).order('created_at') : Promise.resolve({ data: [] }),
       ]);
       setOffers((offs as any) || []);
       setSelectedOffer((offs && offs[0]) as any || null);
+      setAbonnementOffers((abos as any) || []);
       setDisponibilites(dispos || []);
       const profil = (profilRes as any)?.data;
       if (profil?.prenom) setPrenom(profil.prenom);
@@ -263,6 +283,52 @@ export default function BookingScreen() {
       Alert.alert('Erreur', e.message || 'Impossible de finaliser la réservation pour le moment.');
     } finally {
       setUsingForfait(false);
+    }
+  }
+
+  async function handleSubscribeAbonnement() {
+    if (!selectedAbonnementOffer || abonnementJourSemaine == null) {
+      Alert.alert('Formulaire incomplet', 'Choisis un jour pour ton abonnement.');
+      return;
+    }
+    setSubscribing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-abonnement-reservation', {
+        body: {
+          offer_id: selectedAbonnementOffer.id,
+          chien_id: selectedChienId,
+          jour_semaine: abonnementJourSemaine,
+          heure_debut: `${toTimeStr(abonnementHeure)}:00`,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (data.client_secret) {
+        const { error: initError } = await initPaymentSheet({
+          merchantDisplayName: 'The Pack La Meute',
+          paymentIntentClientSecret: data.client_secret,
+          defaultBillingDetails: { name: prenom.trim() || undefined },
+        });
+        if (initError) throw new Error(initError.message);
+
+        const { error: presentError } = await presentPaymentSheet();
+        if (presentError) {
+          if (presentError.code !== 'Canceled') Alert.alert('Paiement non abouti', presentError.message);
+          return;
+        }
+      }
+
+      const intervalle = selectedAbonnementOffer.offer_prices?.[0]?.intervalle === 'mois' ? 'mois' : 'semaine';
+      Alert.alert(
+        'Abonnement activé !',
+        `Première séance le ${JOURS_LABELS[abonnementJourSemaine]} à ${toTimeStr(abonnementHeure)}. Le prélèvement se renouvelle automatiquement chaque ${intervalle}.`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message || "Impossible d'activer l'abonnement pour le moment.");
+    } finally {
+      setSubscribing(false);
     }
   }
 
@@ -425,6 +491,73 @@ export default function BookingScreen() {
               </View>
             ))}
           </View>
+        </>
+      )}
+
+      {abonnementOffers.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Abonnements récurrents</Text>
+          <View style={{ gap: 8, marginBottom: 8 }}>
+            {abonnementOffers.map((o) => {
+              const price = (o.offer_prices || [])[0];
+              const intervalle = price?.intervalle === 'mois' ? 'mois' : 'semaine';
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  style={[styles.prestaCard, selectedAbonnementOffer?.id === o.id && styles.prestaCardActive]}
+                  onPress={() => { setSelectedAbonnementOffer(o); setAbonnementJourSemaine(null); }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.prestaNom}>{o.nom}</Text>
+                    {!!o.description && <Text style={styles.prestaDesc}>{o.description}</Text>}
+                  </View>
+                  <Text style={styles.prestaPrix}>{price ? `${(price.prix_cents / 100).toFixed(2)} €/${intervalle}` : '—'}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {selectedAbonnementOffer && (
+            <>
+              <Text style={styles.sectionLabel}>Jour de la semaine</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                {JOURS_LABELS.map((label, i) => (
+                  <TouchableOpacity key={i} style={[styles.dogChip, abonnementJourSemaine === i && styles.dogChipActive]} onPress={() => setAbonnementJourSemaine(i)}>
+                    <Text style={[styles.dogChipText, abonnementJourSemaine === i && styles.dogChipTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.sectionLabel}>Heure</Text>
+              <TouchableOpacity style={styles.dateBtn} onPress={() => setShowAbonnementTimePicker(true)}>
+                <Ionicons name="time-outline" size={16} color={colors.bordeaux} />
+                <Text style={styles.dateBtnText}>{toTimeStr(abonnementHeure)}</Text>
+              </TouchableOpacity>
+              {showAbonnementTimePicker && (
+                <DateTimePicker
+                  value={abonnementHeure}
+                  mode="time"
+                  display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                  onChange={(_, d) => { setShowAbonnementTimePicker(false); if (d) setAbonnementHeure(d); }}
+                />
+              )}
+
+              {/* Pas besoin du prenom ici (create-abonnement-reservation ne le lit pas --
+                  le pro voit le prenom du profil, deja utilise par le webhook de
+                  materialisation), contrairement au reste de l'ecran : certains lieux
+                  n'ont qu'une offre abonnement, le formulaire prenom/tel plus bas (dans
+                  la branche offers.length>0) ne serait alors jamais affiche. */}
+              <TouchableOpacity
+                style={[styles.submitBtn, { marginTop: 12 }, (abonnementJourSemaine == null || subscribing) && styles.submitBtnDisabled]}
+                disabled={abonnementJourSemaine == null || subscribing}
+                onPress={handleSubscribeAbonnement}
+              >
+                {subscribing
+                  ? <ActivityIndicator color={colors.ivory} />
+                  : <Text style={styles.submitBtnText}>S'abonner</Text>}
+              </TouchableOpacity>
+            </>
+          )}
         </>
       )}
 

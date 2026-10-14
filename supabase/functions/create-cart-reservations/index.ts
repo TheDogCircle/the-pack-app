@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
-import { resolveOfferPrice, applyRemiseMembre } from '../_shared/offerPricing.ts'
+import { resolveOfferPrice, applyRemiseMembre, getBookingRules, checkConges, checkBuffer } from '../_shared/offerPricing.ts'
+import { resolveCommissionPercent } from '../_shared/commission.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -49,7 +50,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
-      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled, commission_rate_percent')
+      .from('lieux').select('id, stripe_account_id, stripe_charges_enabled')
       .eq('id', lieu_id).maybeSingle()
     if (lieuErr) throw lieuErr
     if (!lieu) throw new Error('Lieu introuvable')
@@ -65,11 +66,8 @@ Deno.serve(async (req) => {
       throw new Error("Ce prestataire n'a pas encore activé les paiements en ligne")
     }
 
-    let percent = lieu.commission_rate_percent
-    if (percent === null || percent === undefined) {
-      const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
-      percent = settings?.value?.percent ?? 20
-    }
+    const percent = await resolveCommissionPercent(supabaseAdmin, lieu_id)
+    const rules = await getBookingRules(supabaseAdmin, place?.org_id ?? null)
 
     // Client Stripe : reutilise celui deja enregistre sur le profil, sinon
     // en cree un (necessaire pour reutiliser la carte hors-session ensuite).
@@ -102,6 +100,8 @@ Deno.serve(async (req) => {
         if (!dispo || heure_debut < dispo.heure_debut || heure_fin > dispo.heure_fin) {
           throw new Error("Ce créneau n'est pas disponible")
         }
+        await checkConges(supabaseAdmin, lieu_id, date)
+        await checkBuffer(supabaseAdmin, lieu_id, date, heure_debut, heure_fin, rules, resolved.offer.type === 'place')
 
         await supabaseAdmin
           .from('reservations')
@@ -115,11 +115,13 @@ Deno.serve(async (req) => {
             lieu_id, prestation_id: resolved.legacyPrestationId, offer_id, offer_price_id: resolved.offerPrice.id,
             panier_id: panierId, chien_id: chien_id || null,
             user_id: caller.id, client_prenom, client_tel: client_tel || null, client_email: caller.email || null,
-            date, heure_debut, heure_fin, statut: 'en_attente', statut_paiement: 'en_attente', montant_ht: prixCents / 100,
+            date, heure_debut, heure_fin, is_place_booking: resolved.offer.type === 'place',
+            statut: 'en_attente', statut_paiement: 'en_attente', montant_ht: prixCents / 100,
           })
           .select('id').single()
         if (insertErr) {
-          if (insertErr.code === '23505') throw new Error('Ce créneau vient d\'être réservé par quelqu\'un d\'autre')
+          if (insertErr.code === '23505' || insertErr.code === '23P01') throw new Error('Ce créneau vient d\'être réservé par quelqu\'un d\'autre')
+          if (insertErr.code === 'P0001') throw new Error(insertErr.message || 'Capacité atteinte pour ce créneau')
           throw insertErr
         }
 

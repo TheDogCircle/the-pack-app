@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, RefreshControl,
+  ActivityIndicator, Alert, RefreshControl, Image,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,9 +20,26 @@ type Reservation = {
   statut_paiement: string;
   montant_ht: number;
   montant_rembourse: number | null;
+  presence: string | null;
   lieux: { nom: string } | null;
   prestations: { nom: string } | null;
 };
+
+// Phase Pro 5 : compte rendu poste par le pro apres une prestation terminee
+// (photo/duree/notes) -- affiche ici, jamais cree depuis l'app (cote pro
+// uniquement, espace-pro.html).
+type CompteRendu = { reservation_id: string; photo_url: string | null; duree_minutes: number | null; notes: string | null };
+
+// Abonnement recurrent (offre type 'abonnement') actif de l'utilisateur.
+type AbonnementReservation = {
+  id: string;
+  jour_semaine: number;
+  heure_debut: string;
+  statut: string;
+  lieux: { nom: string } | null;
+  offers: { nom: string } | null;
+};
+const JOURS_LABELS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
 // Format .ics universel (Apple Calendar, Google Calendar, tout client compatible RFC 5545) --
 // evite d'avoir a integrer deux SDK/OAuth differents pour un simple ajout d'evenement.
@@ -84,21 +101,73 @@ export default function MesReservationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [comptesRendus, setComptesRendus] = useState<Record<string, CompteRendu>>({});
+  const [abonnements, setAbonnements] = useState<AbonnementReservation[]>([]);
+  const [cancellingAbonnementId, setCancellingAbonnementId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!session) return;
-    const { data } = await supabase
-      .from('reservations')
-      .select('id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, montant_rembourse, lieux(nom), prestations(nom)')
-      .eq('user_id', session.user.id)
-      .order('date', { ascending: false })
-      .order('heure_debut', { ascending: false });
-    setReservations((data as any) || []);
+    const [{ data }, { data: abos }] = await Promise.all([
+      supabase
+        .from('reservations')
+        .select('id, date, heure_debut, heure_fin, statut, statut_paiement, montant_ht, montant_rembourse, presence, lieux(nom), prestations(nom)')
+        .eq('user_id', session.user.id)
+        .order('date', { ascending: false })
+        .order('heure_debut', { ascending: false }),
+      supabase
+        .from('abonnements_reservations')
+        .select('id, jour_semaine, heure_debut, statut, lieux(nom), offers(nom)')
+        .eq('user_id', session.user.id)
+        .eq('statut', 'actif'),
+    ]);
+    const resas = (data as any) || [];
+    setReservations(resas);
+    setAbonnements((abos as any) || []);
+
+    const termineesIds = resas.filter((r: Reservation) => r.statut === 'terminee').map((r: Reservation) => r.id);
+    if (termineesIds.length) {
+      const { data: crs } = await supabase
+        .from('comptes_rendus')
+        .select('reservation_id, photo_url, duree_minutes, notes')
+        .in('reservation_id', termineesIds);
+      const map: Record<string, CompteRendu> = {};
+      (crs || []).forEach((cr: CompteRendu) => { map[cr.reservation_id] = cr; });
+      setComptesRendus(map);
+    } else {
+      setComptesRendus({});
+    }
+
     setLoading(false);
     setRefreshing(false);
   }, [session?.user.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  function handleCancelAbonnement(abo: AbonnementReservation) {
+    Alert.alert(
+      'Annuler cet abonnement ?',
+      `Le prélèvement récurrent (${abo.offers?.nom || 'abonnement'}) sera arrêté. Les séances déjà réservées ne sont pas annulées par cette action.`,
+      [
+        { text: 'Retour', style: 'cancel' },
+        {
+          text: "Arrêter l'abonnement", style: 'destructive',
+          onPress: async () => {
+            setCancellingAbonnementId(abo.id);
+            try {
+              const { data, error } = await supabase.functions.invoke('cancel-abonnement-reservation', { body: { abonnement_id: abo.id } });
+              if (error) throw error;
+              if (data?.error) throw new Error(data.error);
+              await load();
+            } catch (e: any) {
+              Alert.alert('Erreur', e.message || "Impossible d'annuler l'abonnement pour le moment.");
+            } finally {
+              setCancellingAbonnementId(null);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   async function handleCancel(resa: Reservation) {
     const estPayee = resa.statut_paiement === 'paye';
@@ -150,6 +219,35 @@ export default function MesReservationsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.terra} />}
     >
+      {abonnements.length > 0 && (
+        <View style={{ gap: 10 }}>
+          <Text style={styles.sectionTitle}>Mes abonnements</Text>
+          {abonnements.map(abo => (
+            <View key={abo.id} style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.lieuNom}>{abo.lieux?.nom || 'Lieu'}</Text>
+              </View>
+              {!!abo.offers?.nom && <Text style={styles.prestaNom}>{abo.offers.nom}</Text>}
+              <View style={styles.metaRow}>
+                <Ionicons name="repeat-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.metaText}>Tous les {JOURS_LABELS[abo.jour_semaine]?.toLowerCase()} à {abo.heure_debut?.slice(0, 5)}</Text>
+              </View>
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  disabled={cancellingAbonnementId === abo.id}
+                  onPress={() => handleCancelAbonnement(abo)}
+                >
+                  {cancellingAbonnementId === abo.id
+                    ? <ActivityIndicator color="#C62828" size="small" />
+                    : <Text style={styles.cancelBtnText}>Arrêter l'abonnement</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
       {!reservations.length ? (
         <View style={styles.emptyBox}>
           <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />
@@ -178,12 +276,30 @@ export default function MesReservationsScreen() {
                 <Ionicons name="pricetag-outline" size={13} color={colors.textMuted} />
                 <Text style={styles.metaText}>{Number(resa.montant_ht).toFixed(2)} €</Text>
               </View>
+              {resa.statut === 'terminee' && resa.presence === 'absent' && (
+                <Text style={[styles.statutBadge, { color: '#C62828', marginTop: 2 }]}>Absent</Text>
+              )}
 
               {resa.statut === 'annulee' && resa.montant_rembourse != null && (
                 <Text style={styles.refundedText}>{Number(resa.montant_rembourse).toFixed(2)} € remboursés</Text>
               )}
               {preview && (
                 <Text style={styles.previewText}>Si annulation maintenant : {preview.label.toLowerCase()}</Text>
+              )}
+
+              {resa.statut === 'terminee' && !!comptesRendus[resa.id] && (
+                <View style={styles.compteRenduBox}>
+                  <Text style={styles.compteRenduTitle}>Compte rendu</Text>
+                  {!!comptesRendus[resa.id].photo_url && (
+                    <Image source={{ uri: comptesRendus[resa.id].photo_url! }} style={styles.compteRenduPhoto} resizeMode="cover" />
+                  )}
+                  {!!comptesRendus[resa.id].duree_minutes && (
+                    <Text style={styles.metaText}>Durée : {comptesRendus[resa.id].duree_minutes} min</Text>
+                  )}
+                  {!!comptesRendus[resa.id].notes && (
+                    <Text style={styles.compteRenduNotes}>{comptesRendus[resa.id].notes}</Text>
+                  )}
+                </View>
               )}
 
               <View style={styles.actionsRow}>
@@ -219,6 +335,14 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ivoryLight },
   emptyBox: { alignItems: 'center', gap: 10, padding: 40 },
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
+  sectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux },
+  compteRenduBox: {
+    marginTop: 10, padding: 12, borderRadius: 10,
+    backgroundColor: 'rgba(196,105,58,0.06)', gap: 6,
+  },
+  compteRenduTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, textTransform: 'uppercase', letterSpacing: 0.3 },
+  compteRenduPhoto: { width: '100%', height: 160, borderRadius: 8 },
+  compteRenduNotes: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid, lineHeight: 18 },
   card: {
     backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
     padding: 16, gap: 6,

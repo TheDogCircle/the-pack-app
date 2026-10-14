@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { resolveCommissionPercent } from '../_shared/commission.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -60,10 +61,9 @@ Deno.serve(async (req) => {
 
     const lieuIds = [...new Set((pendingResas || []).map(r => r.lieu_id))]
     const { data: lieux } = await supabaseAdmin
-      .from('lieux').select('id, stripe_account_id, commission_rate_percent').in('id', lieuIds)
+      .from('lieux').select('id, stripe_account_id').in('id', lieuIds)
     const lieuById = Object.fromEntries((lieux || []).map(l => [l.id, l]))
-
-    let defaultPercent: number | null = null
+    const percentByLieu: Record<string, number> = {}
 
     const succeeded: string[] = []
     const failed: { reservation_id: string; error: string }[] = []
@@ -76,14 +76,10 @@ Deno.serve(async (req) => {
         const lieu = lieuById[resa.lieu_id]
         if (!lieu?.stripe_account_id) throw new Error('Prestataire sans paiements activés')
 
-        let percent = lieu.commission_rate_percent
-        if (percent === null || percent === undefined) {
-          if (defaultPercent === null) {
-            const { data: settings } = await supabaseAdmin.from('app_settings').select('value').eq('key', 'commission_rate').maybeSingle()
-            defaultPercent = settings?.value?.percent ?? 20
-          }
-          percent = defaultPercent
+        if (percentByLieu[resa.lieu_id] === undefined) {
+          percentByLieu[resa.lieu_id] = await resolveCommissionPercent(supabaseAdmin, resa.lieu_id)
         }
+        const percent = percentByLieu[resa.lieu_id]
 
         const amountCents = Math.round(Number(resa.montant_ht) * 100)
         const commissionCents = Math.round(amountCents * (percent / 100))
