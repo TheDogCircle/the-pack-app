@@ -83,7 +83,8 @@ Deno.serve(async (req) => {
     try {
       const [profilRes, chiensRes, favorisRes, evFavRes, avisRes, photosRes, videosRes,
         messagesRes, convMembersRes, reservationsRes, evOrgRes, participationsRes,
-        photoLikesRes, followingRes, followersRes, baladesRes] = await Promise.all([
+        photoLikesRes, followingRes, followersRes,
+        clientsProRes, orgMembersRes, produitFavorisRes, npsRes, baladesRes] = await Promise.all([
         admin.from('profils').select('*').eq('id', targetUserId).single(),
         admin.from('chiens').select('*').eq('user_id', targetUserId),
         admin.from('favoris').select('*').eq('user_id', targetUserId),
@@ -99,6 +100,14 @@ Deno.serve(async (req) => {
         admin.from('photo_likes').select('*').eq('user_id', targetUserId),
         admin.from('follows').select('*').eq('follower_id', targetUserId),
         admin.from('follows').select('*').eq('following_id', targetUserId),
+        // Audit de securite (2026-10-14) : ces 4 tables (+ chien_questions_veto/
+        // chien_partages_sante ci-dessous, + candidatures_partenaires par email)
+        // ont ete ajoutees par les phases Pro 5/6/7, jamais retrofittees dans cet
+        // export -- un vrai manquement RGPD (droit d'acces incomplet).
+        admin.from('clients_pro').select('*').eq('user_id', targetUserId),
+        admin.from('org_members').select('org_id, role, status, created_at, organizations(nom, segment)').eq('user_id', targetUserId),
+        admin.from('produit_marque_favoris').select('produit_id, created_at, produits_marque(nom)').eq('user_id', targetUserId),
+        admin.from('nps_responses').select('*').eq('user_id', targetUserId),
         admin.from('balades').select('*').eq('user_id', targetUserId),
       ])
 
@@ -108,9 +117,24 @@ Deno.serve(async (req) => {
       const { data: carnetEntries } = chienIds.length
         ? await admin.from('chien_carnet_entries').select('*').in('chien_id', chienIds)
         : { data: [] as any[] }
+      // Donnees de sante (suite) + candidature B2B -- ajoutees par les phases
+      // Pro 5/6/7, jamais retrofittees dans cet export avant cet audit.
+      const { data: questionsVeto } = chienIds.length
+        ? await admin.from('chien_questions_veto').select('*').in('chien_id', chienIds)
+        : { data: [] as any[] }
+      const { data: partagesSante } = chienIds.length
+        ? await admin.from('chien_partages_sante').select('*').in('chien_id', chienIds)
+        : { data: [] as any[] }
 
       const { data: authUserData } = await admin.auth.admin.getUserById(targetUserId)
       const authUser = authUserData?.user
+
+      // candidatures_partenaires n'a pas de user_id -- rattachee par email,
+      // seul lien disponible au moment de la candidature (avant creation de
+      // compte dans certains cas).
+      const { data: candidatures } = authUser?.email
+        ? await admin.from('candidatures_partenaires').select('*').eq('email', authUser.email)
+        : { data: [] as any[] }
 
       const conversations = (convMembersRes.data || []).map((m: any) => ({
         conversation_id: m.conversation_id, nom: m.conversations?.nom, type: m.conversations?.type, rejoint_le: m.joined_at,
@@ -124,6 +148,13 @@ Deno.serve(async (req) => {
         profil,
         chiens,
         carnet_de_sante: carnetEntries || [],
+        questions_veterinaire: questionsVeto || [],
+        partages_sante_avec_pros: partagesSante || [],
+        candidatures_partenaires: candidatures || [],
+        organisations_membre: orgMembersRes.data || [],
+        produits_marque_favoris: produitFavorisRes.data || [],
+        reponses_satisfaction: npsRes.data || [],
+        client_chez_des_pros: clientsProRes.data || [],
         lieux_enregistres: favorisRes.data || [],
         evenements_favoris: evFavRes.data || [],
         avis: avisRes.data || [],
@@ -152,6 +183,13 @@ Deno.serve(async (req) => {
       zip.file('profil.csv', toCSV([profil]))
       zip.file('chiens.csv', toCSV(chiens))
       zip.file('carnet_de_sante.csv', toCSV(carnetEntries || []))
+      zip.file('questions_veterinaire.csv', toCSV(questionsVeto || []))
+      zip.file('partages_sante_avec_pros.csv', toCSV(partagesSante || []))
+      zip.file('candidatures_partenaires.csv', toCSV(candidatures || []))
+      zip.file('organisations_membre.csv', toCSV(orgMembersRes.data || []))
+      zip.file('produits_marque_favoris.csv', toCSV(produitFavorisRes.data || []))
+      zip.file('reponses_satisfaction.csv', toCSV(npsRes.data || []))
+      zip.file('client_chez_des_pros.csv', toCSV(clientsProRes.data || []))
       zip.file('lieux_enregistres.csv', toCSV(favorisRes.data || []))
       zip.file('evenements_favoris.csv', toCSV(evFavRes.data || []))
       zip.file('avis.csv', toCSV(avisRes.data || []))
@@ -171,10 +209,13 @@ Deno.serve(async (req) => {
         'Généré le ' + new Date().toLocaleDateString('fr-FR'),
         '',
         'Ce fichier contient donnees.json (export complet structuré) et un CSV',
-        'lisible par catégorie (profil, chiens, carnet_de_sante, lieux_enregistres,',
-        'avis, photos, videos, messages, conversations, reservations,',
-        'evenements_organises, evenements_inscriptions, photos_aimees,',
-        'abonnements_suivis, abonnes, balades).',
+        'lisible par catégorie (profil, chiens, carnet_de_sante,',
+        'questions_veterinaire, partages_sante_avec_pros, candidatures_partenaires,',
+        'organisations_membre, produits_marque_favoris, reponses_satisfaction,',
+        'client_chez_des_pros, lieux_enregistres, avis, photos, videos, messages,',
+        'conversations, reservations, evenements_organises,',
+        'evenements_inscriptions, photos_aimees, abonnements_suivis, abonnes,',
+        'balades).',
         '',
         "Abonnement payant : aucun abonnement individuel payant n'existe sur",
         "notre plateforme à ce jour (abonnements_suivis/abonnes ci-dessus",

@@ -36,13 +36,20 @@ type Post = {
   disponibilite: string | null;
   date_debut: string | null; date_expiration: string | null;
 };
+// Phase Pro 7, point 3 : produit du catalogue d'une marque -- `en_ligne`
+// uniquement, deja filtre par la RLS (produits_marque_public_select), la
+// requete le repete explicitement pour rester lisible sans s'y fier seule.
+type Produit = {
+  id: string; nom: string; photo_url: string | null;
+  prix_indicatif_cents: number | null; lien: string | null;
+};
 type Partenaire = {
   id: string; nom: string; description: string | null;
   logo_url: string | null; banniere_url: string | null; site_web: string | null;
   lien_affiliation: string | null;
   instagram_url: string | null; tiktok_url: string | null;
   categorie: string | null; lieu_id: string | null;
-  type_service: string[] | null;
+  type_service: string[] | null; org_id: string | null;
 };
 
 const TYPE_SERVICE_LABELS: Record<string, string> = {
@@ -194,12 +201,14 @@ function CandidatureMarqueModal({ visible, onClose }: { visible: boolean; onClos
 // ── Brand detail modal ──────────────────────────────────────────────────────
 
 function BrandModal({
-  partenaire, posts, visible, highlightPostId, onClose,
+  partenaire, posts, visible, highlightPostId, userId, onClose,
 }: {
-  partenaire: Partenaire | null; posts: Post[]; visible: boolean; highlightPostId?: string | null; onClose: () => void;
+  partenaire: Partenaire | null; posts: Post[]; visible: boolean; highlightPostId?: string | null; userId: string | null; onClose: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [produits, setProduits] = useState<Produit[]>([]);
+  const [favoris, setFavoris] = useState<Set<string>>(new Set());
   const scrollRef = useRef<ScrollView>(null);
   const postNodeRefs = useRef<Record<string, View | null>>({});
 
@@ -207,6 +216,42 @@ function BrandModal({
   useEffect(() => {
     if (visible && partenaire) trackEvent('page_view', 'partenaires', { target_type: 'partenaire', target_id: partenaire.id });
   }, [visible, partenaire]);
+
+  // Catalogue (Phase Pro 7, point 3) : charge a l'ouverture de la fiche,
+  // meme esprit que le reste de cette modale (rien de precharge globalement
+  // pour toutes les marques, contrairement a partenaire_posts).
+  useEffect(() => {
+    if (!visible || !partenaire?.org_id) { setProduits([]); setFavoris(new Set()); return; }
+    (async () => {
+      const { data: prods } = await supabase.from('produits_marque')
+        .select('id,nom,photo_url,prix_indicatif_cents,lien')
+        .eq('org_id', partenaire.org_id).eq('statut', 'en_ligne')
+        .order('created_at', { ascending: false });
+      setProduits(prods || []);
+      if (userId && prods?.length) {
+        const { data: favs } = await supabase.from('produit_marque_favoris')
+          .select('produit_id').eq('user_id', userId).in('produit_id', prods.map(p => p.id));
+        setFavoris(new Set((favs || []).map(f => f.produit_id)));
+      } else {
+        setFavoris(new Set());
+      }
+    })();
+  }, [visible, partenaire?.org_id, userId]);
+
+  async function toggleProduitFavori(produitId: string) {
+    if (!userId) return;
+    const isFav = favoris.has(produitId);
+    setFavoris(prev => {
+      const next = new Set(prev);
+      if (isFav) next.delete(produitId); else next.add(produitId);
+      return next;
+    });
+    if (isFav) {
+      await supabase.from('produit_marque_favoris').delete().eq('user_id', userId).eq('produit_id', produitId);
+    } else {
+      await supabase.from('produit_marque_favoris').insert({ user_id: userId, produit_id: produitId });
+    }
+  }
 
   // Arrivee via une notification "au clic, ouvrir -> une publication precise" :
   // scrolle jusqu'a la publication visee des que son noeud est mesurable (le
@@ -324,6 +369,42 @@ function BrandModal({
               </View>
             </View>
           )}
+
+          {/* Catalogue (Phase Pro 7, point 3) */}
+          {produits.length > 0 ? (
+            <>
+              <Text style={s.sectionTitle}>Catalogue</Text>
+              <View style={s.produitsGrid}>
+                {produits.map(produit => {
+                  const isFav = favoris.has(produit.id);
+                  return (
+                    <TouchableOpacity
+                      key={produit.id}
+                      style={[s.produitCard, { width: halfW }]}
+                      disabled={!produit.lien}
+                      onPress={() => { trackEvent('click', 'partenaires', { target_type: 'produit', target_id: produit.id, action: 'produit_lien' }); Linking.openURL(produit.lien!); }}
+                    >
+                      {produit.photo_url
+                        ? <Image source={{ uri: produit.photo_url }} style={s.produitCardImg} resizeMode="cover" />
+                        : <View style={[s.produitCardImg, s.produitCardImgFallback]} />}
+                      <TouchableOpacity
+                        style={s.produitCardFavBtn}
+                        onPress={() => toggleProduitFavori(produit.id)}
+                      >
+                        <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={16} color={isFav ? '#E05070' : '#fff'} />
+                      </TouchableOpacity>
+                      <View style={s.produitCardBody}>
+                        <Text style={s.produitCardNom} numberOfLines={2}>{produit.nom}</Text>
+                        {produit.prix_indicatif_cents != null ? (
+                          <Text style={s.produitCardPrix}>{(produit.prix_indicatif_cents / 100).toFixed(2)} €</Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
 
           {/* Actualités */}
           {otherPosts.length > 0 ? (
@@ -891,6 +972,7 @@ export default function PartenairesScreen() {
         posts={selectedBrand ? postsFor(selectedBrand.id) : []}
         visible={!!selectedBrand}
         highlightPostId={highlightPostId}
+        userId={session?.user?.id ?? null}
         onClose={() => { setSelectedBrand(null); setHighlightPostId(null); }}
       />
 
@@ -1085,6 +1167,24 @@ const s = StyleSheet.create({
     borderWidth: 2.5, borderColor: colors.bordeaux,
     shadowOpacity: 0.28, shadowRadius: 12,
   },
+
+  // Catalogue (Phase Pro 7, point 3)
+  produitsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  produitCard: {
+    backgroundColor: colors.white, borderRadius: 14, overflow: 'hidden',
+    borderWidth: 1, borderColor: colors.border, marginBottom: 8,
+  },
+  produitCardImg: { width: '100%', height: 110 },
+  produitCardImgFallback: { backgroundColor: colors.bordeaux },
+  produitCardFavBtn: {
+    position: 'absolute', top: 8, right: 8,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  produitCardBody: { padding: 10, gap: 3 },
+  produitCardNom: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, lineHeight: 17 },
+  produitCardPrix: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra },
 
   // Post item
   postItem: {

@@ -21,16 +21,18 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Verifie que l'appelant est bien un admin -- source unique de verite : le flag
-  // is_admin en base (meme critere que partout ailleurs, cf is_admin_user() utilise
-  // par les policies RLS). Une liste d'IDs codee en dur s'etait desynchronisee du
-  // vrai compte admin de Marine, bloquant silencieusement ses propres tests.
+  // Audit de securite (2026-10-14) : verifiait profils.is_admin, un flag legacy
+  // jamais synchronise par aucun trigger avec admin_roles (la vraie source de
+  // verite documentee, docs/admin-v2.md) -- et sans palier de role, n'importe
+  // quel admin aurait pu diffuser a TOUS les utilisateurs. Aligne sur le meme
+  // seuil que send-notification-campaign (moderator+, deja l'action admin la
+  // plus proche en impact : notification de masse).
   const { data: { user }, error: userErr } = await supabase.auth.getUser(jwt);
   if (userErr || !user) {
     return new Response(JSON.stringify({ error: 'Non autorise' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
-  const { data: callerProfil } = await supabase.from('profils').select('is_admin').eq('id', user.id).maybeSingle();
-  if (!callerProfil?.is_admin) {
+  const { data: callerRole } = await supabase.from('admin_roles').select('role').eq('user_id', user.id).maybeSingle();
+  if (!['moderator', 'super_admin'].includes(callerRole?.role ?? '')) {
     return new Response(JSON.stringify({ error: 'Non autorise' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 
