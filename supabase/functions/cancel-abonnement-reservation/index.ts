@@ -34,12 +34,25 @@ Deno.serve(async (req) => {
     if (!abonnement_id) throw new Error('abonnement_id manquant')
 
     const { data: abonnement, error: aErr } = await supabaseAdmin
-      .from('abonnements_reservations').select('id, user_id, statut, stripe_subscription_id, lieux:lieu_id(manager_user_id)')
+      .from('abonnements_reservations').select('id, lieu_id, user_id, statut, stripe_subscription_id, lieux:lieu_id(manager_user_id)')
       .eq('id', abonnement_id).maybeSingle()
     if (aErr) throw aErr
     if (!abonnement) throw new Error('Abonnement introuvable')
     const isClient = abonnement.user_id === caller.id
-    const isPro = (abonnement as any).lieux?.manager_user_id === caller.id
+    // Un pro peut aussi annuler au nom d'un client (ex: client injoignable) --
+    // seuil 'manager' (pas 'staff') : resilier un abonnement payant recurrent
+    // est plus consequent qu'une action d'agenda courante (meme recette que
+    // reservations_org_write pour la distinction staff/manager).
+    let isPro = (abonnement as any).lieux?.manager_user_id === caller.id
+    if (!isPro) {
+      const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', abonnement.lieu_id).eq('statut', 'approved').maybeSingle()
+      if (place?.org_id) {
+        const { data: membership } = await supabaseAdmin
+          .from('org_members').select('role').eq('org_id', place.org_id).eq('user_id', caller.id).eq('status', 'active').maybeSingle()
+        const roleRank: Record<string, number> = { owner: 3, manager: 2, staff: 1 }
+        isPro = !!membership && (roleRank[membership.role] ?? 0) >= 2
+      }
+    }
     if (!isClient && !isPro) throw new Error('Non autorisé')
     if (abonnement.statut === 'annule') throw new Error('Cet abonnement est déjà annulé')
 

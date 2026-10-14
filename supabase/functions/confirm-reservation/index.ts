@@ -43,8 +43,24 @@ Deno.serve(async (req) => {
     if (resaErr) throw resaErr
     if (!resa) throw new Error('Réservation introuvable')
 
+    // Recette Phase Pro 5 : ce check n'acceptait que le manager_user_id
+    // historique -- un membre staff/manager d'une organisation (jamais
+    // rebranche ici, meme en Phase Pro 4) ne pouvait pas confirmer une
+    // reservation, contrairement a ce que permet desormais l'Agenda cote
+    // UI (staff compris, cf docs/pro-v2.md Phase Pro 3). 'staff' minimum --
+    // meme seuil que reservations_org_write.
     const managerUserId = (resa as any).lieux?.manager_user_id
-    if (!managerUserId || managerUserId !== caller.id) throw new Error('Non autorisé sur cette réservation')
+    let isPro = !!managerUserId && managerUserId === caller.id
+    if (!isPro) {
+      const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', resa.lieu_id).eq('statut', 'approved').maybeSingle()
+      if (place?.org_id) {
+        const { data: membership } = await supabaseAdmin
+          .from('org_members').select('role').eq('org_id', place.org_id).eq('user_id', caller.id).eq('status', 'active').maybeSingle()
+        const roleRank: Record<string, number> = { owner: 3, manager: 2, staff: 1 }
+        isPro = !!membership && (roleRank[membership.role] ?? 0) >= 1
+      }
+    }
+    if (!isPro) throw new Error('Non autorisé sur cette réservation')
 
     if (resa.statut !== 'en_attente') throw new Error('Cette réservation ne peut plus être confirmée')
 

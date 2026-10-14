@@ -11,6 +11,15 @@ async function resolveOrgId(supabaseAdmin: any, lieuId: string): Promise<string 
   return place?.org_id ?? null
 }
 
+// Recette Phase Pro 5 : pour une reservation sans acompte confirmee
+// manuellement (le cas le plus courant), confirm-reservation capture le
+// PaymentIntent -- ce qui declenche ensuite, de facon asynchrone,
+// l'evenement payment_intent.succeeded recu par stripe-webhook. Les DEUX
+// chemins appellent recordBookingRevenue pour la MEME reservation : sans
+// garde, la ligne revenue_events (et donc la commission comptee) serait
+// dupliquee a chaque confirmation. Idempotent par (type, external_ref) --
+// meme principe deja utilise pour les factures d'abonnement SaaS pro dans
+// stripe-webhook (invoice.paid).
 export async function recordBookingRevenue(supabaseAdmin: any, params: {
   lieuId: string
   grossCents: number
@@ -20,6 +29,9 @@ export async function recordBookingRevenue(supabaseAdmin: any, params: {
 }) {
   const orgId = await resolveOrgId(supabaseAdmin, params.lieuId)
   if (!orgId) return
+  const { data: existing } = await supabaseAdmin
+    .from('revenue_events').select('id').eq('type', 'booking').eq('external_ref', params.externalRef).maybeSingle()
+  if (existing) return
   await supabaseAdmin.from('revenue_events').insert({
     org_id: orgId,
     type: 'booking',
@@ -47,6 +59,9 @@ export async function recordRefundRevenue(supabaseAdmin: any, params: {
   if (params.refundedGrossCents <= 0) return
   const orgId = await resolveOrgId(supabaseAdmin, params.lieuId)
   if (!orgId) return
+  const { data: existing } = await supabaseAdmin
+    .from('revenue_events').select('id').eq('type', 'refund').eq('external_ref', params.externalRef).maybeSingle()
+  if (existing) return
   await supabaseAdmin.from('revenue_events').insert({
     org_id: orgId,
     type: 'refund',

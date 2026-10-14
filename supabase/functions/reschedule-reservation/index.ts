@@ -66,6 +66,10 @@ Deno.serve(async (req) => {
 
     const managerUserId = (resa as any).lieux?.manager_user_id
     const isClient = resa.user_id === caller.id
+    // 'staff' minimum, pas 'manager' -- Agenda & reservations est documente
+    // comme accessible "staff compris" depuis la Phase Pro 3, et deplacer un
+    // RDV est une action de base de cet ecran (meme recette que
+    // reservations_org_write / comptes_rendus_pro_write).
     let isPro = !!managerUserId && managerUserId === caller.id
     if (!isPro) {
       const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', resa.lieu_id).eq('statut', 'approved').maybeSingle()
@@ -73,7 +77,7 @@ Deno.serve(async (req) => {
         const { data: membership } = await supabaseAdmin
           .from('org_members').select('role').eq('org_id', place.org_id).eq('user_id', caller.id).eq('status', 'active').maybeSingle()
         const roleRank: Record<string, number> = { owner: 3, manager: 2, staff: 1 }
-        isPro = !!membership && (roleRank[membership.role] ?? 0) >= 2
+        isPro = !!membership && (roleRank[membership.role] ?? 0) >= 1
       }
     }
     if (!isClient && !isPro) throw new Error('Non autorisé sur cette réservation')

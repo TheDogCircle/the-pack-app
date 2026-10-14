@@ -62,9 +62,21 @@ Deno.serve(async (req) => {
     if (resaErr) throw resaErr
     if (!resa) throw new Error('Réservation introuvable')
 
+    // Recette Phase Pro 5 : meme correctif que confirm-reservation -- ce
+    // check n'acceptait que le manager_user_id historique, jamais un membre
+    // staff/manager d'organisation (Agenda documente "staff compris").
     const managerUserId = (resa as any).lieux?.manager_user_id
     const isClient = resa.user_id === caller.id
-    const isPro = !!managerUserId && managerUserId === caller.id
+    let isPro = !!managerUserId && managerUserId === caller.id
+    if (!isPro) {
+      const { data: place } = await supabaseAdmin.from('org_places').select('org_id').eq('lieu_id', resa.lieu_id).eq('statut', 'approved').maybeSingle()
+      if (place?.org_id) {
+        const { data: membership } = await supabaseAdmin
+          .from('org_members').select('role').eq('org_id', place.org_id).eq('user_id', caller.id).eq('status', 'active').maybeSingle()
+        const roleRank: Record<string, number> = { owner: 3, manager: 2, staff: 1 }
+        isPro = !!membership && (roleRank[membership.role] ?? 0) >= 1
+      }
+    }
     if (!isClient && !isPro) throw new Error('Non autorisé sur cette réservation')
 
     // Notifie push + email les deux parties (client et pro) qu'une reservation
