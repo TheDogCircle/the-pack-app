@@ -30,6 +30,20 @@ type PrivateInfo = {
 
 type VetLieu = { id: string; nom: string; ville: string | null; adresse: string | null; tel: string | null };
 
+// Partage selectif du carnet avec un pro (Phase Pro 6) : rien n'est visible
+// par defaut, le client choisit par categorie, revocable a tout moment.
+// Une ligne par (chien, lieu) -- categories vide = rien de partage, pas de
+// suppression de ligne necessaire pour revoquer.
+type PartageCategorie = 'vaccins' | 'sterilisation' | 'veterinaire' | 'poids_taille';
+type LieuPourPartage = { id: string; nom: string };
+
+const PARTAGE_CATEGORIES: { key: PartageCategorie; label: string }[] = [
+  { key: 'vaccins', label: 'Vaccins à jour' },
+  { key: 'sterilisation', label: 'Stérilisation' },
+  { key: 'veterinaire', label: 'Vétérinaire' },
+  { key: 'poids_taille', label: 'Poids & taille' },
+];
+
 type EntryType = 'vaccin' | 'vermifuge' | 'antiparasitaire' | 'rdv_veto' | 'pesee' | 'note';
 
 type Entry = {
@@ -160,6 +174,13 @@ export default function CarnetSanteScreen() {
 
   const [newQuestion, setNewQuestion] = useState('');
   const [addingQuestion, setAddingQuestion] = useState(false);
+
+  const [shareModal, setShareModal] = useState(false);
+  const [shareLieux, setShareLieux] = useState<LieuPourPartage[]>([]);
+  const [sharePartages, setSharePartages] = useState<Record<string, PartageCategorie[]>>({});
+  const [shareSelectedLieuId, setShareSelectedLieuId] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareSavingCat, setShareSavingCat] = useState<PartageCategorie | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: chienData }, { data: privateData }, { data: entriesData }, { data: questionsData }] = await Promise.all([
@@ -390,6 +411,43 @@ export default function CarnetSanteScreen() {
     await supabase.from('chien_questions_veto').delete().eq('id', question.id);
   }
 
+  async function openShareModal() {
+    setShareModal(true);
+    setShareLoading(true);
+    setShareSelectedLieuId(null);
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    const [{ data: resas }, { data: partages }] = await Promise.all([
+      userId
+        ? supabase.from('reservations').select('lieu_id, lieux(nom)').eq('user_id', userId).eq('chien_id', chienId).in('statut', ['confirmee', 'terminee'])
+        : Promise.resolve({ data: [] as any[] }),
+      supabase.from('chien_partages_sante').select('lieu_id, categories').eq('chien_id', chienId),
+    ]);
+    const lieuxMap: Record<string, LieuPourPartage> = {};
+    (resas || []).forEach((r: any) => { if (r.lieu_id) lieuxMap[r.lieu_id] = { id: r.lieu_id, nom: r.lieux?.nom || 'Établissement' }; });
+    setShareLieux(Object.values(lieuxMap));
+    const partagesMap: Record<string, PartageCategorie[]> = {};
+    (partages || []).forEach((p: any) => { partagesMap[p.lieu_id] = p.categories || []; });
+    setSharePartages(partagesMap);
+    setShareLoading(false);
+  }
+
+  async function toggleShareCategorie(cat: PartageCategorie) {
+    if (!shareSelectedLieuId) return;
+    const current = sharePartages[shareSelectedLieuId] || [];
+    const next = current.includes(cat) ? current.filter(c => c !== cat) : [...current, cat];
+    setSharePartages(p => ({ ...p, [shareSelectedLieuId]: next }));
+    setShareSavingCat(cat);
+    const { error } = await supabase.from('chien_partages_sante')
+      .upsert({ chien_id: chienId, lieu_id: shareSelectedLieuId, categories: next, updated_at: new Date().toISOString() }, { onConflict: 'chien_id,lieu_id' });
+    setShareSavingCat(null);
+    if (error) {
+      // Revert optimiste si l'ecriture echoue (ex: RLS, hors ligne).
+      setSharePartages(p => ({ ...p, [shareSelectedLieuId]: current }));
+      Alert.alert('Erreur', error.message);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -435,6 +493,10 @@ export default function CarnetSanteScreen() {
             <TouchableOpacity onPress={openInfoModal} style={styles.infoLink}>
               <Ionicons name="create-outline" size={13} color={colors.terra} />
               <Text style={styles.infoLinkText}>Puce, vétérinaire, stérilisation</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openShareModal} style={styles.infoLink}>
+              <Ionicons name="share-social-outline" size={13} color={colors.terra} />
+              <Text style={styles.infoLinkText}>Partager avec un pro</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -877,6 +939,70 @@ export default function CarnetSanteScreen() {
                   <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
                 </TouchableOpacity>
               ))}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={shareModal} animationType="slide" transparent onRequestClose={() => setShareModal(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Partager avec un pro</Text>
+              <TouchableOpacity onPress={() => setShareModal(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.rappelHint}>
+                Rien n'est visible par défaut. Choisis ce que tu veux partager avec chaque établissement — tu peux révoquer à tout moment en décochant.
+              </Text>
+
+              {shareLoading ? (
+                <ActivityIndicator color={colors.terra} style={{ marginTop: 20 }} />
+              ) : shareLieux.length === 0 ? (
+                <Text style={styles.emptyMini}>Réserve une prestation pour pouvoir partager le carnet de santé avec un pro.</Text>
+              ) : (
+                <>
+                  <Text style={styles.fieldLabel}>Établissement</Text>
+                  <View style={styles.typeGrid}>
+                    {shareLieux.map(l => {
+                      const active = shareSelectedLieuId === l.id;
+                      const nbPartage = (sharePartages[l.id] || []).length;
+                      return (
+                        <TouchableOpacity
+                          key={l.id}
+                          style={[styles.typeChip, active && { backgroundColor: colors.terra, borderColor: colors.terra }]}
+                          onPress={() => setShareSelectedLieuId(l.id)}
+                        >
+                          <Text style={[styles.typeChipText, active && { color: colors.ivory }]}>
+                            {l.nom}{nbPartage > 0 ? ` (${nbPartage})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {shareSelectedLieuId && (
+                    <>
+                      <Text style={styles.fieldLabel}>Ce que ce pro peut voir</Text>
+                      {PARTAGE_CATEGORIES.map(c => {
+                        const checked = (sharePartages[shareSelectedLieuId] || []).includes(c.key);
+                        return (
+                          <TouchableOpacity key={c.key} style={styles.checkboxRow} onPress={() => toggleShareCategorie(c.key)} disabled={shareSavingCat === c.key}>
+                            <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={20} color={checked ? colors.sage : colors.textMuted} />
+                            <Text style={styles.checkboxLabel}>{c.label}</Text>
+                            {shareSavingCat === c.key && <ActivityIndicator size="small" color={colors.terra} style={{ marginLeft: 6 }} />}
+                          </TouchableOpacity>
+                        );
+                      })}
+                      {(sharePartages[shareSelectedLieuId] || []).length === 0 && (
+                        <Text style={styles.rappelHint}>Rien n'est partagé avec cet établissement pour l'instant.</Text>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
