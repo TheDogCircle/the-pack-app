@@ -331,7 +331,7 @@ export default function Navigation() {
     // moment du deploiement, ou un futur oubli de convention, ne doit pas se traduire
     // par une notif qui ne fait rien au tap.
     const lieuId = data.lieuId || data.lieu_id;
-    if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer' || data.type === 'photo_like_lieu') {
+    if (data.type === 'new_lieu' || data.type === 'suggestion_validee' || data.type === 'friend_lieu' || data.type === 'new_partner' || data.type === 'new_offer' || data.type === 'photo_like_lieu' || data.type === 'offre_locale' || data.type === 'avis_demande') {
       if (lieuId) {
         mapNavigation.setPendingLieu(lieuId);
         navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
@@ -366,7 +366,7 @@ export default function Navigation() {
       if (data.chienId) {
         navigationRef.navigate('CarnetSante' as any, { chienId: data.chienId, chienNom: data.chienNom || '' } as any);
       }
-    } else if (data.type === 'reservation') {
+    } else if (data.type === 'reservation' || data.type === 'compte_rendu') {
       navigationRef.navigate('MesReservations' as any);
     } else if (data.type === 'ticket_reply') {
       if (data.ticketId) {
@@ -422,6 +422,33 @@ export default function Navigation() {
         } else {
           navigationRef.navigate('Tabs' as any, { screen: 'Profil' } as any);
         }
+      }
+    } else if (data.type === 'moderation_action' || data.type === 'moderation_report_resolved') {
+      // Pas de lieu_id/post_id dans le payload (moderate-content-notify n'envoie
+      // que contentType/contentId/action) -- on resout la cible a partir de la
+      // table que content_reports.content_type designe, meme principe que le
+      // lookup carnet_sante ci-dessus.
+      const { contentType, contentId } = data;
+      if (contentType === 'photo') {
+        const { data: photo } = await supabase.from('photos').select('lieu_id').eq('id', contentId).maybeSingle();
+        if (photo?.lieu_id) { mapNavigation.setPendingLieu(photo.lieu_id); navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any); }
+      } else if (contentType === 'video') {
+        const { data: video } = await supabase.from('videos').select('lieu_id').eq('id', contentId).maybeSingle();
+        if (video?.lieu_id) { mapNavigation.setPendingLieu(video.lieu_id); navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any); }
+      } else if (contentType === 'avis') {
+        const { data: avis } = await supabase.from('avis').select('lieu_id').eq('id', contentId).maybeSingle();
+        if (avis?.lieu_id) { mapNavigation.setPendingLieu(avis.lieu_id); navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any); }
+      } else if (contentType === 'commentaire') {
+        const { data: commentaire } = await supabase.from('commentaires').select('entity_type, entity_id').eq('id', contentId).maybeSingle();
+        if (commentaire?.entity_type === 'lieu' && commentaire.entity_id) {
+          mapNavigation.setPendingLieu(commentaire.entity_id);
+          navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any);
+        } else if (commentaire?.entity_type === 'event' && commentaire.entity_id) {
+          mapNavigation.setPendingEvent(commentaire.entity_id);
+          navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
+        }
+      } else if (contentType === 'profil') {
+        navigationRef.navigate('Tabs' as any, { screen: 'Profil' } as any);
       }
     }
   }
