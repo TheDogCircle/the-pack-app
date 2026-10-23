@@ -339,7 +339,7 @@ export default function Navigation() {
     } else if (data.type === 'photo_like' || data.type === 'new_post' || data.type === 'mention_comment') {
       if (data.postId) mapNavigation.setPendingPost(data.postId);
       navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
-    } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today' || data.type === 'mention_event_comment') {
+    } else if (data.type === 'new_event' || data.type === 'event_reminder' || data.type === 'event_reminder_today' || data.type === 'mention_event_comment' || data.type === 'event_validated' || data.type === 'event_refused' || data.type === 'event_cancelled') {
       if (data.eventId) mapNavigation.setPendingEvent(data.eventId);
       navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
     } else if (data.type === 'mention_lieu_comment') {
