@@ -13,7 +13,7 @@ const DEBUT = new Date('2026-10-25T09:00:00+02:00');
 const CLE = 'thepack_nouveautes_vues';
 
 const NOUVEAUTES: { icon: keyof typeof Ionicons.glyphMap; titre: string; texte: string }[] = [
-  { icon: 'footsteps', titre: 'Balades : le Top de la semaine', texte: 'Tes km comptent ! Grimpe au classement de ta meute et partage ta balade en story.' },
+  { icon: 'footsteps', titre: 'Balades : classement du mois et badges', texte: 'Tes km comptent ! Grimpe au classement de ta meute, de ta ville ou de ta race, débloque des badges et partage ta balade en story.' },
   { icon: 'people', titre: 'Invite tes amis dans ta meute', texte: 'Ton code parrain est dans ton profil. Débloque les badges Parrain, Chef de meute et Alpha.' },
   { icon: 'calendar', titre: 'Tes rendez-vous au même endroit', texte: 'Events enregistrés et réservations, avec un rappel la veille et 2 h avant.' },
   { icon: 'sparkles', titre: 'Avantages membres', texte: 'Des attentions réservées à la meute chez nos marques partenaires.' },

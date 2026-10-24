@@ -21,7 +21,7 @@ export type BaladeTerminee = {
   estAMoi?: boolean;
 };
 
-type Stats = { semaine_km: number; semaine_nb: number; rang: number | null; serie_semaines: number };
+type Stats = { mois_km: number; mois_nb: number; rang_mois: number | null; serie_semaines: number };
 
 export function formatDuree(sec: number) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -168,8 +168,8 @@ export default function BaladeResume({
           <Ionicons name="trophy-outline" size={16} color="#854F0B" />
           {stats ? (
             <Text style={styles.rangText}>
-              {stats.rang ? `${stats.rang}${stats.rang === 1 ? 'er' : 'e'} de la semaine` : 'Classement de la semaine'}
-              {` · ${km1(Number(stats.semaine_km))} km au total`}
+              {stats.rang_mois ? `${stats.rang_mois}${stats.rang_mois === 1 ? 'er' : 'e'} du mois` : 'Classement du mois'}
+              {` · ${km1(Number(stats.mois_km))} km en ${new Date().toLocaleDateString('fr-FR', { month: 'long' })}`}
               {stats.serie_semaines > 1 ? ` · ${stats.serie_semaines} semaines d'affilée 🔥` : ''}
             </Text>
           ) : <ActivityIndicator size="small" color="#854F0B" />}
@@ -212,7 +212,7 @@ export default function BaladeResume({
           <View style={styles.storyStat}><Text style={styles.storyVal}>{formatDuree(balade.dureeSec)}</Text><Text style={styles.storyLbl}>durée</Text></View>
           <View style={styles.storyStat}><Text style={styles.storyVal}>{allure}</Text><Text style={styles.storyLbl}>/ km</Text></View>
         </View>
-        {stats?.rang ? <Text style={styles.storyRang}>🏆 {stats.rang}{stats.rang === 1 ? 'er' : 'e'} de la semaine · {km1(Number(stats.semaine_km))} km</Text> : null}
+        {stats?.rang_mois ? <Text style={styles.storyRang}>🏆 {stats.rang_mois}{stats.rang_mois === 1 ? 'er' : 'e'} du mois · {km1(Number(stats.mois_km))} km</Text> : null}
         <View style={{ flex: 1 }} />
         {moi.code ? (
           <>

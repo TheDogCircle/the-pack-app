@@ -7,8 +7,8 @@ import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { BaladeFiche, formatDuree } from '../components/BaladeResume';
 
-// Espace Balades : Top de la semaine (km, calcule cote serveur :
-// classement_balades_semaine / mes_stats_balades), historique perso et dernieres
+// Espace Balades : classement du mois (km, calcule cote serveur :
+// classement_balades_mois / mes_stats_balades / mes_badges_balades), historique perso, dernieres
 // balades de la meute. Toute balade s'ouvre dans la meme fiche (BaladeFiche),
 // aussi utilisee depuis la carte.
 
@@ -18,36 +18,50 @@ type BaladeLigne = {
 };
 
 type Ligne = { rang: number; user_id: string; prenom: string | null; nom_chien: string | null; avatar_url: string | null; km: number; nb: number };
-type Stats = { semaine_km: number; semaine_nb: number; rang: number | null; serie_semaines: number; total_km: number; total_nb: number };
+type Stats = { mois_km: number; mois_nb: number; rang_mois: number | null; serie_semaines: number; total_km: number; total_nb: number };
+type Badge = { code: string; categorie: string; titre: string; palier: number; obtenu: boolean; date: string | null; progression: number };
+type Portee = 'meute' | 'ville' | 'race' | 'tous';
+const PORTEES: [Portee, string][] = [['meute', 'Ma meute'], ['ville', 'Ma ville'], ['race', 'Ma race'], ['tous', 'Tous']];
+
+const BADGE_STYLE: Record<string, { icone: keyof typeof Ionicons.glyphMap; couleur: string }> = {
+  distance: { icone: 'trail-sign', couleur: '#C4693A' },
+  balades: { icone: 'footsteps', couleur: '#2E7D6B' },
+  exploit: { icone: 'flash', couleur: '#BA7517' },
+  regularite: { icone: 'flame', couleur: '#D85A30' },
+  podium: { icone: 'trophy', couleur: '#C9A826' },
+};
 
 const MEDAILLES = ['🥇', '🥈', '🥉'];
 const km1 = (v: number) => Number(v).toFixed(1).replace('.', ',');
 
-function finDeSemaine() {
+function finDuMois() {
   const d = new Date();
-  const jours = (7 - d.getDay()) % 7; // dimanche = 0
-  if (jours === 0) return 'Fin ce soir à minuit';
-  return jours === 1 ? 'Fin demain à minuit' : `Fin dans ${jours} jours`;
+  const fin = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  const jours = Math.ceil((fin.getTime() - d.getTime()) / 86400000);
+  return jours <= 1 ? 'Fin ce soir à minuit' : `Fin dans ${jours} jours`;
 }
+
+const NOM_MOIS = () => new Date().toLocaleDateString('fr-FR', { month: 'long' });
 
 export default function ClassementScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const [onglet, setOnglet] = useState<'top' | 'mes' | 'meute'>(route.params?.onglet || 'top');
+  const [onglet, setOnglet] = useState<'top' | 'mes' | 'meute' | 'badges'>(route.params?.onglet || 'top');
+  const [badges, setBadges] = useState<Badge[] | null>(null);
   const [mesBalades, setMesBalades] = useState<BaladeLigne[] | null>(null);
   const [meuteBalades, setMeuteBalades] = useState<BaladeLigne[] | null>(null);
   const [ficheId, setFicheId] = useState<string | null>(null);
-  const [portee, setPortee] = useState<'meute' | 'tous'>('meute');
+  const [portee, setPortee] = useState<Portee>('meute');
   const [lignes, setLignes] = useState<Ligne[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [moiId, setMoiId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const charger = useCallback(async (p: 'meute' | 'tous') => {
+  const charger = useCallback(async (p: Portee) => {
     const { data: { session } } = await supabase.auth.getSession();
     setMoiId(session?.user.id ?? null);
     const [{ data: cl }, { data: st }] = await Promise.all([
-      supabase.rpc('classement_balades_semaine', { p_portee: p }),
+      supabase.rpc('classement_balades_mois', { p_portee: p }),
       supabase.rpc('mes_stats_balades'),
     ]);
     setLignes((cl as Ligne[]) || []);
@@ -83,6 +97,9 @@ export default function ClassementScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { chargerHistoriques(); }, [chargerHistoriques]));
+  useFocusEffect(useCallback(() => {
+    supabase.rpc('mes_badges_balades').then(({ data }) => setBadges((data as Badge[]) || []));
+  }, []));
 
   function voirSurCarte(id: string) {
     setFicheId(null);
@@ -125,21 +142,66 @@ export default function ClassementScreen() {
     >
       {stats ? (
         <View style={styles.statsCard}>
-          <View style={styles.stat}><Text style={styles.statVal}>{km1(stats.semaine_km)}</Text><Text style={styles.statLbl}>km cette semaine</Text></View>
-          <View style={styles.stat}><Text style={styles.statVal}>{stats.semaine_nb}</Text><Text style={styles.statLbl}>balade{stats.semaine_nb > 1 ? 's' : ''}</Text></View>
+          <View style={styles.stat}><Text style={styles.statVal}>{km1(stats.mois_km)}</Text><Text style={styles.statLbl}>km en {NOM_MOIS()}</Text></View>
+          <View style={styles.stat}><Text style={styles.statVal}>{stats.rang_mois ? `${stats.rang_mois}${stats.rang_mois === 1 ? 'er' : 'e'}` : '–'}</Text><Text style={styles.statLbl}>au classement</Text></View>
           <View style={styles.stat}><Text style={styles.statVal}>{stats.serie_semaines}{stats.serie_semaines > 1 ? ' 🔥' : ''}</Text><Text style={styles.statLbl}>semaine{stats.serie_semaines > 1 ? 's' : ''} d'affilée</Text></View>
         </View>
       ) : null}
 
       <View style={styles.onglets}>
-        {([['top', 'Top'], ['mes', 'Mes balades'], ['meute', 'La meute']] as const).map(([k, label]) => (
+        {([['top', 'Classement'], ['mes', 'Historique'], ['meute', 'La meute'], ['badges', 'Badges']] as const).map(([k, label]) => (
           <TouchableOpacity key={k} style={[styles.onglet, onglet === k && styles.ongletOn]} onPress={() => setOnglet(k)}>
             <Text style={[styles.ongletText, onglet === k && styles.ongletTextOn]}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {onglet === 'mes' ? (
+      {onglet === 'badges' ? (
+        badges === null ? <ActivityIndicator style={{ marginTop: 40 }} color={colors.terra} /> : (
+          <View>
+            {(() => {
+              const dernier = [...badges].filter(b => b.obtenu && b.date).sort((a, b) => (b.date! > a.date! ? 1 : -1))[0];
+              const nb = badges.filter(b => b.obtenu).length;
+              return dernier ? (
+                <View style={styles.badgeVedette}>
+                  <View style={[styles.medaille, styles.medailleGrande, { backgroundColor: (BADGE_STYLE[dernier.categorie] || BADGE_STYLE.distance).couleur }]}>
+                    <Ionicons name={(BADGE_STYLE[dernier.categorie] || BADGE_STYLE.distance).icone} size={34} color="#fff" />
+                  </View>
+                  <Text style={styles.vedetteTitre}>{dernier.titre}</Text>
+                  <Text style={styles.vedetteDate}>
+                    Dernier badge · {new Date(dernier.date!).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  </Text>
+                  <Text style={styles.vedetteCompte}>{nb} / {badges.length} badges</Text>
+                </View>
+              ) : (
+                <View style={styles.vide}>
+                  <Ionicons name="ribbon-outline" size={30} color={colors.terra} />
+                  <Text style={styles.videTitre}>Ton premier badge t'attend</Text>
+                  <Text style={styles.videTexte}>Fais ta première balade d'au moins 500 m pour le débloquer.</Text>
+                </View>
+              );
+            })()}
+            <View style={styles.badgesGrille}>
+              {badges.map(b => {
+                const st = BADGE_STYLE[b.categorie] || BADGE_STYLE.distance;
+                return (
+                  <View key={b.code} style={styles.badgeCase}>
+                    <View style={[styles.medaille, { backgroundColor: b.obtenu ? st.couleur : '#D8D0C6' }]}>
+                      <Ionicons name={st.icone} size={22} color={b.obtenu ? '#fff' : '#9A8F84'} />
+                    </View>
+                    <Text style={[styles.badgeTitre, !b.obtenu && { color: colors.textMuted }]} numberOfLines={2}>{b.titre}</Text>
+                    {b.obtenu ? (
+                      <Text style={styles.badgeDate}>{b.date ? new Date(b.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : ''}</Text>
+                    ) : (
+                      <View style={styles.badgeBarre}><View style={[styles.badgeBarreFill, { width: `${Math.round(b.progression * 100)}%` as any, backgroundColor: st.couleur }]} /></View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )
+      ) : onglet === 'mes' ? (
         mesBalades === null ? <ActivityIndicator style={{ marginTop: 40 }} color={colors.terra} />
         : mesBalades.length === 0 ? (
           <View style={styles.vide}>
@@ -164,22 +226,25 @@ export default function ClassementScreen() {
       ) : (
       <>
       <View style={styles.seg}>
-        {(['meute', 'tous'] as const).map(p => (
+        {PORTEES.map(([p, label]) => (
           <TouchableOpacity key={p} style={[styles.segBtn, portee === p && styles.segBtnOn]} onPress={() => { setLignes(null); setPortee(p); }}>
-            <Text style={[styles.segText, portee === p && styles.segTextOn]}>{p === 'meute' ? 'Ma meute' : 'Tout le monde'}</Text>
+            <Text style={[styles.segText, portee === p && styles.segTextOn]}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.sub}>{finDeSemaine()} · classement en kilomètres</Text>
+      <Text style={styles.sub}>Classement de {NOM_MOIS()} · {finDuMois()} · en kilomètres</Text>
 
       {lignes === null ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.terra} />
       ) : lignes.length === 0 ? (
         <View style={styles.vide}>
           <Ionicons name="footsteps-outline" size={30} color={colors.terra} />
-          <Text style={styles.videTitre}>Personne n'a encore marché cette semaine</Text>
+          <Text style={styles.videTitre}>Personne n'a encore marché ce mois-ci</Text>
           <Text style={styles.videTexte}>
-            {portee === 'meute' ? 'Lance une balade et prends la tête de ta meute !' : 'Lance une balade et prends la première place !'}
+            {portee === 'meute' ? 'Lance une balade et prends la tête de ta meute !'
+              : portee === 'ville' ? 'Sois le premier de ta ville ce mois-ci !'
+              : portee === 'race' ? 'Montre ce que ta race a dans les pattes !'
+              : 'Lance une balade et prends la première place !'}
           </Text>
         </View>
       ) : (
@@ -210,7 +275,7 @@ export default function ClassementScreen() {
         </View>
       )}
       <Text style={styles.regle}>
-        Comptent les balades d'au moins 500 m et 5 min, à allure de marche. Remise à zéro chaque lundi.
+        Comptent les balades d'au moins 500 m et 5 min, à allure de marche. Remise à zéro le 1er de chaque mois.
       </Text>
       </>
       )}
@@ -231,8 +296,20 @@ const styles = StyleSheet.create({
   onglets: { flexDirection: 'row', marginHorizontal: 16, marginTop: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   onglet: { flex: 1, alignItems: 'center', paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: 'transparent', marginBottom: -1 },
   ongletOn: { borderBottomColor: colors.terra },
-  ongletText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.textMuted },
+  ongletText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   ongletTextOn: { color: colors.bordeaux },
+  badgeVedette: { alignItems: 'center', margin: 16, marginTop: 16, padding: 20, borderRadius: 18, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+  vedetteTitre: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux, marginTop: 10 },
+  vedetteDate: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 3 },
+  vedetteCompte: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginTop: 8 },
+  badgesGrille: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: 10, marginTop: 4 },
+  badgeCase: { width: '33.33%', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 6 },
+  medaille: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.7)' },
+  medailleGrande: { width: 84, height: 84, borderRadius: 42 },
+  badgeTitre: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux, textAlign: 'center', marginTop: 7, minHeight: 30 },
+  badgeDate: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted },
+  badgeBarre: { width: 50, height: 4, borderRadius: 2, backgroundColor: 'rgba(61,26,26,0.08)', overflow: 'hidden', marginTop: 2 },
+  badgeBarreFill: { height: 4, borderRadius: 2 },
   iconeBalade: { backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center' },
   seg: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12, backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 4 },
   segBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 7 },
