@@ -20,6 +20,7 @@ import { normalizePhone } from '../lib/phone';
 import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
 import { colors } from '../lib/theme';
 import { usePastillesActives } from '../lib/pastilles';
+import { track } from '../lib/tracking';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -968,6 +969,8 @@ function NewPostModal({
 
 // ─── FeedScreen ───────────────────────────────────────────────────────────────
 
+const SOUS_ONGLETS = { feed: 'Meute · Fil', messages: 'Meute · Messages', membres: 'Meute · Membres' } as const;
+
 export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?: () => React.ReactNode } = {}) {
   const navigation = useNavigation<any>();
   const { session, loading: sessionLoading } = useSession();
@@ -989,6 +992,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   }
 
   function selectTab(key: 'feed' | 'messages' | 'membres') {
+    if (key !== tab) track('screen_viewed', { screen: SOUS_ONGLETS[key] });
     setTab(key);
     if (key === 'feed') setFeedBadge(false);
     else if (key === 'messages') setChatBadge(false);
@@ -1166,6 +1170,13 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   useFocusEffect(useCallback(() => {
     if (myUserId) loadBirthdays(myUserId);
   }, [myUserId, loadBirthdays]));
+
+  // Arrivee sur l'onglet Meute : compte le sous-onglet affiche (cockpit admin)
+  const tabCourantRef = useRef(tab);
+  tabCourantRef.current = tab;
+  useFocusEffect(useCallback(() => {
+    track('screen_viewed', { screen: SOUS_ONGLETS[tabCourantRef.current] });
+  }, []));
 
   // Changement d'onglet : premier chargement avec roue, ensuite rafraichissement
   // discret en arriere-plan (et pas plus d'une fois toutes les 30 s), la liste

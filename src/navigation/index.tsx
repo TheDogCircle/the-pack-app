@@ -9,6 +9,7 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { savePushToken, clearBadge } from '../lib/notifications';
+import { track } from '../lib/tracking';
 import { usePastillesActives } from '../lib/pastilles';
 import { mapNavigation } from '../lib/mapNavigation';
 import SplashLoader from '../components/SplashLoader';
@@ -86,6 +87,24 @@ function renderMeuteHeartButton(navigation: any, activityBadge: boolean, setActi
 
 function bottomTabSeenKey(tab: string, userId: string) {
   return `thepack_bottomtab_seen_${tab}_${userId}`;
+}
+
+// Suivi des sections visitees (cockpit admin > "Ce qui interesse les utilisateurs").
+// Un evenement par changement d'ecran ; les sous-onglets Fil / Messages / Membres
+// de la Meute sont suivis par FeedScreen lui-meme.
+const NOMS_ECRANS: Record<string, string> = {
+  Carte: 'Carte', Events: 'Events', Services: 'Partenaires', Profil: 'Mon profil',
+  Classement: 'Balades & classement', MesReservations: 'Mes rendez-vous', Settings: 'Paramètres',
+  CarnetSante: 'Carnet de santé', ProfilPublic: "Profil d'un membre", Activite: 'Activité',
+  Anniversaires: 'Anniversaires', Booking: 'Réservation', Idees: 'Idées', Contact: 'Contact', ContactDetail: 'Contact',
+};
+let dernierEcran: string | null = null;
+function suivreEcran() {
+  const nom = navigationRef.isReady() ? navigationRef.getCurrentRoute()?.name : undefined;
+  if (!nom || nom === dernierEcran) return;
+  dernierEcran = nom;
+  const section = NOMS_ECRANS[nom];
+  if (section) track('screen_viewed', { screen: section });
 }
 
 function MainTabs() {
@@ -738,7 +757,8 @@ export default function Navigation() {
 
   return (
     <>
-    <NavigationContainer ref={navigationRef} onReady={() => {
+    <NavigationContainer ref={navigationRef} onStateChange={suivreEcran} onReady={() => {
+        suivreEcran();
         supabase.from('push_debug_logs').insert({
           to_token: 'NAV_READY', title: 'NavigationContainer onReady',
           detail: JSON.stringify({ hasPendingNotifData: !!pendingNotifData, pendingNotifData }),
