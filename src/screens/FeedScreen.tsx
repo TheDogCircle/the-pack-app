@@ -1805,7 +1805,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
       <View style={styles.tabsWrap}>
         {([
           { key: 'feed',     label: 'Feed',     badge: feedBadge },
-          { key: 'messages', label: 'Chat',     badge: chatBadge },
+          { key: 'messages', label: 'Messages', badge: chatBadge },
           { key: 'membres',  label: 'Membres',  badge: membresBadge },
         ] as const).map(t => (
           <TouchableOpacity
