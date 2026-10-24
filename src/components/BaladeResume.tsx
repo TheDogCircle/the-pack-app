@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, Image } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, ScrollView } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import TraceDessin from './TraceDessin';
+import { StoryBalade, ApercuStory, MISES_EN_PAGE, type MiseEnPage, type DonneesStory } from './BaladeStories';
 
 export type BaladeTerminee = {
   nom: string;
@@ -65,45 +66,48 @@ export default function BaladeResume({
   const mapRef = useRef<MapView>(null);
   const [storyCarteUri, setStoryCarteUri] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [moi, setMoi] = useState<{ prenom: string | null; nom_chien: string | null; code: string | null }>({ prenom: null, nom_chien: null, code: null });
+  const [nomChien, setNomChien] = useState<string | null>(null);
+  const [etape, setEtape] = useState<'resume' | 'partage'>('resume');
+  const [miseEnPage, setMiseEnPage] = useState<MiseEnPage>('carte');
   const [partage, setPartage] = useState(false);
 
   useEffect(() => {
     if (!balade) return;
-    setStats(null);
+    setStats(null); setEtape('resume'); setStoryCarteUri(null);
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      const [{ data: st }, { data: p }, { data: parr }] = await Promise.all([
+      const [{ data: st }, { data: p }] = await Promise.all([
         supabase.rpc('mes_stats_balades'),
-        session ? supabase.from('profils').select('prenom,nom_chien').eq('id', session.user.id).maybeSingle() : Promise.resolve({ data: null }),
-        supabase.rpc('mon_parrainage'),
+        session ? supabase.from('profils').select('nom_chien').eq('id', session.user.id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
       if (st) setStats(st as Stats);
-      setMoi({ prenom: (p as any)?.prenom ?? null, nom_chien: (p as any)?.nom_chien ?? null, code: (parr as any)?.code ?? null });
+      setNomChien((p as any)?.nom_chien ?? null);
     })();
   }, [balade]);
 
-  async function partager() {
+  // Etape 1 : photo de la carte affichee (trace deja ampute du debut et de la fin),
+  // reutilisee par la mise en page "Carte" ; puis choix de la mise en page.
+  async function ouvrirPartage() {
+    if (carteRef.current) {
+      try { setStoryCarteUri(await captureRef(carteRef, { format: 'png', quality: 0.95 })); } catch {}
+    }
+    setEtape('partage');
+  }
+
+  async function envoyer() {
     if (!balade || !storyRef.current) return;
     setPartage(true);
-    track('balade_partage', { km: Math.round(balade.distanceKm * 10) / 10 });
+    track('balade_partage', { km: Math.round(balade.distanceKm * 10) / 10, mise_en_page: miseEnPage });
     try {
-      // 1. photo de la carte affichee (trace deja ampute du debut et de la fin),
-      // 2. placee en fond de la story, 3. capture de la story
-      if (carteRef.current) {
-        try {
-          setStoryCarteUri(await captureRef(carteRef, { format: 'png', quality: 0.95 }));
-          await new Promise(r => setTimeout(r, 350));
-        } catch {}
-      }
+      await new Promise(r => setTimeout(r, 150));
       const uri = await captureRef(storyRef, { format: 'png', quality: 1, width: 1080, height: 1920 });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager ma balade' });
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager ma balade', UTI: 'public.png' });
       else await Share.share({ url: uri });
     } catch {} finally { setPartage(false); }
   }
 
   if (!balade) return null;
-  const chien = moi.nom_chien;
+  const chien = nomChien;
   const traceCarte = masquerExtremites(balade.trace);
   const fiche = mode === 'fiche';
   const partageable = !fiche || !!balade.estAMoi;
@@ -111,9 +115,57 @@ export default function BaladeResume({
     ? new Date(balade.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
     : '';
   const allure = formatAllure(balade.distanceKm, balade.dureeSec);
+  const donnees: DonneesStory = {
+    titre: chien ? `Balade avec ${chien}` : 'Ma balade',
+    nom: balade.nom,
+    km: km1(balade.distanceKm),
+    duree: formatDuree(balade.dureeSec),
+    allure,
+    date: new Date(balade.date || Date.now()).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }),
+    rang: !fiche && stats?.rang_mois ? `${stats.rang_mois}${stats.rang_mois === 1 ? 'er' : 'e'} du mois · ${km1(Number(stats.mois_km))} km` : null,
+    trace: masquerExtremites(balade.trace),
+  };
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      {etape === 'partage' ? (
+        <View style={styles.page}>
+          <View style={styles.top}>
+            <TouchableOpacity onPress={() => setEtape('resume')} hitSlop={10} accessibilityLabel="Retour" style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="chevron-back" size={22} color={colors.bordeaux} />
+              <Text style={styles.retour}>Retour</Text>
+            </TouchableOpacity>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityLabel="Fermer">
+              <Ionicons name="close" size={24} color={colors.bordeaux} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.bravo}>Choisis ta mise en page</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 18 }}>
+            {MISES_EN_PAGE.map(m => (
+              <TouchableOpacity key={m.key} onPress={() => setMiseEnPage(m.key)} activeOpacity={0.85} style={{ alignItems: 'center' }}>
+                <ApercuStory type={m.key} d={donnees} carteUri={storyCarteUri} actif={miseEnPage === m.key} />
+                <Text style={[styles.miseEnPageLbl, miseEnPage === m.key && { color: colors.terra }]}>
+                  {m.label}{m.transparent ? ' · fond transparent' : ''}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {MISES_EN_PAGE.find(m => m.key === miseEnPage)?.transparent ? (
+            <Text style={styles.astuce}>
+              Astuce : dans le partage, choisis « Copier » puis colle-la dans ta story Instagram par-dessus ta photo (ou « Enregistrer l'image » et ajoute-la en sticker).
+            </Text>
+          ) : null}
+          <TouchableOpacity style={styles.cta} onPress={envoyer} disabled={partage}>
+            {partage ? <ActivityIndicator color={colors.ivory} /> : (
+              <>
+                <Ionicons name="share-outline" size={17} color={colors.ivory} />
+                <Text style={styles.ctaText}>Partager</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      ) : (
       <View style={styles.page}>
         <View style={styles.top}>
           <View style={{ flex: 1 }} />
@@ -178,13 +230,9 @@ export default function BaladeResume({
         ) : null}
 
         {partageable ? (
-        <TouchableOpacity style={styles.cta} onPress={partager} disabled={partage}>
-          {partage ? <ActivityIndicator color={colors.ivory} /> : (
-            <>
-              <Ionicons name="share-outline" size={17} color={colors.ivory} />
-              <Text style={styles.ctaText}>Partager ma balade</Text>
-            </>
-          )}
+        <TouchableOpacity style={styles.cta} onPress={ouvrirPartage}>
+          <Ionicons name="share-outline" size={17} color={colors.ivory} />
+          <Text style={styles.ctaText}>Partager ma balade</Text>
         </TouchableOpacity>
         ) : null}
         {onVoirCarte ? (
@@ -195,34 +243,14 @@ export default function BaladeResume({
         ) : null}
         {partageable ? <Text style={styles.note}>Le début et la fin du tracé sont masqués : ton adresse reste privée.</Text> : null}
       </View>
+      )}
 
-      {/* Story 9:16 hors ecran */}
-      <View ref={storyRef} collapsable={false} style={styles.story}>
-        <Text style={styles.storyBrand}>THE PACK LA MEUTE</Text>
-        <View style={styles.storyLine} />
-        <Text style={styles.storyTitre}>{chien ? `Balade avec ${chien}` : 'Ma balade'}</Text>
-        <Text style={styles.storyNom} numberOfLines={1}>{balade.nom}</Text>
-        <View style={{ marginTop: 22 }}>
-          {storyCarteUri
-            ? <Image source={{ uri: storyCarteUri }} style={styles.storyCarte} resizeMode="cover" />
-            : <TraceDessin trace={balade.trace} width={300} height={250} color={colors.terra} epaisseur={5} marge={16} />}
+      {/* Mise en page choisie, taille reelle, hors ecran (capturee en 1080 x 1920) */}
+      {etape === 'partage' ? (
+        <View ref={storyRef} collapsable={false} style={styles.storyHorsEcran}>
+          <StoryBalade type={miseEnPage} d={donnees} carteUri={storyCarteUri} />
         </View>
-        <View style={styles.storyStats}>
-          <View style={styles.storyStat}><Text style={styles.storyVal}>{km1(balade.distanceKm)}</Text><Text style={styles.storyLbl}>km</Text></View>
-          <View style={styles.storyStat}><Text style={styles.storyVal}>{formatDuree(balade.dureeSec)}</Text><Text style={styles.storyLbl}>durée</Text></View>
-          <View style={styles.storyStat}><Text style={styles.storyVal}>{allure}</Text><Text style={styles.storyLbl}>/ km</Text></View>
-        </View>
-        {stats?.rang_mois ? <Text style={styles.storyRang}>🏆 {stats.rang_mois}{stats.rang_mois === 1 ? 'er' : 'e'} du mois · {km1(Number(stats.mois_km))} km</Text> : null}
-        <View style={{ flex: 1 }} />
-        {moi.code ? (
-          <>
-            <Text style={styles.storyCta}>Rejoins ma meute 🐾</Text>
-            <View style={styles.storyCode}><Text style={styles.storyCodeText}>{moi.code}</Text></View>
-          </>
-        ) : <Text style={styles.storyCta}>Rejoins la meute 🐾</Text>}
-        <Text style={styles.storyUrl}>App Store · Google Play</Text>
-        <View style={{ height: 34 }} />
-      </View>
+      ) : null}
     </Modal>
   );
 }
@@ -240,7 +268,6 @@ const styles = StyleSheet.create({
     height: 210, marginTop: 18, borderRadius: 18, overflow: 'hidden',
     backgroundColor: colors.ivoryLight, borderWidth: 1, borderColor: colors.border,
   },
-  storyCarte: { width: 312, height: 250, borderRadius: 18 },
   statsRow: { flexDirection: 'row', marginTop: 18 },
   stat: { flex: 1, alignItems: 'center' },
   statVal: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 26, color: colors.bordeaux },
@@ -262,23 +289,10 @@ const styles = StyleSheet.create({
   secondaireText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   note: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 10 },
 
-  story: {
-    position: 'absolute', left: -9999, top: 0, width: 360, height: 640,
-    backgroundColor: '#3D1A1A', alignItems: 'center', paddingTop: 44, paddingHorizontal: 24,
-  },
-  storyBrand: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(232,168,130,0.85)', letterSpacing: 2.5 },
-  storyLine: { width: 260, height: 1, backgroundColor: 'rgba(196,105,58,0.5)', marginTop: 10 },
-  storyTitre: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 30, color: '#F5EFE0', marginTop: 22, textAlign: 'center' },
-  storyNom: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: 'rgba(245,239,224,0.6)', marginTop: 4 },
-  storyStats: { flexDirection: 'row', marginTop: 18, alignSelf: 'stretch' },
-  storyStat: { flex: 1, alignItems: 'center' },
-  storyVal: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 28, color: '#F5EFE0' },
-  storyLbl: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.55)', marginTop: 2 },
-  storyRang: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: '#E8A882', marginTop: 16 },
-  storyCta: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: '#F5EFE0' },
-  storyCode: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 12, backgroundColor: '#C4693A' },
-  storyCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 20, color: '#F5EFE0', letterSpacing: 2 },
-  storyUrl: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(196,105,58,0.9)', marginTop: 10 },
+  storyHorsEcran: { position: 'absolute', left: -9999, top: 0, width: 360, height: 640, backgroundColor: 'transparent' },
+  retour: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux },
+  miseEnPageLbl: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, marginTop: 8 },
+  astuce: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 17, backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 10 },
 });
 
 // Fiche d'une balade existante, chargee par id. balade_by_id applique la zone de
