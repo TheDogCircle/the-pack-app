@@ -16,7 +16,7 @@ import AuthGate from '../components/AuthGate';
 import { mapNavigation } from '../lib/mapNavigation';
 
 const TYPE_LABEL: Record<string, string> = {
-  offre: 'Offre exclusive',
+  offre: 'Avantage membre',
   news: 'Actualité',
 };
 
@@ -684,8 +684,10 @@ function ActuCarousel({
   );
 }
 
-// ── Bande "Offres du moment" ────────────────────────────────────────────────
-function OffresStrip({
+// ── Bande "Avantages de la meute" ───────────────────────────────────────────
+// Volontairement sobre : pas de code ni de pourcentage sur les cartes, le code
+// ne se revele que dans la fenetre de detail. 3 avantages maximum.
+function AvantagesStrip({
   offres, partenaires, onOpen,
 }: {
   offres: Post[]; partenaires: Partenaire[]; onOpen: (post: Post) => void;
@@ -693,26 +695,32 @@ function OffresStrip({
   if (!offres.length) return null;
   return (
     <View style={s.actuSection}>
-      <Text style={s.actuSectionTitle}>Offres du moment</Text>
+      <Text style={s.actuSectionTitle}>Avantages de la meute</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.actuList}>
-        {offres.map(post => {
+        {offres.slice(0, 3).map(post => {
           const partenaire = partenaires.find(p => p.id === post.partenaire_id);
+          const img = post.image_url || post.images?.[0] || partenaire?.banniere_url || null;
           return (
-            <TouchableOpacity key={post.id} style={s.offreCard} activeOpacity={0.85} onPress={() => onOpen(post)}>
-              <View style={s.offreBrandRow}>
-                <View style={s.offreLogo}>
-                  {partenaire?.logo_url
-                    ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
-                    : <Text style={s.actuCardBrandLogoFallback}>{partenaire?.nom?.[0] || '?'}</Text>}
-                </View>
-                <Text style={s.offreBrand} numberOfLines={1}>{partenaire?.nom || ''}</Text>
+            <TouchableOpacity key={post.id} style={s.avantageCard} activeOpacity={0.88} onPress={() => onOpen(post)}>
+              {img
+                ? <Image source={{ uri: img }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.bordeauxMid }]} />}
+              <LinearGradient colors={['transparent', 'rgba(61,26,26,0.88)']} style={StyleSheet.absoluteFillObject} />
+              <View style={s.avantageBadge}>
+                <Ionicons name="sparkles" size={10} color={colors.terra} />
+                <Text style={s.avantageBadgeText}>Avantage membre</Text>
               </View>
-              <Text style={s.offreTitle} numberOfLines={2}>{post.titre}</Text>
-              {post.code_promo ? (
-                <View style={s.offreCode}><Text style={s.offreCodeText}>{post.code_promo}</Text></View>
-              ) : (
-                <Text style={s.offreMore}>Voir l'offre →</Text>
-              )}
+              <View style={s.avantageText}>
+                <View style={s.carouselBrandRow}>
+                  <View style={s.actuCardBrandLogo}>
+                    {partenaire?.logo_url
+                      ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                      : <Text style={s.actuCardBrandLogoFallback}>{partenaire?.nom?.[0] || '?'}</Text>}
+                  </View>
+                  <Text style={s.carouselBrand} numberOfLines={1}>{partenaire?.nom || ''}</Text>
+                </View>
+                <Text style={s.avantageTitle} numberOfLines={2}>{post.titre}</Text>
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -730,7 +738,8 @@ function PostSheet({
   const { width } = useWindowDimensions();
   const [photo, setPhoto] = useState(0);
   const [copie, setCopie] = useState(false);
-  useEffect(() => { setPhoto(0); setCopie(false); }, [post?.id]);
+  const [revele, setRevele] = useState(false);
+  useEffect(() => { setPhoto(0); setCopie(false); setRevele(false); }, [post?.id]);
   useEffect(() => {
     if (post) trackEvent('page_view', 'partenaires', { target_type: 'post', target_id: post.id, action: 'post_sheet' });
   }, [post?.id]);
@@ -786,18 +795,32 @@ function PostSheet({
               {post.contenu ? <Text style={s.sheetText}>{post.contenu}</Text> : null}
 
               {post.code_promo ? (
-                <TouchableOpacity
-                  style={s.sheetCode}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    Clipboard.setString(post.code_promo!);
-                    setCopie(true);
-                    trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'copy_code' });
-                  }}
-                >
-                  <Text style={s.sheetCodeText}>{post.code_promo}</Text>
-                  <Text style={s.sheetCodeCopy}>{copie ? 'Copié ✓' : 'Copier'}</Text>
-                </TouchableOpacity>
+                revele ? (
+                  <TouchableOpacity
+                    style={s.sheetCode}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      Clipboard.setString(post.code_promo!);
+                      setCopie(true);
+                      trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'copy_code' });
+                    }}
+                  >
+                    <Text style={s.sheetCodeText}>{post.code_promo}</Text>
+                    <Text style={s.sheetCodeCopy}>{copie ? 'Copié ✓' : 'Copier'}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={s.sheetReveal}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setRevele(true);
+                      trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'reveal_code' });
+                    }}
+                  >
+                    <Ionicons name="lock-open-outline" size={16} color={colors.bordeaux} />
+                    <Text style={s.sheetRevealText}>Révéler mon code membre</Text>
+                  </TouchableOpacity>
+                )
               ) : null}
 
               {post.lien ? (
@@ -805,7 +828,7 @@ function PostSheet({
                   style={s.sheetCta}
                   onPress={() => { trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'offer_cta' }); Linking.openURL(post.lien!); }}
                 >
-                  <Text style={s.sheetCtaText}>{post.type === 'offre' ? "Profiter de l'offre" : 'En savoir plus'}</Text>
+                  <Text style={s.sheetCtaText}>{post.type === 'offre' ? "Profiter de l'avantage" : 'En savoir plus'}</Text>
                   <Ionicons name="arrow-forward" size={15} color={colors.ivory} />
                 </TouchableOpacity>
               ) : null}
@@ -1080,7 +1103,7 @@ export default function PartenairesScreen() {
               partenaires={partenaires}
               onOpen={setOpenPost}
             />
-            <OffresStrip offres={offres} partenaires={partenaires} onOpen={setOpenPost} />
+            <AvantagesStrip offres={offres} partenaires={partenaires} onOpen={setOpenPost} />
           </>
         ) : null}
 
@@ -1268,24 +1291,19 @@ const s = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(61,26,26,0.15)' },
   dotActive: { width: 16, backgroundColor: colors.terra },
 
-  // Offres du moment
-  offreCard: {
-    width: 156, backgroundColor: colors.white, borderRadius: 14, padding: 12,
-    borderWidth: 1, borderColor: colors.border,
+  // Avantages de la meute
+  avantageCard: { width: 230, height: 150, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.bordeaux },
+  avantageBadge: {
+    position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(253,250,244,0.92)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3,
   },
-  offreBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  avantageBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 10, color: colors.terra, letterSpacing: 0.2 },
+  avantageText: { position: 'absolute', left: 12, right: 12, bottom: 12 },
+  avantageTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, color: colors.ivory, lineHeight: 20 },
   offreLogo: {
     width: 22, height: 22, borderRadius: 6, overflow: 'hidden', backgroundColor: colors.ivoryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  offreBrand: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
-  offreTitle: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginTop: 8, minHeight: 34 },
-  offreCode: {
-    alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.terra,
-    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2,
-  },
-  offreCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, letterSpacing: 0.5 },
-  offreMore: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, marginTop: 8 },
 
   // Fenetre de detail
   sheet: { flex: 1, backgroundColor: colors.ivoryPale, paddingTop: 12 },
@@ -1304,6 +1322,11 @@ const s = StyleSheet.create({
   },
   sheetCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 17, color: colors.terra, letterSpacing: 1.5 },
   sheetCodeCopy: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  sheetReveal: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18,
+    borderWidth: 1, borderColor: colors.bordeaux, borderRadius: 12, paddingVertical: 13,
+  },
+  sheetRevealText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   sheetCta: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14,
     backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 14,
