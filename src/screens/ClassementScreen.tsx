@@ -21,7 +21,7 @@ type Ligne = { rang: number; user_id: string; prenom: string | null; nom_chien: 
 type Stats = { mois_km: number; mois_nb: number; rang_mois: number | null; serie_semaines: number; total_km: number; total_nb: number };
 type Badge = { code: string; categorie: string; titre: string; palier: number; obtenu: boolean; date: string | null; progression: number };
 type Portee = 'meute' | 'ville' | 'race' | 'tous';
-const PORTEES: [Portee, string][] = [['meute', 'Ma meute'], ['ville', 'Ma ville'], ['race', 'Ma race'], ['tous', 'Tous']];
+const PORTEES: [Portee, string][] = [['tous', 'Toute la meute'], ['ville', 'Ma ville'], ['race', 'Ma race'], ['meute', 'Mes amis']];
 
 const BADGE_STYLE: Record<string, { icone: keyof typeof Ionicons.glyphMap; couleur: string }> = {
   distance: { icone: 'trail-sign', couleur: '#C4693A' },
@@ -51,7 +51,7 @@ export default function ClassementScreen() {
   const [mesBalades, setMesBalades] = useState<BaladeLigne[] | null>(null);
   const [meuteBalades, setMeuteBalades] = useState<BaladeLigne[] | null>(null);
   const [ficheId, setFicheId] = useState<string | null>(null);
-  const [portee, setPortee] = useState<Portee>('meute');
+  const [portee, setPortee] = useState<Portee>('tous');
   const [lignes, setLignes] = useState<Ligne[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [moiId, setMoiId] = useState<string | null>(null);
@@ -228,7 +228,7 @@ export default function ClassementScreen() {
       <View style={styles.seg}>
         {PORTEES.map(([p, label]) => (
           <TouchableOpacity key={p} style={[styles.segBtn, portee === p && styles.segBtnOn]} onPress={() => { setLignes(null); setPortee(p); }}>
-            <Text style={[styles.segText, portee === p && styles.segTextOn]}>{label}</Text>
+            <Text style={[styles.segText, portee === p && styles.segTextOn]} numberOfLines={1} adjustsFontSizeToFit>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -241,7 +241,7 @@ export default function ClassementScreen() {
           <Ionicons name="footsteps-outline" size={30} color={colors.terra} />
           <Text style={styles.videTitre}>Personne n'a encore marché ce mois-ci</Text>
           <Text style={styles.videTexte}>
-            {portee === 'meute' ? 'Lance une balade et prends la tête de ta meute !'
+            {portee === 'meute' ? 'Lance une balade et passe devant tes amis !'
               : portee === 'ville' ? 'Sois le premier de ta ville ce mois-ci !'
               : portee === 'race' ? 'Montre ce que ta race a dans les pattes !'
               : 'Lance une balade et prends la première place !'}
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
   seg: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12, backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 4 },
   segBtn: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 7 },
   segBtnOn: { backgroundColor: colors.white },
-  segText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+  segText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
   segTextOn: { color: colors.bordeaux },
   sub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginHorizontal: 18, marginTop: 10 },
   liste: { marginHorizontal: 16, marginTop: 10, backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
