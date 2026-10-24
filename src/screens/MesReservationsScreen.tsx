@@ -10,6 +10,8 @@ import * as Sharing from 'expo-sharing';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
+import { mapNavigation } from '../lib/mapNavigation';
+import { chargerMesEvenementsAVenir, synchroniserRappelsEvenements, type MonEvenement } from '../lib/rappelsEvenements';
 
 type Reservation = {
   id: string;
@@ -95,7 +97,7 @@ function refundPreview(date: string, heure_debut: string): { percent: number; la
 }
 
 export default function MesReservationsScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const { session } = useSession();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,6 +106,7 @@ export default function MesReservationsScreen() {
   const [comptesRendus, setComptesRendus] = useState<Record<string, CompteRendu>>({});
   const [abonnements, setAbonnements] = useState<AbonnementReservation[]>([]);
   const [cancellingAbonnementId, setCancellingAbonnementId] = useState<string | null>(null);
+  const [mesEvents, setMesEvents] = useState<MonEvenement[]>([]);
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -120,6 +123,13 @@ export default function MesReservationsScreen() {
         .eq('user_id', session.user.id)
         .eq('statut', 'actif'),
     ]);
+    // Evenements a venir (inscrit ou enregistre) + recalage des rappels locaux
+    try {
+      const evs = await chargerMesEvenementsAVenir(session.user.id);
+      setMesEvents(evs);
+      synchroniserRappelsEvenements(evs.filter(e => e.statut === 'enregistre'));
+    } catch { setMesEvents([]); }
+
     const resas = (data as any) || [];
     setReservations(resas);
     setAbonnements((abos as any) || []);
@@ -219,6 +229,52 @@ export default function MesReservationsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.terra} />}
     >
+      {mesEvents.length > 0 && (
+        <View style={{ gap: 10 }}>
+          <Text style={styles.sectionTitle}>Événements à venir</Text>
+          {mesEvents.map(ev => {
+            const d = new Date(ev.date_heure);
+            const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
+            const finJour = new Date(debutJour); finJour.setDate(finJour.getDate() + 1);
+            const aujourdHui = d >= debutJour && d < finJour;
+            const dateLabel = aujourdHui
+              ? `Aujourd'hui à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+              : `${d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+            return (
+              <TouchableOpacity
+                key={ev.id}
+                style={styles.card}
+                activeOpacity={0.85}
+                onPress={() => { mapNavigation.setPendingEvent(ev.id); navigation.navigate('Tabs', { screen: 'Events' }); }}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.lieuNom} numberOfLines={2}>{ev.titre}</Text>
+                  <Text style={[styles.statutBadge, { color: ev.statut === 'inscrit' ? colors.sage : colors.terra }]}>
+                    {ev.statut === 'inscrit' ? 'Inscrit·e' : 'Enregistré'}
+                  </Text>
+                </View>
+                <View style={styles.metaRow}>
+                  <Ionicons name="calendar-outline" size={13} color={aujourdHui ? colors.terra : colors.textMuted} />
+                  <Text style={[styles.metaText, aujourdHui && { color: colors.terra }]}>{dateLabel}</Text>
+                </View>
+                {!!(ev.adresse || ev.ville) && (
+                  <View style={styles.metaRow}>
+                    <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+                    <Text style={[styles.metaText, { textTransform: 'none' }]} numberOfLines={1}>{ev.adresse || ev.ville}</Text>
+                  </View>
+                )}
+                <View style={styles.metaRow}>
+                  <Ionicons name="notifications-outline" size={13} color={colors.textMuted} />
+                  <Text style={[styles.metaText, { textTransform: 'none' }]}>
+                    {ev.statut === 'inscrit' ? 'Rappels la veille et le jour J' : 'Rappels la veille à 18 h et 2 h avant'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
       {abonnements.length > 0 && (
         <View style={{ gap: 10 }}>
           <Text style={styles.sectionTitle}>Mes abonnements</Text>
@@ -248,6 +304,9 @@ export default function MesReservationsScreen() {
         </View>
       )}
 
+      {(mesEvents.length > 0 || abonnements.length > 0) && (
+        <Text style={styles.sectionTitle}>Mes réservations</Text>
+      )}
       {!reservations.length ? (
         <View style={styles.emptyBox}>
           <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />

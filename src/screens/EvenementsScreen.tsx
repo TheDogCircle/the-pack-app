@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { sendPushNotification } from '../lib/notifications';
 import { colors } from '../lib/theme';
+import { filtreEvenementsVisibles, estEvenementVisible } from '../utils/evenementsVisibles';
+import { programmerRappelsEvenement, annulerRappelsEvenement, synchroniserRappelsUtilisateur } from '../lib/rappelsEvenements';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import { RACES } from '../constants/races';
@@ -216,13 +218,14 @@ export default function EvenementsScreen() {
   async function load() {
     setLoading(true);
     try {
-      const now = new Date().toISOString();
+      // Recale les rappels locaux des events enregistres (non bloquant)
+      if (session?.user?.id) synchroniserRappelsUtilisateur(session.user.id);
       const endWeek = new Date(Date.now() + 7 * 86400000).toISOString();
 
       let q = supabase.from('evenements')
         .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
         .eq('valide', true).eq('actif', true)
-        .gte('date_heure', now)
+        .or(filtreEvenementsVisibles())
         .order('date_heure', { ascending: true });
 
       if (filter === 'semaine') q = q.lte('date_heure', endWeek);
@@ -269,12 +272,11 @@ export default function EvenementsScreen() {
   }
 
   async function buildMesEvents(baseMapped: Evenement[], userId: string): Promise<Evenement[]> {
-    // baseMapped vient d'une requete deja filtree sur date_heure >= now (voir load()),
+    // baseMapped vient d'une requete deja filtree sur les events visibles (voir load()),
     // donc les events passes auxquels on est inscrit en sont deja absents. Mais les
     // events qu'on a organises ou enregistres sont recuperes ici via des requetes a
     // part qui n'ont pas ce filtre par defaut - on l'applique explicitement pour ne
     // pas laisser trainer indefiniment des events passes dans "Mes events".
-    const now = new Date().toISOString();
     // !e.site_web : les fiches d'evenements tiers (curatees via admin, lien externe)
     // ont souvent organisateur_id/created_by pointant vers le compte admin qui les a
     // ajoutees -- ca ne veut pas dire que ce compte "organise" l'event. Sans ce filtre,
@@ -287,7 +289,7 @@ export default function EvenementsScreen() {
         .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
         .or(`organisateur_id.eq.${userId},created_by.eq.${userId}`)
         .is('site_web', null)
-        .gte('date_heure', now);
+        .or(filtreEvenementsVisibles());
       (ownAll || []).forEach((e: any) => {
         if (!byId.has(e.id)) byId.set(e.id, { ...e, je_suis_inscrit: false, est_enregistre: false });
       });
@@ -297,7 +299,7 @@ export default function EvenementsScreen() {
         .select('event_id, evenements(*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url))')
         .eq('user_id', userId);
       (favRows || []).forEach((f: any) => {
-        if (!f.evenements || f.evenements.date_heure < now) return;
+        if (!f.evenements || !estEvenementVisible(f.evenements)) return;
         if (!byId.has(f.event_id)) {
           byId.set(f.event_id, { ...f.evenements, je_suis_inscrit: false, est_enregistre: true });
         } else {
@@ -321,6 +323,10 @@ export default function EvenementsScreen() {
     };
     setEvenements(prev => prev.map(update));
     if (selectedEvent?.id === eventId) setSelectedEvent(prev => prev ? update(prev) : prev);
+    // Participant : rappels serveur. Desinscrit mais toujours enregistre : rappels locaux.
+    const ev = evenements.find(e => e.id === eventId) || (selectedEvent?.id === eventId ? selectedEvent : null);
+    if (join) annulerRappelsEvenement(eventId);
+    else if (ev?.est_enregistre) programmerRappelsEvenement(ev);
   }
 
   async function toggleFavori(eventId: string, save: boolean) {
@@ -336,7 +342,12 @@ export default function EvenementsScreen() {
       setEvenements(prev => prev.map(revert));
       if (selectedEvent?.id === eventId) setSelectedEvent(prev => prev ? revert(prev) : prev);
       Alert.alert('Erreur', error.message);
-    } else if (filter === 'mesEvents' && !save) {
+    } else {
+      const ev = evenements.find(e => e.id === eventId) || (selectedEvent?.id === eventId ? selectedEvent : null);
+      if (save && ev && !ev.je_suis_inscrit) programmerRappelsEvenement(ev);
+      if (!save) annulerRappelsEvenement(eventId);
+    }
+    if (!error && filter === 'mesEvents' && !save) {
       setEvenements(prev => prev.filter(e => e.id !== eventId || e.je_suis_inscrit || e.organisateur_id === myUserId || e.created_by === myUserId));
     }
   }

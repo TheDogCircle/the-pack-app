@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
+import { filtreEvenementsVisibles } from '../utils/evenementsVisibles';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
@@ -2163,12 +2164,11 @@ export default function CarteScreen() {
   }
 
   async function loadMapEvents() {
-    const now = new Date().toISOString();
     const { data } = await supabase
       .from('evenements')
       .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils!evenements_organisateur_id_fkey(prenom,username)')
       .eq('valide', true).eq('actif', true)
-      .gte('date_heure', now)
+      .or(filtreEvenementsVisibles())
       .not('lat', 'is', null)
       .not('lng', 'is', null);
     const list = (data || []) as any[];

@@ -519,7 +519,7 @@ export default function ProfilScreen() {
         <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.8}>
           <Ionicons name="calendar-outline" size={22} color={colors.terra} />
           <Text style={styles.tileLabel}>Rendez-vous</Text>
-          <Text style={styles.tileSub} numberOfLines={1}>Mes réservations</Text>
+          <Text style={styles.tileSub} numberOfLines={1}>Events et résas</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.tile} onPress={goToCarnetSante} activeOpacity={0.8}>
           <Ionicons name="medkit-outline" size={22} color={colors.terra} />
