@@ -571,6 +571,27 @@ export default function Navigation() {
     }
   }, [navReady, pendingProfilId, pendingNotifData]);
 
+  // Meme logique que ci-dessus, pour la redirection vers Onboarding : avant,
+  // c'etait initialRouteName (plus bas) qui s'en chargeait, en etant evalue
+  // une seule fois au montage de NavigationContainer -- correct tant que ce
+  // montage etait retarde jusqu'a ce que session/onboarding soient connus (le
+  // "if (loading...) return <SplashLoader/>" juste avant le JSX). Ce garde-fou
+  // demontait/remontait NavigationContainer des que loading/onboardingChecked
+  // changeaient APRES le premier montage (ex: un deuxieme evenement
+  // onAuthStateChange juste apres le mount), ce qui redeclenchait onReady une
+  // deuxieme fois et perdait la navigation d'un tap de notification deja
+  // appliquee par le premier onReady (confirme via push_debug_logs : deux
+  // NAV_READY a moins d'une seconde d'intervalle pour un seul MOUNT). Fixe en
+  // montant NavigationContainer une bonne fois pour toutes (SplashLoader passe
+  // en overlay plus bas) -- initialRouteName n'a donc plus les bonnes valeurs
+  // au moment ou il compte, cette redirection explicite prend le relais.
+  useEffect(() => {
+    if (!navReady || !session || !onboardingChecked || !needsOnboarding) return;
+    if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== 'Onboarding') {
+      navigationRef.navigate('Onboarding' as any);
+    }
+  }, [navReady, session?.user.id, onboardingChecked, needsOnboarding]);
+
   useEffect(() => {
     if (!session) {
       setNeedsOnboarding(false);
@@ -624,9 +645,7 @@ export default function Navigation() {
     return () => sub.remove();
   }, [session?.user.id]);
 
-  if (loading || (session && !onboardingChecked)) {
-    return <SplashLoader />;
-  }
+  const showSplash = loading || !!(session && !onboardingChecked);
 
   return (
     <>
@@ -781,6 +800,11 @@ export default function Navigation() {
     )}
     {highlight && (
       <HighlightBanner highlight={highlight} topOffset={insets.top} onDismiss={() => setHighlight(null)} />
+    )}
+    {showSplash && (
+      <View style={StyleSheet.absoluteFillObject}>
+        <SplashLoader />
+      </View>
     )}
     </>
   );
