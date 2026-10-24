@@ -103,7 +103,13 @@ export default function ParrainageCard() {
         </Text>
         {prochain && (
           <Text style={styles.next}>
-            encore {prochain.min - data.nb_valides} pour {prochain.nom}
+            {(() => {
+              const reste = prochain.min - data.nb_valides;
+              const amis = `${reste} ami${reste > 1 ? 's' : ''}`;
+              return data.nb_valides === 0
+                ? `Invite ${amis} pour le badge ${prochain.nom} 🏅`
+                : `Plus que ${amis} pour le badge ${prochain.nom} 🏅`;
+            })()}
           </Text>
         )}
       </View>
@@ -201,7 +207,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
   stat: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMid },
   statNum: { fontFamily: 'DMSans_500Medium', color: colors.bordeaux },
-  next: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  next: { flexShrink: 1, marginLeft: 12, textAlign: 'right', fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   membres: { gap: 12, paddingTop: 12 },
   membre: { alignItems: 'center', width: 54 },
   avatar: { width: 44, height: 44, borderRadius: 22 },

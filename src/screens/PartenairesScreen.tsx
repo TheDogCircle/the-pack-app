@@ -607,39 +607,218 @@ function PrestataireCard({
 
 // ── Actualité card (horizontal scroll) ──────────────────────────────────────
 
-function ActuCard({
-  post, partenaire, onPress,
+// ── Carrousel d'actualites (defilement auto) ────────────────────────────────
+function ActuCarousel({
+  posts, partenaires, onOpen,
 }: {
-  post: Post; partenaire: Partenaire; onPress: () => void;
+  posts: Post[]; partenaires: Partenaire[]; onOpen: (post: Post) => void;
 }) {
-  const periode = buildPeriode(post);
+  const { width } = useWindowDimensions();
+  const itemW = width - 28 * 2;
+  const gap = 10;
+  const scrollRef = useRef<ScrollView>(null);
+  const [index, setIndex] = useState(0);
+  const pausedUntil = useRef(0);
+
+  useEffect(() => {
+    if (posts.length < 2) return;
+    const t = setInterval(() => {
+      if (Date.now() < pausedUntil.current) return;
+      setIndex(i => {
+        const next = (i + 1) % posts.length;
+        scrollRef.current?.scrollTo({ x: next * (itemW + gap), animated: true });
+        return next;
+      });
+    }, 4500);
+    return () => clearInterval(t);
+  }, [posts.length, itemW]);
+
+  if (!posts.length) return null;
   return (
-    <TouchableOpacity style={s.actuCard} onPress={onPress} activeOpacity={0.88}>
-      <View style={s.actuCardImg}>
-        {post.image_url
-          ? <Image source={{ uri: post.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-          : <View style={[StyleSheet.absoluteFillObject, s.actuCardImgFallback]} />}
-        <LinearGradient
-          colors={['transparent', 'rgba(61,26,26,0.75)']}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={s.actuCardTypeBadge}>
-          <Text style={s.actuCardTypeBadgeText}>{TYPE_LABEL[post.type] || post.type}</Text>
+    <View style={s.carouselWrap}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={itemW + gap}
+        decelerationRate="fast"
+        contentContainerStyle={{ paddingHorizontal: 28, gap }}
+        onScrollBeginDrag={() => { pausedUntil.current = Date.now() + 8000; }}
+        onMomentumScrollEnd={e => setIndex(Math.round(e.nativeEvent.contentOffset.x / (itemW + gap)))}
+      >
+        {posts.map(post => {
+          const partenaire = partenaires.find(p => p.id === post.partenaire_id);
+          const img = post.image_url || post.images?.[0] || partenaire?.banniere_url || null;
+          return (
+            <TouchableOpacity key={post.id} style={[s.carouselItem, { width: itemW }]} activeOpacity={0.9} onPress={() => onOpen(post)}>
+              {img
+                ? <Image source={{ uri: img }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.bordeaux }]} />}
+              <LinearGradient colors={['transparent', 'rgba(61,26,26,0.85)']} style={StyleSheet.absoluteFillObject} />
+              <View style={s.carouselBadge}>
+                <Text style={s.carouselBadgeText}>{TYPE_LABEL[post.type] || 'Actualité'}</Text>
+              </View>
+              <View style={s.carouselText}>
+                {partenaire ? (
+                  <View style={s.carouselBrandRow}>
+                    <View style={s.actuCardBrandLogo}>
+                      {partenaire.logo_url
+                        ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                        : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
+                    </View>
+                    <Text style={s.carouselBrand} numberOfLines={1}>{partenaire.nom}</Text>
+                  </View>
+                ) : null}
+                <Text style={s.carouselTitle} numberOfLines={2}>{post.titre}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      {posts.length > 1 ? (
+        <View style={s.dotsRow}>
+          {posts.map((p, i) => <View key={p.id} style={[s.dot, i === index && s.dotActive]} />)}
         </View>
-        <View style={s.actuCardBrandRow}>
-          <View style={s.actuCardBrandLogo}>
-            {partenaire.logo_url
-              ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
-              : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
+      ) : null}
+    </View>
+  );
+}
+
+// ── Bande "Offres du moment" ────────────────────────────────────────────────
+function OffresStrip({
+  offres, partenaires, onOpen,
+}: {
+  offres: Post[]; partenaires: Partenaire[]; onOpen: (post: Post) => void;
+}) {
+  if (!offres.length) return null;
+  return (
+    <View style={s.actuSection}>
+      <Text style={s.actuSectionTitle}>Offres du moment</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.actuList}>
+        {offres.map(post => {
+          const partenaire = partenaires.find(p => p.id === post.partenaire_id);
+          return (
+            <TouchableOpacity key={post.id} style={s.offreCard} activeOpacity={0.85} onPress={() => onOpen(post)}>
+              <View style={s.offreBrandRow}>
+                <View style={s.offreLogo}>
+                  {partenaire?.logo_url
+                    ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                    : <Text style={s.actuCardBrandLogoFallback}>{partenaire?.nom?.[0] || '?'}</Text>}
+                </View>
+                <Text style={s.offreBrand} numberOfLines={1}>{partenaire?.nom || ''}</Text>
+              </View>
+              <Text style={s.offreTitle} numberOfLines={2}>{post.titre}</Text>
+              {post.code_promo ? (
+                <View style={s.offreCode}><Text style={s.offreCodeText}>{post.code_promo}</Text></View>
+              ) : (
+                <Text style={s.offreMore}>Voir l'offre →</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── Fenetre de detail d'une actualite / offre ───────────────────────────────
+function PostSheet({
+  post, partenaire, onClose, onOpenBrand,
+}: {
+  post: Post | null; partenaire: Partenaire | null; onClose: () => void; onOpenBrand: () => void;
+}) {
+  const { width } = useWindowDimensions();
+  const [photo, setPhoto] = useState(0);
+  const [copie, setCopie] = useState(false);
+  useEffect(() => { setPhoto(0); setCopie(false); }, [post?.id]);
+  useEffect(() => {
+    if (post) trackEvent('page_view', 'partenaires', { target_type: 'post', target_id: post.id, action: 'post_sheet' });
+  }, [post?.id]);
+
+  const images = post ? (post.images?.length ? post.images : post.image_url ? [post.image_url] : []) : [];
+  const photoW = width - 40;
+  const periode = post ? buildPeriode(post) : '';
+
+  return (
+    <Modal visible={!!post} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      {post ? (
+        <View style={s.sheet}>
+          <View style={s.sheetTop}>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityLabel="Fermer">
+              <Ionicons name="close" size={24} color={colors.bordeaux} />
+            </TouchableOpacity>
           </View>
-          <Text style={s.actuCardBrandName} numberOfLines={1}>{partenaire.nom}</Text>
+          <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+            {images.length ? (
+              <>
+                <ScrollView
+                  horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+                  style={{ width: photoW, alignSelf: 'center' }}
+                  onMomentumScrollEnd={e => setPhoto(Math.round(e.nativeEvent.contentOffset.x / photoW))}
+                >
+                  {images.map(u => (
+                    <Image key={u} source={{ uri: u }} style={[s.sheetPhoto, { width: photoW }]} resizeMode="cover" />
+                  ))}
+                </ScrollView>
+                {images.length > 1 ? (
+                  <View style={s.dotsRow}>
+                    {images.map((u, i) => <View key={u} style={[s.dot, i === photo && s.dotActive]} />)}
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+
+            <View style={s.sheetBody}>
+              {partenaire ? (
+                <TouchableOpacity style={s.sheetBrandRow} onPress={onOpenBrand} activeOpacity={0.7}>
+                  <View style={s.offreLogo}>
+                    {partenaire.logo_url
+                      ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                      : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
+                  </View>
+                  <Text style={s.sheetBrand}>{partenaire.nom} · {TYPE_LABEL[post.type] || 'Actualité'}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <Text style={s.sheetTitle}>{post.titre}</Text>
+              {periode ? <Text style={s.sheetMeta}>{periode}</Text> : null}
+              {post.disponibilite ? <Text style={s.sheetMeta}>{post.disponibilite}</Text> : null}
+              {post.contenu ? <Text style={s.sheetText}>{post.contenu}</Text> : null}
+
+              {post.code_promo ? (
+                <TouchableOpacity
+                  style={s.sheetCode}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Clipboard.setString(post.code_promo!);
+                    setCopie(true);
+                    trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'copy_code' });
+                  }}
+                >
+                  <Text style={s.sheetCodeText}>{post.code_promo}</Text>
+                  <Text style={s.sheetCodeCopy}>{copie ? 'Copié ✓' : 'Copier'}</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {post.lien ? (
+                <TouchableOpacity
+                  style={s.sheetCta}
+                  onPress={() => { trackEvent('click', 'partenaires', { target_type: 'post', target_id: post.id, action: 'offer_cta' }); Linking.openURL(post.lien!); }}
+                >
+                  <Text style={s.sheetCtaText}>{post.type === 'offre' ? "Profiter de l'offre" : 'En savoir plus'}</Text>
+                  <Ionicons name="arrow-forward" size={15} color={colors.ivory} />
+                </TouchableOpacity>
+              ) : null}
+              {partenaire ? (
+                <TouchableOpacity style={s.sheetSecondary} onPress={onOpenBrand}>
+                  <Text style={s.sheetSecondaryText}>Voir la marque {partenaire.nom}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </ScrollView>
         </View>
-      </View>
-      <View style={s.actuCardBody}>
-        <Text style={s.actuCardTitle} numberOfLines={2}>{post.titre}</Text>
-        {periode ? <Text style={s.actuCardMeta} numberOfLines={1}>{periode}</Text> : null}
-      </View>
-    </TouchableOpacity>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -656,6 +835,7 @@ export default function PartenairesScreen() {
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Partenaire | null>(null);
   const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
+  const [openPost, setOpenPost] = useState<Post | null>(null);
   const [showCandidature, setShowCandidature] = useState(false);
   const [macroTab, setMacroTab] = useState<'marques' | 'prestataires'>('marques');
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
@@ -799,15 +979,17 @@ export default function PartenairesScreen() {
     [prestatairesAll, serviceFilter],
   );
 
-  // allPosts is already sorted created_at desc (see load()), so keeping only the
-  // first occurrence per brand gives its most recent post — max 1 card/brand in the carousel.
-  const latestPostByBrand = useMemo(() => {
+
+  const offres = useMemo(() => allPosts.filter(p => p.type === 'offre'), [allPosts]);
+  // Carrousel : la derniere actualite (hors offres) de chaque marque, max 6.
+  // allPosts est deja trie created_at desc (cf load()).
+  const latestNewsByBrand = useMemo(() => {
     const seen = new Set<string>();
     return allPosts.filter(p => {
-      if (seen.has(p.partenaire_id)) return false;
+      if (p.type === 'offre' || seen.has(p.partenaire_id)) return false;
       seen.add(p.partenaire_id);
       return true;
-    });
+    }).slice(0, 6);
   }, [allPosts]);
 
   if (sessionLoading || loading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
@@ -851,25 +1033,25 @@ export default function PartenairesScreen() {
       >
         <View style={s.header}>
           <Text style={s.headerTitle}>Nos partenaires</Text>
-          <Text style={s.headerSub}>Des marques dog-friendly sélectionnées pour la meute</Text>
+          <Text style={s.headerSub}>
+            {macroTab === 'marques' ? 'Des marques dog-friendly sélectionnées pour la meute' : 'Des pros du chien vérifiés, près de chez toi'}
+          </Text>
         </View>
 
-        {prestataires.length > 0 ? (
-          <View style={s.macroTabRow}>
-            <TouchableOpacity
-              style={[s.macroTabBtn, macroTab === 'marques' && s.macroTabBtnActive]}
-              onPress={() => setMacroTab('marques')}
-            >
-              <Text style={[s.macroTabBtnText, macroTab === 'marques' && s.macroTabBtnTextActive]}>Marques</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.macroTabBtn, macroTab === 'prestataires' && s.macroTabBtnActive]}
-              onPress={() => setMacroTab('prestataires')}
-            >
-              <Text style={[s.macroTabBtnText, macroTab === 'prestataires' && s.macroTabBtnTextActive]}>Promeneurs &amp; Éducateurs</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
+        <View style={s.macroTabRow}>
+          <TouchableOpacity
+            style={[s.macroTabBtn, macroTab === 'marques' && s.macroTabBtnActive]}
+            onPress={() => setMacroTab('marques')}
+          >
+            <Text style={[s.macroTabBtnText, macroTab === 'marques' && s.macroTabBtnTextActive]}>Marques</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.macroTabBtn, macroTab === 'prestataires' && s.macroTabBtnActive]}
+            onPress={() => setMacroTab('prestataires')}
+          >
+            <Text style={[s.macroTabBtnText, macroTab === 'prestataires' && s.macroTabBtnTextActive]}>Services</Text>
+          </TouchableOpacity>
+        </View>
 
         {macroTab === 'prestataires' && presentServices.length > 1 ? (
           <View style={s.serviceFilterRow}>
@@ -891,31 +1073,34 @@ export default function PartenairesScreen() {
           </View>
         ) : null}
 
-        {macroTab === 'marques' && latestPostByBrand.length > 0 ? (
-          <View style={s.actuSection}>
-            <Text style={s.actuSectionTitle}>Actualités du moment</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.actuList}
-            >
-              {latestPostByBrand.map(post => {
-                const partenaire = partenaires.find(p => p.id === post.partenaire_id);
-                if (!partenaire) return null;
-                return (
-                  <ActuCard
-                    key={post.id}
-                    post={post}
-                    partenaire={partenaire}
-                    onPress={() => setSelectedBrand(partenaire)}
-                  />
-                );
-              })}
-            </ScrollView>
+        {macroTab === 'marques' ? (
+          <>
+            <ActuCarousel
+              posts={latestNewsByBrand}
+              partenaires={partenaires}
+              onOpen={setOpenPost}
+            />
+            <OffresStrip offres={offres} partenaires={partenaires} onOpen={setOpenPost} />
+          </>
+        ) : null}
+
+        {macroTab === 'prestataires' && prestataires.length === 0 ? (
+          <View style={s.servicesEmpty}>
+            <Ionicons name="paw-outline" size={30} color={colors.terra} />
+            <Text style={s.servicesEmptyTitle}>Bientôt près de chez toi</Text>
+            <Text style={s.servicesEmptyText}>
+              Éducateurs, promeneurs, pet-sitters et comportementalistes vérifiés arrivent dans la meute.
+            </Text>
+            <TouchableOpacity style={s.brandCtaBtn} onPress={() => Linking.openURL('https://thepacklameute.fr/pro-auth?add=prestataire')}>
+              <Text style={s.brandCtaBtnLabel}>Je suis pro</Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
+            </TouchableOpacity>
           </View>
         ) : null}
 
-        <Text style={s.gridSectionTitle}>{macroTab === 'marques' ? 'Toutes les marques' : 'Promeneurs & éducateurs'}</Text>
+        {currentList.length > 0 ? (
+          <Text style={s.gridSectionTitle}>{macroTab === 'marques' ? 'Toutes les marques' : 'Près de chez toi'}</Text>
+        ) : null}
         <View style={s.grid}>
           {rows.map((row, ri) => (
             <View key={ri} style={[s.row, { gap: cardGap }]}>
@@ -954,7 +1139,7 @@ export default function PartenairesScreen() {
               <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
             </TouchableOpacity>
           </View>
-        ) : (
+        ) : prestataires.length > 0 ? (
           <View style={s.brandCta}>
             <Ionicons name="paw-outline" size={28} color={colors.terra} />
             <Text style={s.brandCtaTitle}>Vous êtes promeneur ou éducateur canin ?</Text>
@@ -964,7 +1149,7 @@ export default function PartenairesScreen() {
               <Ionicons name="arrow-forward" size={14} color={colors.ivory} />
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
       <BrandModal
@@ -974,6 +1159,19 @@ export default function PartenairesScreen() {
         highlightPostId={highlightPostId}
         userId={session?.user?.id ?? null}
         onClose={() => { setSelectedBrand(null); setHighlightPostId(null); }}
+      />
+
+      <PostSheet
+        post={openPost}
+        partenaire={openPost ? partenaires.find(p => p.id === openPost.partenaire_id) || null : null}
+        onClose={() => setOpenPost(null)}
+        onOpenBrand={() => {
+          const brand = openPost ? partenaires.find(p => p.id === openPost.partenaire_id) || null : null;
+          const postId = openPost?.id || null;
+          setOpenPost(null);
+          // Laisse la fenetre se fermer avant d'ouvrir la fiche marque (deux Modal empiles sur iOS)
+          setTimeout(() => { setHighlightPostId(postId); setSelectedBrand(brand); }, 400);
+        }}
       />
 
       <CandidatureMarqueModal
@@ -998,14 +1196,14 @@ const s = StyleSheet.create({
 
   macroTabRow: {
     flexDirection: 'row', gap: 6, marginHorizontal: 28, marginBottom: 16,
-    backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 4, alignSelf: 'flex-start',
+    backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 4,
   },
-  macroTabBtn: { borderRadius: 7, paddingHorizontal: 16, paddingVertical: 8 },
+  macroTabBtn: { flex: 1, alignItems: 'center', borderRadius: 7, paddingHorizontal: 16, paddingVertical: 9 },
   macroTabBtnActive: {
     backgroundColor: colors.white,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 1,
   },
-  macroTabBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  macroTabBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
   macroTabBtnTextActive: { color: colors.bordeaux },
 
   serviceFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginHorizontal: 28, marginBottom: 16 },
@@ -1054,6 +1252,74 @@ const s = StyleSheet.create({
   cardArrow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
   cardArrowText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
 
+  // Carrousel d'actualites
+  carouselWrap: { marginBottom: 22 },
+  carouselItem: { height: 190, borderRadius: 18, overflow: 'hidden', backgroundColor: colors.bordeaux },
+  carouselBadge: {
+    position: 'absolute', top: 12, left: 12, backgroundColor: 'rgba(253,250,244,0.92)',
+    borderRadius: 12, paddingHorizontal: 9, paddingVertical: 3,
+  },
+  carouselBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra },
+  carouselText: { position: 'absolute', left: 14, right: 14, bottom: 14 },
+  carouselBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 5 },
+  carouselBrand: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 12, color: 'rgba(245,239,224,0.85)' },
+  carouselTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 19, color: colors.ivory, lineHeight: 24 },
+  dotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(61,26,26,0.15)' },
+  dotActive: { width: 16, backgroundColor: colors.terra },
+
+  // Offres du moment
+  offreCard: {
+    width: 156, backgroundColor: colors.white, borderRadius: 14, padding: 12,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  offreBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  offreLogo: {
+    width: 22, height: 22, borderRadius: 6, overflow: 'hidden', backgroundColor: colors.ivoryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  offreBrand: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  offreTitle: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginTop: 8, minHeight: 34 },
+  offreCode: {
+    alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.terra,
+    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2,
+  },
+  offreCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, letterSpacing: 0.5 },
+  offreMore: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terra, marginTop: 8 },
+
+  // Fenetre de detail
+  sheet: { flex: 1, backgroundColor: colors.ivoryPale, paddingTop: 12 },
+  sheetTop: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8 },
+  sheetPhoto: { height: 240, borderRadius: 16, backgroundColor: colors.ivoryLight },
+  sheetBody: { paddingHorizontal: 22, paddingTop: 16 },
+  sheetBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sheetBrand: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted },
+  sheetTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 22, color: colors.bordeaux, marginTop: 8 },
+  sheetMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terra, marginTop: 4 },
+  sheetText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 21, marginTop: 12 },
+  sheetCode: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.terra, borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, backgroundColor: colors.white,
+  },
+  sheetCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 17, color: colors.terra, letterSpacing: 1.5 },
+  sheetCodeCopy: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  sheetCta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14,
+    backgroundColor: colors.terra, borderRadius: 12, paddingVertical: 14,
+  },
+  sheetCtaText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  sheetSecondary: { alignItems: 'center', paddingVertical: 14 },
+  sheetSecondaryText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMuted },
+
+  // Services vide
+  servicesEmpty: {
+    alignItems: 'center', gap: 8, marginHorizontal: 28, marginTop: 8, marginBottom: 24,
+    borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(61,26,26,0.2)', borderRadius: 18, padding: 24,
+  },
+  servicesEmptyTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.bordeaux },
+  servicesEmptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 19, marginBottom: 6 },
+
   // Actualités du moment (horizontal scroll)
   actuSection: { marginBottom: 22 },
   actuSectionTitle: {
@@ -1065,33 +1331,13 @@ const s = StyleSheet.create({
     fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux,
     paddingHorizontal: 28, marginBottom: 12, marginTop: 4,
   },
-  actuCard: {
-    width: 172, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.white,
-    borderWidth: 1, borderColor: colors.border,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 2,
-  },
-  actuCardImg: { width: '100%', height: 104, backgroundColor: colors.bordeaux, position: 'relative' },
-  actuCardImgFallback: { backgroundColor: colors.bordeaux },
-  actuCardTypeBadge: {
-    position: 'absolute', top: 8, left: 8,
-    backgroundColor: 'rgba(245,239,224,0.92)', borderRadius: 20,
-    paddingHorizontal: 7, paddingVertical: 3,
-  },
-  actuCardTypeBadgeText: { fontFamily: 'DMSans_500Medium', fontSize: 8, color: colors.terra, letterSpacing: 0.4, textTransform: 'uppercase' },
-  actuCardBrandRow: {
-    position: 'absolute', bottom: 8, left: 8, right: 8,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-  },
+
   actuCardBrandLogo: {
     width: 22, height: 22, borderRadius: 6, backgroundColor: colors.white, overflow: 'hidden',
     alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.white,
   },
   actuCardBrandLogoImg: { width: '100%', height: '100%', padding: 2 },
   actuCardBrandLogoFallback: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 11, color: colors.bordeaux },
-  actuCardBrandName: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: '#fff', flex: 1 },
-  actuCardBody: { padding: 11, gap: 3, minHeight: 66 },
-  actuCardTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 13, color: colors.bordeaux, lineHeight: 17 },
-  actuCardMeta: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginTop: 2 },
 
   // Modal
   modalContainer: { flex: 1, backgroundColor: colors.ivoryPale },
