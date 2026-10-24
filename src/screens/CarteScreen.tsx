@@ -3811,16 +3811,29 @@ export default function CarteScreen() {
 
       {fabOpen && (
         <View style={styles.fabMenu}>
+          {/* Ordre de haut en bas : l'action la plus proche du pouce (en bas) = demarrer */}
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => setProposeModal(true)); }}>
             <Text style={styles.fabMenuLabel}>Suggérer un lieu</Text>
             <View style={[styles.fabMenuIcon, { backgroundColor: colors.bordeaux }]}>
               <Ionicons name="location-outline" size={18} color="#fff" />
             </View>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); onBaladesPress(); }}>
+            <Text style={styles.fabMenuLabel}>{showBalades ? 'Masquer les parcours' : 'Voir les parcours de la meute'}</Text>
+            <View style={[styles.fabMenuIcon, { backgroundColor: colors.sage }]}>
+              <Ionicons name="map-outline" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => navigation.navigate('Classement')); }}>
+            <Text style={styles.fabMenuLabel}>Top de la semaine</Text>
+            <View style={[styles.fabMenuIcon, { backgroundColor: '#BA7517' }]}>
+              <Ionicons name="trophy-outline" size={18} color="#fff" />
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => requireAuth(() => startBaladeTracking())}>
-            <Text style={styles.fabMenuLabel}>Démarrer une balade</Text>
-            <View style={[styles.fabMenuIcon, { backgroundColor: '#2E7D6B' }]}>
-              <Ionicons name="walk-outline" size={18} color="#fff" />
+            <Text style={[styles.fabMenuLabel, { fontFamily: 'DMSans_500Medium' }]}>Démarrer une balade</Text>
+            <View style={[styles.fabMenuIcon, { backgroundColor: '#2E7D6B', width: 46, height: 46, borderRadius: 23 }]}>
+              <Ionicons name="footsteps" size={20} color="#fff" />
             </View>
           </TouchableOpacity>
         </View>
