@@ -67,8 +67,20 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const RETOUR_LABELS: Record<string, string> = { MesReservations: 'Mes rendez-vous' };
+
 export default function EvenementsScreen() {
   const navigation = useNavigation<any>();
+  // Ecran d'ou l'event a ete ouvert (ex. Mes rendez-vous) : fleche retour + y revenir a la fermeture
+  const [retourVers, setRetourVers] = useState<string | null>(null);
+  function fermerEvenement() {
+    setSelectedEvent(null);
+    if (retourVers) {
+      const route = retourVers;
+      setRetourVers(null);
+      navigation.navigate(route);
+    }
+  }
   const { session, loading: sessionLoading } = useSession();
 
   const [evenements, setEvenements] = useState<Evenement[]>([]);
@@ -181,6 +193,7 @@ export default function EvenementsScreen() {
   // jamais etre consomme. L'abonnement direct plus bas couvre ces cas : il s'execute
   // des que la notif est tapee, sans dependre d'un focus ou d'un changement de liste.
   const openEventById = useCallback((pendingId: string) => {
+    setRetourVers(mapNavigation.consumeEventReturn());
     setEvenements(current => {
       const found = current.find(e => e.id === pendingId);
       if (found) { setSelectedEvent(found); return current; }
@@ -1447,11 +1460,17 @@ export default function EvenementsScreen() {
         visible={!!selectedEvent}
         animationType="slide"
         transparent
-        onRequestClose={() => (shareModalVisible ? setShareModalVisible(false) : setSelectedEvent(null))}
+        onRequestClose={() => (shareModalVisible ? setShareModalVisible(false) : fermerEvenement())}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedEvent(null)}>
+            {retourVers ? (
+              <TouchableOpacity style={styles.modalBack} onPress={fermerEvenement} hitSlop={8}>
+                <Ionicons name="chevron-back" size={20} color={colors.bordeaux} />
+                <Text style={styles.modalBackText}>{RETOUR_LABELS[retourVers] || 'Retour'}</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={styles.modalClose} onPress={fermerEvenement}>
               <Ionicons name="close" size={22} color={colors.textMid} />
             </TouchableOpacity>
             {selectedEvent && (() => {
@@ -2026,6 +2045,11 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: colors.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '90%' },
   modalClose: { position: 'absolute', top: 14, right: 16, zIndex: 10, padding: 4 },
+  modalBack: {
+    position: 'absolute', top: 14, left: 12, zIndex: 10, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(253,250,244,0.92)', borderRadius: 16, paddingVertical: 4, paddingRight: 10, paddingLeft: 4,
+  },
+  modalBackText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   modalImg: { width: '100%', height: 210, resizeMode: 'cover' },
   photoDotsRow: {
     position: 'absolute', bottom: 10, left: 0, right: 0,

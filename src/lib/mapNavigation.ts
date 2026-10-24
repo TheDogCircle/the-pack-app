@@ -38,6 +38,8 @@ const eventsFilterPending = createPending<string>();
 
 let _returnCallback: (() => void) | null = null;
 
+let eventReturn: string | null = null;
+
 export const mapNavigation = {
   setPendingLieu(id: string, returnCallback?: () => void) {
     lieuPending.set(id);
@@ -61,6 +63,11 @@ export const mapNavigation = {
   setPendingConversation(id: string) { conversationPending.set(id); },
   consumeConversation(): string | null { return conversationPending.consume(); },
   onConversationPending(cb: ((id: string) => void) | null) { conversationPending.subscribe(cb); },
+
+  // Ecran a rouvrir quand on ferme l'event (ex. 'MesReservations'), pose AVANT
+  // setPendingEvent. Simple variable : lue une seule fois par openEventById.
+  setEventReturn(route: string | null) { eventReturn = route; },
+  consumeEventReturn(): string | null { const r = eventReturn; eventReturn = null; return r; },
 
   setPendingEvent(id: string) { eventPending.set(id); },
   consumeEvent(): string | null { return eventPending.consume(); },

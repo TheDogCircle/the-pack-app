@@ -107,6 +107,7 @@ export default function MesReservationsScreen() {
   const [abonnements, setAbonnements] = useState<AbonnementReservation[]>([]);
   const [cancellingAbonnementId, setCancellingAbonnementId] = useState<string | null>(null);
   const [mesEvents, setMesEvents] = useState<MonEvenement[]>([]);
+  const [filtre, setFiltre] = useState<'tout' | 'events' | 'resas' | 'abos'>('tout');
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -229,7 +230,33 @@ export default function MesReservationsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.terra} />}
     >
-      {mesEvents.length > 0 && (
+      {(() => {
+        const options = [
+          { key: 'tout' as const, label: 'Tout', n: 0 },
+          { key: 'events' as const, label: 'Événements', n: mesEvents.length },
+          { key: 'resas' as const, label: 'Réservations', n: reservations.length },
+          { key: 'abos' as const, label: 'Abonnements', n: abonnements.length },
+        ];
+        // Filtres utiles seulement s'il y a au moins deux types de rendez-vous
+        if (options.filter(o => o.key !== 'tout' && o.n > 0).length < 2) return null;
+        return (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtresRow}>
+            {options.filter(o => o.key === 'tout' || o.n > 0).map(o => (
+              <TouchableOpacity
+                key={o.key}
+                style={[styles.filtreChip, filtre === o.key && styles.filtreChipActive]}
+                onPress={() => setFiltre(o.key)}
+              >
+                <Text style={[styles.filtreChipText, filtre === o.key && styles.filtreChipTextActive]}>
+                  {o.label}{o.key !== 'tout' ? ` ${o.n}` : ''}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        );
+      })()}
+
+      {mesEvents.length > 0 && (filtre === 'tout' || filtre === 'events') && (
         <View style={{ gap: 10 }}>
           <Text style={styles.sectionTitle}>Événements à venir</Text>
           {mesEvents.map(ev => {
@@ -245,7 +272,11 @@ export default function MesReservationsScreen() {
                 key={ev.id}
                 style={styles.card}
                 activeOpacity={0.85}
-                onPress={() => { mapNavigation.setPendingEvent(ev.id); navigation.navigate('Tabs', { screen: 'Events' }); }}
+                onPress={() => {
+                  mapNavigation.setEventReturn('MesReservations');
+                  mapNavigation.setPendingEvent(ev.id);
+                  navigation.navigate('Tabs', { screen: 'Events' });
+                }}
               >
                 <View style={styles.cardHeader}>
                   <Text style={styles.lieuNom} numberOfLines={2}>{ev.titre}</Text>
@@ -275,7 +306,7 @@ export default function MesReservationsScreen() {
         </View>
       )}
 
-      {abonnements.length > 0 && (
+      {abonnements.length > 0 && (filtre === 'tout' || filtre === 'abos') && (
         <View style={{ gap: 10 }}>
           <Text style={styles.sectionTitle}>Mes abonnements</Text>
           {abonnements.map(abo => (
@@ -304,10 +335,10 @@ export default function MesReservationsScreen() {
         </View>
       )}
 
-      {(mesEvents.length > 0 || abonnements.length > 0) && (
+      {(filtre === 'tout' || filtre === 'resas') && (mesEvents.length > 0 || abonnements.length > 0) && (
         <Text style={styles.sectionTitle}>Mes réservations</Text>
       )}
-      {!reservations.length ? (
+      {!(filtre === 'tout' || filtre === 'resas') ? null : !reservations.length ? (
         <View style={styles.emptyBox}>
           <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />
           <Text style={styles.emptyText}>Aucune réservation pour le moment.</Text>
@@ -395,6 +426,14 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: 'center', gap: 10, padding: 40 },
   emptyText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   sectionTitle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 16, color: colors.bordeaux },
+  filtresRow: { gap: 8, paddingBottom: 4 },
+  filtreChip: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white,
+  },
+  filtreChipActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  filtreChipText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.textMid },
+  filtreChipTextActive: { color: colors.ivory },
   compteRenduBox: {
     marginTop: 10, padding: 12, borderRadius: 10,
     backgroundColor: 'rgba(196,105,58,0.06)', gap: 6,
