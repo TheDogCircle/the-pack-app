@@ -317,6 +317,17 @@ export default function Navigation() {
   // Stores a notification's data payload to apply once NavigationContainer is ready
   // (ex: app ouverte a froid en tapant sur la notif, la nav n'est pas encore montee)
   const [pendingNotifData, setPendingNotifData] = useState<any | null>(null);
+  // Bug trouve en recette (2026-10-24, vrai force-quit teste par Marine, pas juste
+  // l'app en arriere-plan) : onReady de NavigationContainer ne se declenche qu'UNE
+  // fois, avec la fermeture JSX capturee a CE moment-la -- si le tap a froid arrive
+  // (setPendingNotifData) APRES que onReady se soit deja declenche, ce check
+  // "if (pendingNotifData)" dans onReady lit a jamais sa valeur null d'origine, le
+  // nouvel appel ne redeclenche pas onReady. Confirme via push_debug_logs :
+  // navReady=false au moment du tap (donc pendingNotifData bien pose), mais jamais
+  // applique. Remplace par un state + useEffect ci-dessous, qui reagit a la vraie
+  // valeur courante a chaque fois, plutot que de compter sur la fermeture figee
+  // d'un callback qui ne se re-declenche jamais.
+  const [navReady, setNavReady] = useState(false);
   // Bannière rappelant le contenu du push une fois sur l'écran cible (demande de
   // Marine : le texte de la notif disparaît sinon complètement après le tap, sans
   // rien pour expliquer pourquoi on est arrivé là -- utile pour une fonctionnalité
@@ -542,6 +553,24 @@ export default function Navigation() {
     return () => { linkSub.remove(); notifSub?.remove(); };
   }, []);
 
+  // Applique le profil/la notification en attente des que la navigation est
+  // prete -- un effet reactif normal (relit toujours le state courant a chaque
+  // declenchement) plutot que le callback onReady de NavigationContainer
+  // (qui ne se declenche qu'une seule fois, avec sa fermeture figee au moment
+  // ou il se declenche -- si pendingNotifData est pose APRES, onReady ne se
+  // redeclenche jamais pour le lire). Voir le commentaire sur navReady plus haut.
+  useEffect(() => {
+    if (!navReady) return;
+    if (pendingProfilId) {
+      navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
+      setPendingProfilId(null);
+    }
+    if (pendingNotifData) {
+      applyNotificationData(pendingNotifData);
+      setPendingNotifData(null);
+    }
+  }, [navReady, pendingProfilId, pendingNotifData]);
+
   useEffect(() => {
     if (!session) {
       setNeedsOnboarding(false);
@@ -606,14 +635,7 @@ export default function Navigation() {
           to_token: 'NAV_READY', title: 'NavigationContainer onReady',
           detail: JSON.stringify({ hasPendingNotifData: !!pendingNotifData, pendingNotifData }),
         }).then(() => {}, () => {});
-        if (pendingProfilId) {
-          navigationRef.navigate('ProfilPublic', { userId: pendingProfilId, prenom: '' });
-          setPendingProfilId(null);
-        }
-        if (pendingNotifData) {
-          applyNotificationData(pendingNotifData);
-          setPendingNotifData(null);
-        }
+        setNavReady(true);
       }}>
       <Stack.Navigator
         screenOptions={{ headerShown: false }}
