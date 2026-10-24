@@ -983,14 +983,20 @@ export default function CarteScreen() {
     // declenchement automatique au montage n'est pas garanti selon les versions/plateformes).
     // Affichage instantane : derniers lieux charges a l'ouverture precedente, puis
     // rafraichissement reseau par-dessus (le fetch ci-dessous remplace la liste).
-    AsyncStorage.getItem(LIEUX_CACHE_KEY).then(raw => {
-      if (!raw || lieuxFraisRef.current) return;
+    // Le chargement reseau AJOUTE alors les lieux au lieu de remplacer la liste : la
+    // zone par defaut de la carte n'est pas celle de l'utilisateur, un remplacement
+    // faisait disparaitre ses lieux jusqu'au recentrage GPS (marqueurs qui clignotaient).
+    (async () => {
+      let restaure = false;
       try {
-        const cached = JSON.parse(raw) as Lieu[];
-        if (Array.isArray(cached) && cached.length) { setLieux(cached); setLoading(false); }
+        const raw = await AsyncStorage.getItem(LIEUX_CACHE_KEY);
+        const cached = raw ? JSON.parse(raw) as Lieu[] : null;
+        if (Array.isArray(cached) && cached.length && !lieuxFraisRef.current) {
+          setLieux(cached); setLoading(false); restaure = true;
+        }
       } catch {}
-    }).catch(() => {});
-    fetchLieux(region, null, true);
+      fetchLieux(region, null, !restaure);
+    })();
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
@@ -1097,14 +1103,14 @@ export default function CarteScreen() {
       }
       const newPlaces = data || [];
       lieuxFraisRef.current = true;
+      // Cache pour la prochaine ouverture (zone chargee, sans filtre de categorie)
+      // (borne a ~1,5 Mo : limite par entree d'AsyncStorage sur Android)
+      if (!cat && newPlaces.length) {
+        const json = JSON.stringify(newPlaces);
+        if (json.length < 1_500_000) AsyncStorage.setItem(LIEUX_CACHE_KEY, json).catch(() => {});
+      }
       if (reset) {
         setLieux(newPlaces);
-        // Cache pour la prochaine ouverture (zone courante, sans filtre de categorie)
-        // (borne a ~1,5 Mo : limite par entree d'AsyncStorage sur Android)
-        if (!cat) {
-          const json = JSON.stringify(newPlaces);
-          if (json.length < 1_500_000) AsyncStorage.setItem(LIEUX_CACHE_KEY, json).catch(() => {});
-        }
       } else {
         setLieux(prev => {
           const existing = new Set(prev.map(l => l.id));
