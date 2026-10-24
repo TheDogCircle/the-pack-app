@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, ScrollView } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, ScrollView, Platform } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import TraceDessin from './TraceDessin';
-import { StoryBalade, ApercuStory, MISES_EN_PAGE, type MiseEnPage, type DonneesStory } from './BaladeStories';
+import { StoryBalade, CarteStory, MISES_EN_PAGE, type MiseEnPage, type DonneesStory } from './BaladeStories';
 
 export type BaladeTerminee = {
   nom: string;
@@ -64,7 +64,7 @@ export default function BaladeResume({
   const storyRef = useRef<View>(null);
   const carteRef = useRef<View>(null);
   const mapRef = useRef<MapView>(null);
-  const [storyCarteUri, setStoryCarteUri] = useState<string | null>(null);
+  const [cartePrete, setCartePrete] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [nomChien, setNomChien] = useState<string | null>(null);
   const [etape, setEtape] = useState<'resume' | 'partage'>('resume');
@@ -73,7 +73,7 @@ export default function BaladeResume({
 
   useEffect(() => {
     if (!balade) return;
-    setStats(null); setEtape('resume'); setStoryCarteUri(null);
+    setStats(null); setEtape('resume'); setCartePrete(false);
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const [{ data: st }, { data: p }] = await Promise.all([
@@ -85,12 +85,8 @@ export default function BaladeResume({
     })();
   }, [balade]);
 
-  // Etape 1 : photo de la carte affichee (trace deja ampute du debut et de la fin),
-  // reutilisee par la mise en page "Carte" ; puis choix de la mise en page.
-  async function ouvrirPartage() {
-    if (carteRef.current) {
-      try { setStoryCarteUri(await captureRef(carteRef, { format: 'png', quality: 0.95 })); } catch {}
-    }
+  function ouvrirPartage() {
+    setCartePrete(false);
     setEtape('partage');
   }
 
@@ -99,10 +95,12 @@ export default function BaladeResume({
     setPartage(true);
     track('balade_partage', { km: Math.round(balade.distanceKm * 10) / 10, mise_en_page: miseEnPage });
     try {
-      await new Promise(r => setTimeout(r, 150));
       const uri = await captureRef(storyRef, { format: 'png', quality: 1, width: 1080, height: 1920 });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager ma balade', UTI: 'public.png' });
-      else await Share.share({ url: uri });
+      // iOS : feuille de partage systeme (UIActivityViewController) qui propose
+      // Instagram, mais aussi "Copier" et "Enregistrer l'image" pour les fonds
+      // transparents. Android : expo-sharing (Share.share n'accepte pas de fichier).
+      if (Platform.OS === 'ios') await Share.share({ url: uri });
+      else if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager ma balade' });
     } catch {} finally { setPartage(false); }
   }
 
@@ -140,24 +138,40 @@ export default function BaladeResume({
               <Ionicons name="close" size={24} color={colors.bordeaux} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.bravo}>Choisis ta mise en page</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 18 }}>
+          <View style={styles.choixRangee}>
             {MISES_EN_PAGE.map(m => (
-              <TouchableOpacity key={m.key} onPress={() => setMiseEnPage(m.key)} activeOpacity={0.85} style={{ alignItems: 'center' }}>
-                <ApercuStory type={m.key} d={donnees} carteUri={storyCarteUri} actif={miseEnPage === m.key} />
-                <Text style={[styles.miseEnPageLbl, miseEnPage === m.key && { color: colors.terra }]}>
-                  {m.label}{m.transparent ? ' · fond transparent' : ''}
-                </Text>
+              <TouchableOpacity
+                key={m.key}
+                style={[styles.choix, miseEnPage === m.key && styles.choixActif]}
+                onPress={() => setMiseEnPage(m.key)}
+              >
+                <Text style={[styles.choixTexte, miseEnPage === m.key && styles.choixTexteActif]}>{m.label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+          <ScrollView style={{ flex: 1, marginHorizontal: -22 }} contentContainerStyle={{ alignItems: 'center', paddingVertical: 12 }}>
+            {/* Apercu en taille reelle = image envoyee (capture directe, carte nette) */}
+            <View style={[styles.apercuFond, MISES_EN_PAGE.find(m => m.key === miseEnPage)?.transparent && styles.apercuDamier]}>
+              <View ref={storyRef} collapsable={false} style={{ width: 360, height: 640 }}>
+                <StoryBalade
+                  type={miseEnPage}
+                  d={donnees}
+                  carte={miseEnPage === 'carte' ? <CarteStory trace={donnees.trace} onPrete={() => setCartePrete(true)} /> : undefined}
+                />
+              </View>
+            </View>
+            {MISES_EN_PAGE.find(m => m.key === miseEnPage)?.transparent ? (
+              <Text style={[styles.astuce, { marginHorizontal: 22, marginTop: 12 }]}>
+                Fond transparent : dans le partage, choisis « Copier » (ou « Enregistrer l'image »), puis dans ta story Instagram colle-la par-dessus ta photo.
+              </Text>
+            ) : null}
           </ScrollView>
-          {MISES_EN_PAGE.find(m => m.key === miseEnPage)?.transparent ? (
-            <Text style={styles.astuce}>
-              Astuce : dans le partage, choisis « Copier » puis colle-la dans ta story Instagram par-dessus ta photo (ou « Enregistrer l'image » et ajoute-la en sticker).
-            </Text>
-          ) : null}
-          <TouchableOpacity style={styles.cta} onPress={envoyer} disabled={partage}>
-            {partage ? <ActivityIndicator color={colors.ivory} /> : (
+          <TouchableOpacity
+            style={[styles.cta, { marginBottom: 24 }, miseEnPage === 'carte' && !cartePrete && { opacity: 0.6 }]}
+            onPress={envoyer}
+            disabled={partage || (miseEnPage === 'carte' && !cartePrete)}
+          >
+            {partage || (miseEnPage === 'carte' && !cartePrete) ? <ActivityIndicator color={colors.ivory} /> : (
               <>
                 <Ionicons name="share-outline" size={17} color={colors.ivory} />
                 <Text style={styles.ctaText}>Partager</Text>
@@ -245,12 +259,6 @@ export default function BaladeResume({
       </View>
       )}
 
-      {/* Mise en page choisie, taille reelle, hors ecran (capturee en 1080 x 1920) */}
-      {etape === 'partage' ? (
-        <View ref={storyRef} collapsable={false} style={styles.storyHorsEcran}>
-          <StoryBalade type={miseEnPage} d={donnees} carteUri={storyCarteUri} />
-        </View>
-      ) : null}
     </Modal>
   );
 }
@@ -289,9 +297,14 @@ const styles = StyleSheet.create({
   secondaireText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   note: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 10 },
 
-  storyHorsEcran: { position: 'absolute', left: -9999, top: 0, width: 360, height: 640, backgroundColor: 'transparent' },
+  choixRangee: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  choix: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  choixActif: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  choixTexte: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMid },
+  choixTexteActif: { color: colors.ivory },
+  apercuFond: { borderRadius: 18, overflow: 'hidden' },
+  apercuDamier: { backgroundColor: '#6b6560' },
   retour: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux },
-  miseEnPageLbl: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.textMuted, marginTop: 8 },
   astuce: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 17, backgroundColor: colors.ivoryLight, borderRadius: 10, padding: 10 },
 });
 
