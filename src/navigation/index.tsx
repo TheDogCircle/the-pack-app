@@ -26,6 +26,7 @@ import ProfilPublicScreen from '../screens/ProfilPublicScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import BookingScreen from '../screens/BookingScreen';
 import MesReservationsScreen from '../screens/MesReservationsScreen';
+import ClassementScreen from '../screens/ClassementScreen';
 import AnniversairesScreen from '../screens/AnniversairesScreen';
 import CarnetSanteScreen from '../screens/CarnetSanteScreen';
 import ContactScreen from '../screens/ContactScreen';
@@ -45,6 +46,7 @@ export type RootStackParamList = {
   Settings: undefined;
   Booking: { lieuId: string; lieuNom: string };
   MesReservations: undefined;
+  Classement: undefined;
   Anniversaires: undefined;
   Activite: undefined;
   CarnetSante: { chienId: string; chienNom: string };
@@ -794,7 +796,19 @@ export default function Navigation() {
             headerShown: true, presentation: 'card',
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
-            headerTitle: 'Mes réservations',
+            headerTitle: 'Mes rendez-vous',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Classement"
+          component={ClassementScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            headerTitle: 'Top de la semaine',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}

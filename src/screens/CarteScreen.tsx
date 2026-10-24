@@ -25,8 +25,9 @@ import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import InviteSheet, { chargerInvitant, type Invitant } from '../components/InviteSheet';
+import BaladeResume, { type BaladeTerminee } from '../components/BaladeResume';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
-import { startBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeStartMs, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
+import { startBaladeBackgroundTracking, pauseBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeElapsedSec, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
 
 const SCREEN_H = Dimensions.get('window').height;
 const SCREEN_W = Dimensions.get('window').width;
@@ -81,7 +82,7 @@ const CAT_CONFIG: Record<string, { icon: IoniconsName; markerIcon: IoniconsName;
   bar:           { icon: 'wine-outline',        markerIcon: 'wine',         label: 'Bar',           color: '#8B5E3C' },
   concept_store: { icon: 'bag-handle-outline', markerIcon: 'bag-handle',   label: 'Concept Store', color: '#D4A853' },
   educateur:     { icon: 'school-outline',     markerIcon: 'school',       label: 'Promeneur / Éducateur', color: '#5B8DB8' },
-  promenade:     { icon: 'walk-outline',       markerIcon: 'walk',         label: 'Promenade',     color: '#8A9A5B' },
+  promenade:     { icon: 'leaf-outline',       markerIcon: 'leaf',         label: 'Coins balade',  color: '#8A9A5B' },
   autre:         { icon: 'location-outline',   markerIcon: 'location',     label: 'Autre',         color: '#7A7A7A' },
 };
 
@@ -330,7 +331,7 @@ function BaladePin({ latitude, longitude, isSelected, onPress }: { latitude: num
     <Marker ref={markerRef} coordinate={{ latitude, longitude }} tracksViewChanges={tracksViewChanges} anchor={{ x: 0.5, y: 1 }} onPress={onPress}>
       <View style={styles.baladePin}>
         <View style={[styles.baladeBubble, isSelected && styles.baladeBubbleSelected]}>
-          <Ionicons name="walk-outline" size={16} color="#fff" />
+          <Ionicons name="footsteps" size={15} color="#fff" />
         </View>
         <View style={[styles.baladeTail, isSelected && { borderTopColor: '#2E7D6B' }]} />
       </View>
@@ -635,6 +636,7 @@ export default function CarteScreen() {
   const navigation = useNavigation<any>();
   const mapRef = useRef<MapView>(null);
   const [invitant, setInvitant] = useState<Invitant | null>(null);
+  const [baladeTerminee, setBaladeTerminee] = useState<BaladeTerminee | null>(null);
   const shareLieuCardRef = useRef<View>(null);
   const baladeMapCaptureRef = useRef<View>(null);
   const [lieux, setLieux] = useState<Lieu[]>([]);
@@ -1301,11 +1303,11 @@ export default function CarteScreen() {
   // dans AsyncStorage, seule source fiable quand l'app est suspendue. Ce poll
   // se contente de relire cette source toutes les 2s pour rafraichir l'UI.
   async function pollBaladeState() {
-    const [trace, startMs] = await Promise.all([getBaladeTrace(), getBaladeStartMs()]);
+    const [trace, elapsed] = await Promise.all([getBaladeTrace(), getBaladeElapsedSec()]);
     if (!trace.length) return;
     setBaladeTrace(trace);
     setBaladeLiveDistanceKm(distanceKmOf(trace));
-    if (startMs) setBaladeElapsedSec(Math.round((Date.now() - startMs) / 1000));
+    if (elapsed != null) setBaladeElapsedSec(elapsed);
   }
 
   function startBaladePoll() {
@@ -1356,7 +1358,7 @@ export default function CarteScreen() {
 
   async function pauseBaladeTracking() {
     stopBaladePoll();
-    await stopBaladeBackgroundTracking();
+    await pauseBaladeBackgroundTracking();
     setBaladePaused(true);
   }
 
@@ -1374,6 +1376,8 @@ export default function CarteScreen() {
     }
     setBaladeTrace(trace);
     setBaladeLiveDistanceKm(distanceKmOf(trace));
+    const elapsed = await getBaladeElapsedSec();
+    if (elapsed != null) setBaladeElapsedSec(elapsed);
     stopBaladePoll();
     await stopBaladeBackgroundTracking();
     setBaladeTracking(false);
@@ -1480,11 +1484,12 @@ export default function CarteScreen() {
     // utilise cote web dans carte.html)
     supabase.rpc('increment_points', { user_id: userId, pts: 25 });
 
+    // Ecran de fin : stats, place au classement, partage (avant que discard ne vide la trace)
+    setBaladeTerminee({ nom: baladeNom.trim(), distanceKm: dist, dureeSec: baladeElapsedSec, trace: baladeTrace });
     setBaladeLoading(false);
     discardBaladeTracking();
     triggerPointsAnim();
     setShowBalades(true);
-    proposerInvitationApresBalade();
   }
 
   // Une seule fois par appareil, apres une balade : c'est le moment ou l'on a
@@ -2617,7 +2622,7 @@ export default function CarteScreen() {
             {/* Balades */}
             {showBalades && (
               <>
-                <Text style={[styles.filterSectionLabel, { marginTop: 20 }]}>BALADES</Text>
+                <Text style={[styles.filterSectionLabel, { marginTop: 20 }]}>PARCOURS</Text>
                 <View style={styles.filterChipsGrid}>
                   {FILTRES_DEF.map(f => {
                     const active = baladeSearchFiltres.includes(f.key);
@@ -2644,8 +2649,12 @@ export default function CarteScreen() {
             >
               <Text style={styles.filterCTAText}>
                 {showBalades
-                  ? `Afficher ${filteredBalades.length} balade${filteredBalades.length !== 1 ? 's' : ''}`
-                  : `Afficher ${filteredLieux.length} lieu${filteredLieux.length !== 1 ? 'x' : ''}`}
+                  ? (filteredBalades.length
+                    ? `Afficher ${filteredBalades.length} parcours`
+                    : 'Aucun parcours ici · élargis la carte')
+                  : (filteredLieux.length
+                    ? `Afficher ${filteredLieux.length} lieu${filteredLieux.length !== 1 ? 'x' : ''}`
+                    : 'Aucun lieu ici · élargis la carte')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -3634,9 +3643,18 @@ export default function CarteScreen() {
             style={[styles.filterPill, showBalades && { backgroundColor: colors.sage, borderColor: colors.sage }]}
             onPress={onBaladesPress}
           >
-            <Ionicons name="walk-outline" size={13} color={showBalades ? '#fff' : colors.sage} />
-            <Text style={[styles.filterLabel, showBalades && styles.filterLabelActive]}>Balades</Text>
+            <Ionicons name="footsteps-outline" size={13} color={showBalades ? '#fff' : colors.sage} />
+            <Text style={[styles.filterLabel, showBalades && styles.filterLabelActive]}>Parcours</Text>
           </TouchableOpacity>
+          {showBalades ? (
+            <TouchableOpacity
+              style={[styles.filterPill, { backgroundColor: '#FAEEDA', borderColor: '#FAEEDA' }]}
+              onPress={() => navigation.navigate('Classement')}
+            >
+              <Ionicons name="trophy-outline" size={13} color="#854F0B" />
+              <Text style={[styles.filterLabel, { color: '#854F0B' }]}>Top de la semaine</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={[styles.filterPill, (autresOpen || AUTRES_CATS.some(c => c.key === activeCat && !favFilter)) && { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux }]}
             onPress={() => setAutresOpen(v => !v)}
@@ -4489,7 +4507,7 @@ export default function CarteScreen() {
           <View style={styles.baladeSheetHandle} />
           <View style={styles.baladeSheetHeader}>
             <View style={[styles.baladeBubble, { width: 40, height: 40, borderRadius: 20 }]}>
-              <Ionicons name="walk-outline" size={20} color="#fff" />
+              <Ionicons name="footsteps" size={18} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.baladeSheetNom}>{selectedBalade.nom}</Text>
@@ -4718,6 +4736,11 @@ export default function CarteScreen() {
     {invitant && (
       <InviteSheet visible onClose={() => setInvitant(null)} invitant={invitant} />
     )}
+    <BaladeResume
+      balade={baladeTerminee}
+      onClose={() => { setBaladeTerminee(null); proposerInvitationApresBalade(); }}
+      onVoirClassement={() => { setBaladeTerminee(null); navigation.navigate('Classement'); }}
+    />
     </>
   );
 }
