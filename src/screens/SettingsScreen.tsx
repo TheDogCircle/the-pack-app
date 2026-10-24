@@ -10,6 +10,51 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
+
+type NotifKey =
+  | 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee'
+  | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer'
+  | 'notif_broadcast' | 'notif_new_post' | 'notif_birthday' | 'notif_event_reminder'
+  | 'notif_carnet_rappel';
+
+// Reglages regroupes par theme : chaque groupe est replie par defaut et
+// affiche combien de ses notifications sont actives.
+const NOTIF_GROUPS: { key: string; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; items: { key: NotifKey; label: string }[] }[] = [
+  {
+    key: 'communaute', label: 'Communauté', sub: 'Abonnés, messages, likes…', icon: 'people-outline',
+    items: [
+      { key: 'notif_follow', label: 'Nouvel abonné' },
+      { key: 'notif_messages', label: 'Messages' },
+      { key: 'notif_photo_like', label: 'Likes sur mes photos' },
+      { key: 'notif_new_post', label: 'Photos de mes abonnements' },
+      { key: 'notif_birthday', label: 'Anniversaires des chiens suivis' },
+    ],
+  },
+  {
+    key: 'lieux', label: 'Lieux', sub: 'Nouveaux lieux, suggestions', icon: 'location-outline',
+    items: [
+      { key: 'notif_lieu_nearby', label: 'Nouveau lieu près de moi' },
+      { key: 'notif_friend_lieu', label: 'Lieu ajouté par un ami' },
+      { key: 'notif_suggestion_validee', label: 'Ma suggestion de lieu validée' },
+    ],
+  },
+  {
+    key: 'rappels', label: 'Événements et rappels', sub: 'Événements proches, carnet de santé', icon: 'calendar-outline',
+    items: [
+      { key: 'notif_event_reminder', label: 'Événements à proximité' },
+      { key: 'notif_carnet_rappel', label: 'Rappels du carnet de santé' },
+    ],
+  },
+  {
+    key: 'partenaires', label: 'Partenaires et actus', sub: 'Offres, nouveaux partenaires', icon: 'pricetag-outline',
+    items: [
+      { key: 'notif_offer', label: 'Nouvelle offre' },
+      { key: 'notif_partner', label: 'Nouveau partenaire' },
+      { key: 'notif_broadcast', label: "Annonces de l'équipe" },
+    ],
+  },
+];
+const ALL_NOTIF_KEYS = NOTIF_GROUPS.flatMap(g => g.items.map(i => i.key));
 import { savePushToken } from '../lib/notifications';
 import { normalizePhone } from '../lib/phone';
 import { RACES } from '../constants/races';
@@ -72,19 +117,10 @@ export default function SettingsScreen() {
   const [savingUsername, setSavingUsername] = useState(false);
 
   // Notifications
-  const [notifFollow, setNotifFollow] = useState(true);
-  const [notifLieuNearby, setNotifLieuNearby] = useState(true);
-  const [notifMessages, setNotifMessages] = useState(true);
-  const [notifSuggestionValidee, setNotifSuggestionValidee] = useState(true);
-  const [notifPhotoLike, setNotifPhotoLike] = useState(true);
-  const [notifFriendLieu, setNotifFriendLieu] = useState(true);
-  const [notifPartner, setNotifPartner] = useState(true);
-  const [notifOffer, setNotifOffer] = useState(true);
-  const [notifBroadcast, setNotifBroadcast] = useState(true);
-  const [notifNewPost, setNotifNewPost] = useState(true);
-  const [notifBirthday, setNotifBirthday] = useState(true);
-  const [notifEventReminder, setNotifEventReminder] = useState(true);
-  const [notifCarnetRappel, setNotifCarnetRappel] = useState(true);
+  const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>(
+    () => Object.fromEntries(ALL_NOTIF_KEYS.map(k => [k, true])) as Record<NotifKey, boolean>,
+  );
+  const [notifGroupOpen, setNotifGroupOpen] = useState<string | null>(null);
   const [masquerDepartBalade, setMasquerDepartBalade] = useState(false);
   const [rayonKm, setRayonKm] = useState(20);
   const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
@@ -169,19 +205,7 @@ export default function SettingsScreen() {
 
     if (data) {
       if (data.username) { setUsername(data.username); setCurrentUsername(data.username); }
-      setNotifFollow(data.notif_follow ?? true);
-      setNotifLieuNearby(data.notif_lieu_nearby ?? true);
-      setNotifMessages(data.notif_messages ?? true);
-      setNotifSuggestionValidee(data.notif_suggestion_validee ?? true);
-      setNotifPhotoLike(data.notif_photo_like ?? true);
-      setNotifFriendLieu(data.notif_friend_lieu ?? true);
-      setNotifPartner(data.notif_partner ?? true);
-      setNotifOffer(data.notif_offer ?? true);
-      setNotifBroadcast(data.notif_broadcast ?? true);
-      setNotifNewPost(data.notif_new_post ?? true);
-      setNotifBirthday(data.notif_birthday ?? true);
-      setNotifEventReminder(data.notif_event_reminder ?? true);
-      setNotifCarnetRappel(data.notif_carnet_rappel ?? true);
+      setNotifs(Object.fromEntries(ALL_NOTIF_KEYS.map(k => [k, (data as any)[k] ?? true])) as Record<NotifKey, boolean>);
       setMasquerDepartBalade(data.masquer_depart_balade ?? false);
       setRayonKm(data.rayon_km ?? 20);
       setPrenom(data.prenom || '');
@@ -220,22 +244,10 @@ export default function SettingsScreen() {
     setLoading(false);
   }
 
-  async function toggleNotif(key: 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee' | 'notif_photo_like' | 'notif_friend_lieu' | 'notif_partner' | 'notif_offer' | 'notif_broadcast' | 'notif_new_post' | 'notif_birthday' | 'notif_event_reminder' | 'notif_carnet_rappel', value: boolean) {
+  async function setNotifValues(keys: NotifKey[], value: boolean) {
     if (!userId) return;
-    if (key === 'notif_follow') setNotifFollow(value);
-    else if (key === 'notif_lieu_nearby') setNotifLieuNearby(value);
-    else if (key === 'notif_messages') setNotifMessages(value);
-    else if (key === 'notif_suggestion_validee') setNotifSuggestionValidee(value);
-    else if (key === 'notif_photo_like') setNotifPhotoLike(value);
-    else if (key === 'notif_friend_lieu') setNotifFriendLieu(value);
-    else if (key === 'notif_partner') setNotifPartner(value);
-    else if (key === 'notif_offer') setNotifOffer(value);
-    else if (key === 'notif_broadcast') setNotifBroadcast(value);
-    else if (key === 'notif_birthday') setNotifBirthday(value);
-    else if (key === 'notif_event_reminder') setNotifEventReminder(value);
-    else if (key === 'notif_carnet_rappel') setNotifCarnetRappel(value);
-    else setNotifNewPost(value);
-    await supabase.from('profils').update({ [key]: value }).eq('id', userId);
+    setNotifs(prev => ({ ...prev, ...Object.fromEntries(keys.map(k => [k, value])) }));
+    await supabase.from('profils').update(Object.fromEntries(keys.map(k => [k, value]))).eq('id', userId);
   }
 
   async function updateRayonKm(km: number) {
@@ -660,134 +672,68 @@ export default function SettingsScreen() {
             </Text>
           </TouchableOpacity>
         )}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Nouvel abonné</Text>
-            <Text style={styles.toggleSub}>Quand quelqu'un commence à te suivre</Text>
-          </View>
-          <Switch value={notifFollow} onValueChange={v => toggleNotif('notif_follow', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={notifLieuNearby ? styles.toggleRow : [styles.toggleRow, { borderBottomWidth: 0 }]}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Nouveau lieu près de moi</Text>
-            <Text style={styles.toggleSub}>Quand un lieu dog-friendly est ajouté près de chez toi</Text>
-          </View>
-          <Switch value={notifLieuNearby} onValueChange={v => toggleNotif('notif_lieu_nearby', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        {notifLieuNearby && (
-          <View style={[styles.toggleRow, { paddingTop: 0 }]}>
-            <View style={styles.toggleInfo}>
-              <Text style={styles.toggleSub}>Distance</Text>
+        {(() => {
+          const toutes = ALL_NOTIF_KEYS.every(k => notifs[k]);
+          return (
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleInfo}>
+                <Text style={styles.toggleLabel}>Toutes les notifications</Text>
+              </View>
+              <Switch value={toutes} onValueChange={v => setNotifValues(ALL_NOTIF_KEYS, v)}
+                trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
             </View>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {[5, 10, 20, 50].map(km => (
-                <TouchableOpacity
-                  key={km}
-                  onPress={() => updateRayonKm(km)}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
-                    backgroundColor: rayonKm === km ? colors.terra : 'transparent',
-                    borderWidth: 1, borderColor: rayonKm === km ? colors.terra : colors.border,
-                  }}
-                >
-                  <Text style={{ fontSize: 12, color: rayonKm === km ? colors.ivory : colors.textMuted, fontFamily: 'DMSans_500Medium' }}>
-                    {km} km
-                  </Text>
-                </TouchableOpacity>
+          );
+        })()}
+        {NOTIF_GROUPS.map((g, gi) => {
+          const actives = g.items.filter(i => notifs[i.key]).length;
+          const open = notifGroupOpen === g.key;
+          const dernier = gi === NOTIF_GROUPS.length - 1;
+          const sub = g.key === 'lieux' && notifs.notif_lieu_nearby ? `Près de moi · ${rayonKm} km` : g.sub;
+          return (
+            <View key={g.key} style={!dernier || open ? styles.notifGroup : [styles.notifGroup, { borderBottomWidth: 0 }]}>
+              <TouchableOpacity style={styles.notifGroupHeader} onPress={() => setNotifGroupOpen(open ? null : g.key)} activeOpacity={0.7}>
+                <Ionicons name={g.icon} size={18} color={colors.terra} />
+                <View style={styles.toggleInfo}>
+                  <Text style={styles.toggleLabel}>{g.label}</Text>
+                  <Text style={styles.toggleSub} numberOfLines={1}>{sub}</Text>
+                </View>
+                <Text style={styles.notifGroupCount}>{actives}/{g.items.length}</Text>
+                <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+              {open && g.items.map(i => (
+                <View key={i.key}>
+                  <View style={styles.notifItem}>
+                    <Text style={styles.notifItemLabel}>{i.label}</Text>
+                    <Switch value={notifs[i.key]} onValueChange={v => setNotifValues([i.key], v)}
+                      trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
+                  </View>
+                  {i.key === 'notif_lieu_nearby' && notifs.notif_lieu_nearby && (
+                    <View style={[styles.notifItem, { paddingTop: 0 }]}>
+                      <Text style={styles.toggleSub}>Distance</Text>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {[5, 10, 20, 50].map(km => (
+                          <TouchableOpacity
+                            key={km}
+                            onPress={() => updateRayonKm(km)}
+                            style={{
+                              paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
+                              backgroundColor: rayonKm === km ? colors.terra : 'transparent',
+                              borderWidth: 1, borderColor: rayonKm === km ? colors.terra : colors.border,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12, color: rayonKm === km ? colors.ivory : colors.textMuted, fontFamily: 'DMSans_500Medium' }}>
+                              {km} km
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
               ))}
             </View>
-          </View>
-        )}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Messages</Text>
-            <Text style={styles.toggleSub}>Nouveaux messages reçus dans tes conversations</Text>
-          </View>
-          <Switch value={notifMessages} onValueChange={v => toggleNotif('notif_messages', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Lieu suggéré validé</Text>
-            <Text style={styles.toggleSub}>Quand un lieu que tu as proposé est publié sur la carte</Text>
-          </View>
-          <Switch value={notifSuggestionValidee} onValueChange={v => toggleNotif('notif_suggestion_validee', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Likes</Text>
-            <Text style={styles.toggleSub}>Quand quelqu'un aime une de tes photos</Text>
-          </View>
-          <Switch value={notifPhotoLike} onValueChange={v => toggleNotif('notif_photo_like', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Photos de mes abonnements</Text>
-            <Text style={styles.toggleSub}>Être notifié(e) quand une personne que tu suis publie une photo</Text>
-          </View>
-          <Switch value={notifNewPost} onValueChange={v => toggleNotif('notif_new_post', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Lieu ajouté par un ami</Text>
-            <Text style={styles.toggleSub}>Quand une personne que tu suis ajoute un lieu</Text>
-          </View>
-          <Switch value={notifFriendLieu} onValueChange={v => toggleNotif('notif_friend_lieu', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Nouveau partenaire</Text>
-            <Text style={styles.toggleSub}>Quand un nouvel établissement partenaire rejoint The Pack</Text>
-          </View>
-          <Switch value={notifPartner} onValueChange={v => toggleNotif('notif_partner', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Nouvelle offre</Text>
-            <Text style={styles.toggleSub}>Quand un partenaire ajoute ou met à jour une offre</Text>
-          </View>
-          <Switch value={notifOffer} onValueChange={v => toggleNotif('notif_offer', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Actualités & annonces</Text>
-            <Text style={styles.toggleSub}>Annonces générales de l'équipe The Pack La Meute</Text>
-          </View>
-          <Switch value={notifBroadcast} onValueChange={v => toggleNotif('notif_broadcast', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Anniversaires des chiens que je suis</Text>
-            <Text style={styles.toggleSub}>Être notifié(e) le jour de l'anniversaire d'un chien que tu suis</Text>
-          </View>
-          <Switch value={notifBirthday} onValueChange={v => toggleNotif('notif_birthday', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Événements à proximité</Text>
-            <Text style={styles.toggleSub}>Rappels avant un événement mis en avant près de toi (2 sem., 1 sem., 3j, veille, jour J)</Text>
-          </View>
-          <Switch value={notifEventReminder} onValueChange={v => toggleNotif('notif_event_reminder', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
-        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
-          <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Rappels du carnet de santé</Text>
-            <Text style={styles.toggleSub}>Vaccin, vermifuge, antiparasitaire, rendez-vous véto — à l'échéance que tu as choisie</Text>
-          </View>
-          <Switch value={notifCarnetRappel} onValueChange={v => toggleNotif('notif_carnet_rappel', v)}
-            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
-        </View>
+          );
+        })}
       </View>
 
       {/* Confidentialité */}
@@ -1296,6 +1242,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   toggleInfo: { flex: 1, marginRight: 12 },
+  notifGroup: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  notifGroupHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
+  notifGroupCount: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginRight: 2 },
+  notifItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingLeft: 46, paddingRight: 16, paddingVertical: 8,
+  },
+  notifItemLabel: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, marginRight: 12 },
   toggleLabel: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   toggleSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 1 },
   // Menu rows

@@ -254,6 +254,7 @@ export default function ProfilScreen() {
   const [chiens, setChiens] = useState<{ id: string; nom: string }[]>([]);
   const [dogPicker, setDogPicker] = useState(false);
   const cardRef = useRef<View>(null);
+  const [meuteOpen, setMeuteOpen] = useState(false);
 
   const [explorateur, setExplorateur] = useState<ExplorateurData | null>(null);
   const [showExplorEdit, setShowExplorEdit] = useState(false);
@@ -383,6 +384,14 @@ export default function ProfilScreen() {
     } catch {}
   }
 
+  function openShareMenu() {
+    Alert.alert('Partager mon profil', undefined, [
+      { text: 'Story / Image', onPress: shareProfile },
+      { text: 'Lien de profil', onPress: shareLink },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  }
+
   function goToCarnetSante() {
     if (chiens.length === 0) {
       Alert.alert('Aucun chien renseigné', "Ajoute d'abord un chien dans Réglages pour créer son carnet de santé.", [
@@ -441,95 +450,98 @@ export default function ProfilScreen() {
     <View style={styles.container}>
       {/* Header profil */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={pickAvatar}>
-          <View style={styles.avatarWrap}>
-            {profil?.avatar_url
-              ? <Image source={{ uri: profil.avatar_url }} style={styles.avatarImg} />
-              : <View style={styles.avatarFallback}><Text style={styles.avatarLetter}>{(profil?.prenom || '?')[0].toUpperCase()}</Text></View>}
-            <View style={styles.avatarEditBadge}><Ionicons name="camera" size={10} color={colors.ivory} /></View>
-          </View>
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity onPress={pickAvatar}>
+            <View style={styles.avatarWrap}>
+              {profil?.avatar_url
+                ? <Image source={{ uri: profil.avatar_url }} style={styles.avatarImg} />
+                : <View style={styles.avatarFallback}><Text style={styles.avatarLetter}>{(profil?.prenom || '?')[0].toUpperCase()}</Text></View>}
+              <View style={styles.avatarEditBadge}><Ionicons name="camera" size={10} color={colors.ivory} /></View>
+            </View>
+          </TouchableOpacity>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <Text style={styles.nom}>{profil?.prenom || 'Mon profil'}</Text>
               {profil?.ambassadeur ? <AmbassadeurBadge size="md" /> : null}
             </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.logoutIcon}>
-              <Ionicons name="settings-outline" size={20} color="rgba(245,239,224,0.6)" />
+            {profil?.username ? <Text style={styles.username} numberOfLines={1}>@{profil.username}</Text> : null}
+            {(profil?.nom_chien || profil?.race_chien || profil?.ville) ? (
+              <Text style={styles.dogInfo} numberOfLines={1}>
+                🐾 {[profil?.nom_chien, profil?.race_chien, profil?.ville].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.headerIcons}>
+            <TouchableOpacity onPress={openShareMenu} style={styles.headerIcon} hitSlop={8} accessibilityLabel="Partager mon profil">
+              <Ionicons name="share-outline" size={20} color="rgba(245,239,224,0.75)" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.headerIcon} hitSlop={8} accessibilityLabel="Paramètres">
+              <Ionicons name="settings-outline" size={20} color="rgba(245,239,224,0.75)" />
             </TouchableOpacity>
           </View>
-          {profil?.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
-          {profil?.ville ? <Text style={styles.ville}>{profil.ville}</Text> : null}
-          {(profil?.nom_chien || profil?.race_chien) ? (
-            <Text style={styles.dogInfo}>
-              🐾 {[profil.nom_chien, profil.race_chien].filter(Boolean).join(' · ')}
-            </Text>
-          ) : null}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNum}>{favoris.length}</Text>
-              <Text style={styles.statLabel}>Favoris</Text>
-            </View>
-            <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('followers')} activeOpacity={0.7}>
-              <Text style={styles.statNum}>{followersCount}{pendingRequests.length > 0 ? ` +${pendingRequests.length}` : ''}</Text>
-              <Text style={styles.statLabel}>Abonnés</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('following')} activeOpacity={0.7}>
-              <Text style={styles.statNum}>{followingCount}</Text>
-              <Text style={styles.statLabel}>Abonnements</Text>
-            </TouchableOpacity>
-          </View>
+        </View>
+
+        <View style={styles.statsRow}>
+          <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('followers')} activeOpacity={0.7}>
+            <Text style={styles.statNum}>{followersCount}{pendingRequests.length > 0 ? ` +${pendingRequests.length}` : ''}</Text>
+            <Text style={styles.statLabel}>abonnés</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statItem} onPress={() => openFollowModal('following')} activeOpacity={0.7}>
+            <Text style={styles.statNum}>{followingCount}</Text>
+            <Text style={styles.statLabel}>abonnements</Text>
+          </TouchableOpacity>
           {(() => {
             const pts = profil?.points || 0;
-            const { n, next, pct } = getNiveau(pts);
+            const { n, next } = getNiveau(pts);
             return (
-              <View style={styles.niveauWrap}>
-                <View style={styles.niveauRow}>
-                  <Text style={styles.niveauEmoji}>{n.emoji}</Text>
-                  <Text style={styles.niveauLabel}>{n.nom}</Text>
-                  <Text style={styles.niveauPts}>{pts} pt{pts > 1 ? 's' : ''}</Text>
-                </View>
-                <View style={styles.niveauBarWrap}>
-                  <View style={[styles.niveauBarFill, { width: `${pct}%` as any }]} />
-                </View>
-                {next && (
-                  <Text style={styles.niveauNext}>encore {next.min - pts} pts pour {next.nom} {next.emoji}</Text>
+              <TouchableOpacity
+                style={styles.niveauPill}
+                activeOpacity={0.75}
+                onPress={() => Alert.alert(
+                  `${n.emoji} ${n.nom}`,
+                  next ? `${pts} pts · encore ${next.min - pts} pts pour ${next.nom} ${next.emoji}` : `${pts} pts · niveau maximum atteint !`,
                 )}
-              </View>
+              >
+                <Text style={styles.niveauPillText} numberOfLines={1}>{n.emoji} {n.nom} · {pts.toLocaleString('fr-FR')} pts</Text>
+              </TouchableOpacity>
             );
           })()}
         </View>
       </View>
 
-      {/* Partager */}
-      <View style={styles.shareBtnRow}>
-        <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={shareProfile}>
-          <Ionicons name="image-outline" size={15} color={colors.bordeaux} />
-          <Text style={styles.shareBtnText}>Story / Image</Text>
+      {/* Raccourcis */}
+      <View style={styles.tilesRow}>
+        <TouchableOpacity style={styles.tile} onPress={() => setMeuteOpen(true)} activeOpacity={0.8}>
+          <Ionicons name="people-outline" size={22} color={colors.terra} />
+          <Text style={styles.tileLabel}>Ma meute</Text>
+          <Text style={styles.tileSub} numberOfLines={1}>Inviter des amis</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={shareLink}>
-          <Ionicons name="link-outline" size={15} color={colors.bordeaux} />
-          <Text style={styles.shareBtnText}>Lien de profil</Text>
+        <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.8}>
+          <Ionicons name="calendar-outline" size={22} color={colors.terra} />
+          <Text style={styles.tileLabel}>Rendez-vous</Text>
+          <Text style={styles.tileSub} numberOfLines={1}>Mes réservations</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tile} onPress={goToCarnetSante} activeOpacity={0.8}>
+          <Ionicons name="medkit-outline" size={22} color={colors.terra} />
+          <Text style={styles.tileLabel}>Santé</Text>
+          <Text style={styles.tileSub} numberOfLines={1}>
+            {chiens.length === 1 ? chiens[0].nom : chiens.length > 1 ? `${chiens.length} chiens` : 'Carnet'}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Parrainage */}
-      <ParrainageCard />
-
-      {/* Mes rendez-vous */}
-      <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.85}>
-        <Ionicons name="calendar-outline" size={16} color={colors.ivory} />
-        <Text style={styles.resaBannerText}>Mes rendez-vous</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
-      </TouchableOpacity>
-
-      {/* Carnet de santé */}
-      <TouchableOpacity style={styles.resaBannerRow} onPress={goToCarnetSante} activeOpacity={0.85}>
-        <Ionicons name="medkit-outline" size={16} color={colors.ivory} />
-        <Text style={styles.resaBannerText}>Carnet de santé</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.ivory} />
-      </TouchableOpacity>
+      {/* Ma meute (parrainage) */}
+      <Modal visible={meuteOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setMeuteOpen(false)}>
+        <View style={styles.meuteSheet}>
+          <View style={styles.meuteSheetHeader}>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => setMeuteOpen(false)} hitSlop={10} accessibilityLabel="Fermer">
+              <Ionicons name="close" size={24} color={colors.bordeaux} />
+            </TouchableOpacity>
+          </View>
+          <ParrainageCard />
+        </View>
+      </Modal>
 
       {/* Demandes en attente */}
       {pendingRequests.length > 0 && (
@@ -953,10 +965,10 @@ export default function ProfilScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.ivoryPale },
-  header: {
-    backgroundColor: colors.bordeaux, flexDirection: 'row', alignItems: 'center',
-    gap: 14, padding: 20, paddingTop: 16,
-  },
+  header: { backgroundColor: colors.bordeaux, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  headerIcons: { flexDirection: 'row', alignSelf: 'flex-start', gap: 4 },
+  headerIcon: { padding: 4 },
   avatarWrap: { position: 'relative' },
   avatarImg: { width: 64, height: 64, borderRadius: 32 },
   avatarFallback: {
@@ -971,23 +983,27 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.bordeaux,
   },
   nom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
-  username: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terraPale },
-  ville: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.6)' },
-  dogInfo: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.7)', marginTop: 2 },
+  username: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.terraPale, marginTop: 1 },
+  dogInfo: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.7)', marginTop: 3 },
   points: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terraPale, marginTop: 3 },
-  statsRow: { flexDirection: 'row', gap: 18, marginTop: 10, flexWrap: 'wrap' },
-  statItem: { minWidth: 50 },
-  statNum: { fontFamily: 'DMSans_500Medium', fontSize: 17, color: colors.terraPale },
-  statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.45)', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 1 },
-  niveauWrap: { marginTop: 10 },
-  niveauRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5 },
-  niveauEmoji: { fontSize: 13 },
-  niveauLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: 'rgba(245,239,224,0.8)', flex: 1 },
-  niveauPts: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(245,239,224,0.4)' },
-  niveauBarWrap: { height: 3, backgroundColor: 'rgba(245,239,224,0.12)', borderRadius: 2, overflow: 'hidden' },
-  niveauBarFill: { height: 3, backgroundColor: colors.terra, borderRadius: 2 },
-  niveauNext: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: 'rgba(245,239,224,0.4)', marginTop: 3 },
-  logoutIcon: { padding: 4, marginLeft: 6 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 18, marginTop: 14 },
+  statItem: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  statNum: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ivory },
+  statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: 'rgba(245,239,224,0.55)' },
+  niveauPill: {
+    marginLeft: 'auto', flexShrink: 1, backgroundColor: 'rgba(196,105,58,0.25)',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  niveauPillText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.terraPale },
+  tilesRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  tile: {
+    flex: 1, alignItems: 'center', backgroundColor: colors.white, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 6, borderWidth: 1, borderColor: colors.border,
+  },
+  tileLabel: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux, marginTop: 6 },
+  tileSub: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  meuteSheet: { flex: 1, backgroundColor: colors.ivoryPale, paddingTop: 12 },
+  meuteSheetHeader: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8 },
   lieuxCountBadge: {
     backgroundColor: colors.terraPale + '40', borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 2, marginRight: 2,
@@ -1029,19 +1045,6 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted },
   tabTextActive: { fontFamily: 'DMSans_500Medium', color: colors.bordeaux },
   tabContent: { padding: 16, gap: 12, paddingBottom: 40 },
-  shareBtnRow: { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginBottom: 10 },
-  shareBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.white, borderRadius: 12, padding: 13,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  shareBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
-  resaBannerRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: colors.terra, borderRadius: 12,
-    paddingVertical: 12, paddingHorizontal: 14, marginHorizontal: 16, marginBottom: 10,
-  },
-  resaBannerText: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ivory },
   explorateurCard: {
     marginHorizontal: 16, marginBottom: 16, height: 100, borderRadius: 16, overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,
