@@ -137,8 +137,8 @@ function GroupeCard({
 // ── Main screen ──────────────────────────────────────────────────────────────
 
 export default function MessagerieScreen({
-  pendingConversationId, onConsumedPendingConversation, defaultHeaderRight,
-}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode } = {}) {
+  pendingConversationId, onConsumedPendingConversation, defaultHeaderRight, actif = true,
+}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode; actif?: boolean } = {}) {
   const navigation = useNavigation<any>();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
@@ -258,6 +258,11 @@ export default function MessagerieScreen({
   }, [pendingGroupeId, groupes]);
 
   useEffect(() => {
+    // Onglet garde monte mais cache (FeedScreen) : il ne doit pas piloter l'en-tete
+    if (!actif) {
+      navigation.setOptions({ title: 'Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
+      return;
+    }
     if (selectedConv) {
       navigation.setOptions({
         title: convDisplayName(selectedConv),
@@ -285,12 +290,20 @@ export default function MessagerieScreen({
     return () => {
       navigation.setOptions({ title: 'Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
     };
-  }, [selectedConv, myMuted]);
+  }, [selectedConv, myMuted, actif]);
+
+  // Retour sur l'onglet : rafraichissement discret (sans roue de chargement)
+  const dejaActifRef = useRef(false);
+  useEffect(() => {
+    if (!actif) return;
+    if (dejaActifRef.current && myUserId) loadConversations(true);
+    dejaActifRef.current = true;
+  }, [actif]);
 
   // ── Conversations ──
-  async function loadConversations() {
+  async function loadConversations(silencieux = false) {
     if (!myUserId) return;
-    setLoading(true);
+    if (!silencieux) setLoading(true);
     const { data: memberRows } = await supabase
       .from('conversation_members').select('conversation_id').eq('user_id', myUserId);
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }

@@ -1093,6 +1093,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   // Membres
   const [membres, setMembres] = useState<MembreItem[]>([]);
   const [membresLoading, setMembresLoading] = useState(false);
+  const [messagesVu, setMessagesVu] = useState(false);
   const [membresRefreshing, setMembresRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [regionFilter, setRegionFilter] = useState<string | null>(null);
@@ -1164,9 +1165,18 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
     if (myUserId) loadBirthdays(myUserId);
   }, [myUserId, loadBirthdays]));
 
+  // Changement d'onglet : premier chargement avec roue, ensuite rafraichissement
+  // discret en arriere-plan (et pas plus d'une fois toutes les 30 s), la liste
+  // deja chargee restant affichee. Avant : tout etait recharge a chaque passage.
+  const dernierChargementRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (tab === 'feed') { loadFeed(); loadSuggestions(); }
-    else if (tab === 'membres') loadMembres();
+    if (tab === 'messages') { setMessagesVu(true); return; }
+    const cle = `${tab}:${session?.user?.id || ''}`;
+    const dernier = dernierChargementRef.current[cle];
+    if (dernier && Date.now() - dernier < 30_000) return;
+    dernierChargementRef.current[cle] = Date.now();
+    if (tab === 'feed') { loadFeed(!!dernier); if (!dernier) loadSuggestions(); }
+    else if (tab === 'membres') loadMembres(!!dernier);
   }, [tab, session?.user?.id]);
 
   // ── Suggestions d'amis ──
@@ -1347,8 +1357,8 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
 
   // ── Feed ──
 
-  async function loadFeed() {
-    setFeedLoading(true);
+  async function loadFeed(silencieux = false) {
+    if (!silencieux) setFeedLoading(true);
 
     const myId = session?.user?.id || null;
     const COMMUNITY_POST_FIELDS = 'id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, visibilite, balade_id, balades (distance_km, duree_secondes), community_post_likes (user_id), community_post_comments (id)';
@@ -1667,8 +1677,8 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
 
   // ── Membres ──
 
-  async function loadMembres() {
-    setMembresLoading(true);
+  async function loadMembres(silencieux = false) {
+    if (!silencieux) setMembresLoading(true);
     const { data: { session: s } } = await supabase.auth.getSession();
     if (!s) { setMembresLoading(false); return; }
     const myId = s.user.id;
@@ -1684,8 +1694,14 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
 
     const myFollowingSet = new Set((myFollowsData || []).map((f: any) => f.following_id));
     const memberIds = membresData.map((m: any) => m.id);
-    const { data: memberFollowsData } = await supabase.from('follows')
-      .select('follower_id,following_id').in('follower_id', memberIds).eq('statut', 'accepte');
+    // Abonnements des membres vers les comptes que JE suis (= amis en commun). Filtrer
+    // sur ma liste d'abonnements plutot que sur les ~700 ids de membres : URL et
+    // reponse bien plus legeres, meme resultat.
+    const mesAbonnements = [...myFollowingSet];
+    const { data: memberFollowsData } = mesAbonnements.length
+      ? await supabase.from('follows')
+        .select('follower_id,following_id').in('following_id', mesAbonnements).eq('statut', 'accepte')
+      : { data: [] as any[] };
 
     const mutualMap: Record<string, number> = {};
     (memberFollowsData || []).forEach((f: any) => {
@@ -1819,16 +1835,21 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
         ))}
       </View>
 
-      {/* Chat */}
-      {tab === 'messages' ? (
-        <MessagerieScreen
-          pendingConversationId={pendingConvId}
-          onConsumedPendingConversation={() => setPendingConvId(null)}
-          defaultHeaderRight={defaultHeaderRight}
-        />
+      {/* Chat : garde monte apres la premiere visite (plus de rechargement complet a chaque passage) */}
+      {messagesVu ? (
+        <View style={{ flex: 1, display: tab === 'messages' ? 'flex' : 'none' }}>
+          <MessagerieScreen
+            pendingConversationId={pendingConvId}
+            onConsumedPendingConversation={() => setPendingConvId(null)}
+            defaultHeaderRight={defaultHeaderRight}
+            actif={tab === 'messages'}
+          />
+        </View>
+      ) : null}
+      {tab === 'messages' ? null
 
       /* Feed */
-      ) : tab === 'feed' ? (
+      : tab === 'feed' ? (
         <>
           {feedLoading ? (
             <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
@@ -1840,7 +1861,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
               refreshControl={
                 <RefreshControl
                   refreshing={feedRefreshing}
-                  onRefresh={async () => { setFeedRefreshing(true); await loadFeed(); setFeedRefreshing(false); }}
+                  onRefresh={async () => { setFeedRefreshing(true); await loadFeed(true); setFeedRefreshing(false); }}
                   tintColor={colors.terra}
                 />
               }
@@ -1993,7 +2014,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
             refreshControl={
               <RefreshControl
                 refreshing={membresRefreshing}
-                onRefresh={async () => { setMembresRefreshing(true); await loadMembres(); setMembresRefreshing(false); }}
+                onRefresh={async () => { setMembresRefreshing(true); await loadMembres(true); setMembresRefreshing(false); }}
                 tintColor={colors.terra}
               />
             }
@@ -2067,7 +2088,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
             visible={newPostVisible}
             onClose={() => setNewPostVisible(false)}
             myUserId={myUserId}
-            onPosted={() => { setTab('feed'); loadFeed(); }}
+            onPosted={() => { setTab('feed'); loadFeed(true); }}
             navigation={navigation}
           />
           <CommentsModal
