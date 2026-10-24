@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
+import { usePastillesActives, setPastillesActives } from '../lib/pastilles';
 
 type NotifKey =
   | 'notif_follow' | 'notif_lieu_nearby' | 'notif_messages' | 'notif_suggestion_validee'
@@ -121,6 +122,7 @@ export default function SettingsScreen() {
     () => Object.fromEntries(ALL_NOTIF_KEYS.map(k => [k, true])) as Record<NotifKey, boolean>,
   );
   const [notifGroupOpen, setNotifGroupOpen] = useState<string | null>(null);
+  const pastilles = usePastillesActives();
   const [masquerDepartBalade, setMasquerDepartBalade] = useState(false);
   const [rayonKm, setRayonKm] = useState(20);
   const [notifPermission, setNotifPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
@@ -672,6 +674,14 @@ export default function SettingsScreen() {
             </Text>
           </TouchableOpacity>
         )}
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleInfo}>
+            <Text style={styles.toggleLabel}>Pastilles sur les onglets</Text>
+            <Text style={styles.toggleSub}>Points rouges quand il y a du nouveau</Text>
+          </View>
+          <Switch value={pastilles} onValueChange={setPastillesActives}
+            trackColor={{ false: colors.border, true: colors.terra }} thumbColor={colors.ivory} />
+        </View>
         {(() => {
           const toutes = ALL_NOTIF_KEYS.every(k => notifs[k]);
           return (

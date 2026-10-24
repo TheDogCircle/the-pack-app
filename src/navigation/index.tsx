@@ -9,6 +9,7 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { savePushToken, clearBadge } from '../lib/notifications';
+import { usePastillesActives } from '../lib/pastilles';
 import { mapNavigation } from '../lib/mapNavigation';
 import SplashLoader from '../components/SplashLoader';
 
@@ -94,6 +95,7 @@ function MainTabs() {
   const [eventsBadge, setEventsBadge] = useState(false);
   const [profilBadge, setProfilBadge] = useState(false);
   const [activityBadge, setActivityBadge] = useState(false);
+  const pastilles = usePastillesActives();
 
   useEffect(() => {
     if (!session) { setAvatarUrl(null); return; }
@@ -301,15 +303,15 @@ function MainTabs() {
     >
       <Tab.Screen
         name="Carte" component={CarteScreen}
-        options={{ title: 'Carte', tabBarBadge: carteBadge ? ' ' : undefined }}
+        options={{ title: 'Carte', tabBarBadge: pastilles && carteBadge ? ' ' : undefined }}
         listeners={{ focus: () => { setCarteBadge(false); marquerVu('Carte'); } }}
       />
       <Tab.Screen
         name="Meute"
         options={({ navigation }) => ({
           title: 'Meute',
-          tabBarBadge: meuteBadge ? ' ' : undefined,
-          headerRight: () => renderMeuteHeartButton(navigation, activityBadge, setActivityBadge),
+          tabBarBadge: pastilles && meuteBadge ? ' ' : undefined,
+          headerRight: () => renderMeuteHeartButton(navigation, pastilles && activityBadge, setActivityBadge),
         })}
         listeners={{ focus: () => { setMeuteBadge(false); marquerVu('Meute'); } }}
       >
@@ -321,23 +323,23 @@ function MainTabs() {
             // fois dans une conversation -- sans ca, elle n'a aucun moyen de restaurer
             // le coeur d'activite en revenant a la liste des conversations, et le
             // remplace silencieusement par rien (voir MessagerieScreen).
-            defaultHeaderRight={() => renderMeuteHeartButton(props.navigation, activityBadge, setActivityBadge)}
+            defaultHeaderRight={() => renderMeuteHeartButton(props.navigation, pastilles && activityBadge, setActivityBadge)}
           />
         )}
       </Tab.Screen>
       <Tab.Screen
         name="Events" component={EvenementsScreen}
-        options={{ title: 'Events', tabBarBadge: eventsBadge ? ' ' : undefined }}
+        options={{ title: 'Events', tabBarBadge: pastilles && eventsBadge ? ' ' : undefined }}
         listeners={{ focus: () => { setEventsBadge(false); marquerVu('Events'); } }}
       />
       <Tab.Screen
         name="Services" component={PartenairesScreen}
-        options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
+        options={{ title: 'Partenaires', tabBarBadge: pastilles && partBadge ? ' ' : undefined }}
         listeners={{ focus: () => { setPartBadge(false); marquerVu('Services'); } }}
       />
       <Tab.Screen
         name="Profil" component={ProfilScreen}
-        options={{ title: 'Mon profil', tabBarBadge: profilBadge ? ' ' : undefined }}
+        options={{ title: 'Mon profil', tabBarBadge: pastilles && profilBadge ? ' ' : undefined }}
         listeners={{ focus: () => setProfilBadge(false) }}
       />
     </Tab.Navigator>

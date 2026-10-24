@@ -161,6 +161,13 @@ export default function MessagerieScreen({
   const [loading, setLoading] = useState(true);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  // Cache memoire des messages par conversation (reouverture instantanee) et id de
+  // la conversation ouverte, lu par loadMessages apres l'appel reseau
+  const messagesCacheRef = useRef(new Map<string, Message[]>());
+  const selectedConvIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedConv && messages.length) messagesCacheRef.current.set(selectedConv.id, messages);
+  }, [messages]);
   const [msgLoading, setMsgLoading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -308,9 +315,14 @@ export default function MessagerieScreen({
       .from('conversation_members').select('conversation_id').eq('user_id', myUserId);
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }
     const convIds = memberRows.map((r: any) => r.conversation_id);
-    const [{ data: convData }, { data: allMembers }] = await Promise.all([
+    const [{ data: convData }, { data: allMembers }, { data: recentMsgs }] = await Promise.all([
       supabase.from('conversations').select('id,nom,created_by,type').in('id', convIds).eq('actif', true),
       supabase.from('conversation_members').select('conversation_id,user_id').in('conversation_id', convIds),
+      // Dernier message de chaque conversation, en parallele (cf. commentaire plus bas)
+      supabase.from('messages')
+        .select('conversation_id,contenu,image_url,created_at,user_id')
+        .in('conversation_id', convIds).eq('actif', true)
+        .order('created_at', { ascending: false }).limit(500),
     ]);
     if (!convData?.length) { setConversations([]); setLoading(false); return; }
     const allUserIds = [...new Set((allMembers || []).map((m: any) => m.user_id))];
@@ -330,10 +342,6 @@ export default function MessagerieScreen({
     // messages recents de toutes les conversations, groupee cote client, suffit tant que
     // chaque conversation a au moins un message parmi les 500 plus recents (largement
     // le cas en pratique).
-    const { data: recentMsgs } = await supabase.from('messages')
-      .select('conversation_id,contenu,image_url,created_at,user_id')
-      .in('conversation_id', convIds).eq('actif', true)
-      .order('created_at', { ascending: false }).limit(500);
     const lastMessages: Record<string, any> = {};
     (recentMsgs || []).forEach((m: any) => { if (!lastMessages[m.conversation_id]) lastMessages[m.conversation_id] = m; });
     const list: Conversation[] = (convData || []).map((c: any) => ({
@@ -351,8 +359,16 @@ export default function MessagerieScreen({
   }
 
   async function openConversation(conv: Conversation) {
+    selectedConvIdRef.current = conv.id;
     setSelectedConv(conv);
-    setMsgLoading(true);
+    // Reouverture : messages deja vus affiches tout de suite, rafraichis en arriere-plan
+    const enCache = messagesCacheRef.current.get(conv.id);
+    if (enCache?.length) setMessages(enCache);
+    else { setMessages([]); setMsgLoading(true); }
+    if (myUserId) {
+      supabase.from('conversation_members').select('muted').eq('conversation_id', conv.id).eq('user_id', myUserId).maybeSingle()
+        .then(({ data: memberRow }) => setMyMuted(memberRow?.muted ?? false));
+    }
     try {
       await loadMessages(conv.id);
     } catch (e: any) {
@@ -387,15 +403,12 @@ export default function MessagerieScreen({
             : m));
         })
       .subscribe();
-    if (myUserId) {
-      const { data: memberRow } = await supabase.from('conversation_members').select('muted').eq('conversation_id', conv.id).eq('user_id', myUserId).maybeSingle();
-      setMyMuted(memberRow?.muted ?? false);
-    }
   }
 
   function closeConversation() {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
+    selectedConvIdRef.current = null;
     setSelectedConv(null);
     setMessages([]);
     setInputText('');
@@ -404,10 +417,14 @@ export default function MessagerieScreen({
   }
 
   async function loadMessages(convId: string) {
-    const { data } = await supabase.from('messages')
+    // Les 100 plus RECENTS, remis dans l'ordre chronologique. Avant : tri croissant +
+    // limit 100 = les 100 plus anciens, donc au-dela de 100 messages les derniers
+    // n'apparaissaient pas.
+    const { data: recents } = await supabase.from('messages')
       .select('id,user_id,contenu,image_url,created_at').eq('conversation_id', convId).eq('actif', true)
-      .order('created_at', { ascending: true }).limit(100);
-    if (!data?.length) { setMessages([]); return; }
+      .order('created_at', { ascending: false }).limit(100);
+    const data = (recents || []).reverse();
+    if (!data.length) { setMessages([]); messagesCacheRef.current.set(convId, []); return; }
     const userIds = [...new Set(data.map((m: any) => m.user_id))];
     const messageIds = data.map((m: any) => m.id);
     const [{ data: profils }, { data: likes }] = await Promise.all([
@@ -422,13 +439,16 @@ export default function MessagerieScreen({
       likeCounts[l.message_id] = (likeCounts[l.message_id] || 0) + 1;
       if (l.user_id === myUserId) likedByMeSet.add(l.message_id);
     });
-    setMessages(data.map((m: any) => ({
+    const liste: Message[] = data.map((m: any) => ({
       ...m,
       prenom: pm[m.user_id]?.prenom || 'Membre',
       avatar_url: pm[m.user_id]?.avatar_url || null,
       likeCount: likeCounts[m.id] || 0,
       likedByMe: likedByMeSet.has(m.id),
-    })));
+    }));
+    messagesCacheRef.current.set(convId, liste);
+    // Ne pas ecraser une autre conversation ouverte entre-temps
+    if (selectedConvIdRef.current === convId) setMessages(liste);
   }
 
   async function toggleLike(message: Message) {
@@ -600,15 +620,19 @@ export default function MessagerieScreen({
   async function loadGroupes() {
     if (!myUserId) return;
     setGroupesLoading(true);
-    const { data: gData } = await supabase.from('groupes').select('*').eq('actif', true).order('created_at', { ascending: false });
-    const { data: memberRows } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', myUserId);
+    const [{ data: gData }, { data: memberRows }] = await Promise.all([
+      supabase.from('groupes').select('*').eq('actif', true).order('created_at', { ascending: false }),
+      supabase.from('conversation_members').select('conversation_id').eq('user_id', myUserId),
+    ]);
     setMyConvIds(new Set((memberRows || []).map((m: any) => m.conversation_id)));
 
     if (gData?.length) {
-      const counts = await Promise.all(gData.map((gr: any) =>
-        supabase.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', gr.conversation_id)
-      ));
-      setGroupes(gData.map((gr: any, i: number) => ({ ...gr, membre_count: counts[i].count ?? 0 })));
+      // Nombre de membres de tous les groupes en une requete (avant : une par groupe)
+      const { data: membresGroupes } = await supabase.from('conversation_members')
+        .select('conversation_id').in('conversation_id', gData.map((gr: any) => gr.conversation_id));
+      const compte: Record<string, number> = {};
+      (membresGroupes || []).forEach((m: any) => { compte[m.conversation_id] = (compte[m.conversation_id] || 0) + 1; });
+      setGroupes(gData.map((gr: any) => ({ ...gr, membre_count: compte[gr.conversation_id] ?? 0 })));
     } else { setGroupes([]); }
     setGroupesLoading(false);
   }

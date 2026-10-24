@@ -19,6 +19,7 @@ import { mapNavigation } from '../lib/mapNavigation';
 import { normalizePhone } from '../lib/phone';
 import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
 import { colors } from '../lib/theme';
+import { usePastillesActives } from '../lib/pastilles';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
@@ -1094,6 +1095,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   const [membres, setMembres] = useState<MembreItem[]>([]);
   const [membresLoading, setMembresLoading] = useState(false);
   const [messagesVu, setMessagesVu] = useState(false);
+  const pastilles = usePastillesActives();
   const [membresRefreshing, setMembresRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [regionFilter, setRegionFilter] = useState<string | null>(null);
@@ -1829,7 +1831,7 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
             style={[styles.tab, tab === t.key && styles.tabActive]}
             onPress={() => selectTab(t.key)}
           >
-            {t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
+            {pastilles && t.badge && tab !== t.key ? <View style={styles.tabDot} /> : null}
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
