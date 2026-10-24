@@ -3819,12 +3819,6 @@ export default function CarteScreen() {
               <Ionicons name="location-outline" size={18} color="#fff" />
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); onBaladesPress(); }}>
-            <Text style={styles.fabMenuLabel}>{showBalades ? 'Masquer les parcours' : 'Voir les parcours de la meute'}</Text>
-            <View style={[styles.fabMenuIcon, { backgroundColor: colors.sage }]}>
-              <Ionicons name="map-outline" size={18} color="#fff" />
-            </View>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => navigation.navigate('Classement')); }}>
             <Text style={styles.fabMenuLabel}>Mes balades & classement</Text>
             <View style={[styles.fabMenuIcon, { backgroundColor: '#BA7517' }]}>

@@ -86,8 +86,11 @@ export default function ClassementScreen() {
 
   function voirSurCarte(id: string) {
     setFicheId(null);
-    mapNavigation.setPendingBalade(id);
     navigation.navigate('Tabs', { screen: 'Carte' });
+    // Laisse la fiche se fermer et la carte s'afficher avant d'ouvrir la balade :
+    // iOS ignore l'ouverture d'une fenetre pendant qu'une autre se ferme, et la
+    // carte ne peut pas cadrer le trace tant qu'elle est cachee.
+    setTimeout(() => mapNavigation.setPendingBalade(id), 650);
   }
 
   function LigneBalade({ b, avecAuteur }: { b: BaladeLigne; avecAuteur?: boolean }) {

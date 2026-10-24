@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, Image } from 'react-native';
+import MapView, { Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -35,6 +36,24 @@ export function formatAllure(km: number, sec: number) {
 
 const km1 = (v: number) => v.toFixed(1).replace('.', ',');
 
+function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
+  const R = 6371, dLat = (b.latitude - a.latitude) * Math.PI / 180, dLng = (b.longitude - a.longitude) * Math.PI / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * Math.PI / 180) * Math.cos(b.latitude * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+// Comme Strava : on retire le debut et la fin du trace (200 m, ou 25 % sur une
+// petite balade) pour que la carte ne revele ni le depart ni l'arrivee.
+export function masquerExtremites<T extends { latitude: number; longitude: number }>(trace: T[]): T[] {
+  if (trace.length < 3) return trace;
+  const cumul = [0];
+  for (let i = 1; i < trace.length; i++) cumul.push(cumul[i - 1] + haversineKm(trace[i - 1], trace[i]));
+  const total = cumul[cumul.length - 1];
+  const coupe = Math.min(0.2, total * 0.25);
+  const garde = trace.filter((_, i) => cumul[i] >= coupe && cumul[i] <= total - coupe);
+  return garde.length >= 2 ? garde : trace.slice(Math.floor(trace.length / 3), Math.ceil((trace.length * 2) / 3) + 1);
+}
+
 export default function BaladeResume({
   balade, onClose, onVoirClassement, mode = 'fin', onVoirCarte,
 }: {
@@ -42,6 +61,9 @@ export default function BaladeResume({
   mode?: 'fin' | 'fiche'; onVoirCarte?: () => void;
 }) {
   const storyRef = useRef<View>(null);
+  const carteRef = useRef<View>(null);
+  const mapRef = useRef<MapView>(null);
+  const [storyCarteUri, setStoryCarteUri] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [moi, setMoi] = useState<{ prenom: string | null; nom_chien: string | null; code: string | null }>({ prenom: null, nom_chien: null, code: null });
   const [partage, setPartage] = useState(false);
@@ -66,6 +88,14 @@ export default function BaladeResume({
     setPartage(true);
     track('balade_partage', { km: Math.round(balade.distanceKm * 10) / 10 });
     try {
+      // 1. photo de la carte affichee (trace deja ampute du debut et de la fin),
+      // 2. placee en fond de la story, 3. capture de la story
+      if (carteRef.current) {
+        try {
+          setStoryCarteUri(await captureRef(carteRef, { format: 'png', quality: 0.95 }));
+          await new Promise(r => setTimeout(r, 350));
+        } catch {}
+      }
       const uri = await captureRef(storyRef, { format: 'png', quality: 1, width: 1080, height: 1920 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Partager ma balade' });
       else await Share.share({ url: uri });
@@ -74,6 +104,7 @@ export default function BaladeResume({
 
   if (!balade) return null;
   const chien = moi.nom_chien;
+  const traceCarte = masquerExtremites(balade.trace);
   const fiche = mode === 'fiche';
   const partageable = !fiche || !!balade.estAMoi;
   const dateLabel = balade.date
@@ -105,9 +136,26 @@ export default function BaladeResume({
           </>
         )}
 
-        <View style={styles.traceBox}>
-          <TraceDessin trace={balade.trace} width={300} height={170} color={colors.sage} />
-        </View>
+        {traceCarte.length >= 2 ? (
+          <View ref={carteRef} collapsable={false} style={styles.carteBox} pointerEvents="none">
+            <MapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFill}
+              liteMode
+              scrollEnabled={false} zoomEnabled={false} rotateEnabled={false} pitchEnabled={false}
+              toolbarEnabled={false} showsPointsOfInterest={false}
+              onMapReady={() => mapRef.current?.fitToCoordinates(traceCarte, {
+                edgePadding: { top: 30, right: 30, bottom: 30, left: 30 }, animated: false,
+              })}
+            >
+              <Polyline coordinates={traceCarte} strokeColor={colors.terra} strokeWidth={5} lineCap="round" lineJoin="round" />
+            </MapView>
+          </View>
+        ) : (
+          <View style={styles.traceBox}>
+            <TraceDessin trace={balade.trace} width={300} height={170} color={colors.sage} />
+          </View>
+        )}
 
         <View style={styles.statsRow}>
           <View style={styles.stat}><Text style={styles.statVal}>{km1(balade.distanceKm)}</Text><Text style={styles.statLbl}>km</Text></View>
@@ -145,7 +193,7 @@ export default function BaladeResume({
             <Text style={styles.secondaireText}>Voir sur la carte</Text>
           </TouchableOpacity>
         ) : null}
-        {partageable ? <Text style={styles.note}>Le tracé est partagé sans fond de carte : ton adresse reste privée.</Text> : null}
+        {partageable ? <Text style={styles.note}>Le début et la fin du tracé sont masqués : ton adresse reste privée.</Text> : null}
       </View>
 
       {/* Story 9:16 hors ecran */}
@@ -155,7 +203,9 @@ export default function BaladeResume({
         <Text style={styles.storyTitre}>{chien ? `Balade avec ${chien}` : 'Ma balade'}</Text>
         <Text style={styles.storyNom} numberOfLines={1}>{balade.nom}</Text>
         <View style={{ marginTop: 22 }}>
-          <TraceDessin trace={balade.trace} width={300} height={250} color={colors.terra} epaisseur={5} marge={16} />
+          {storyCarteUri
+            ? <Image source={{ uri: storyCarteUri }} style={styles.storyCarte} resizeMode="cover" />
+            : <TraceDessin trace={balade.trace} width={300} height={250} color={colors.terra} epaisseur={5} marge={16} />}
         </View>
         <View style={styles.storyStats}>
           <View style={styles.storyStat}><Text style={styles.storyVal}>{km1(balade.distanceKm)}</Text><Text style={styles.storyLbl}>km</Text></View>
@@ -186,6 +236,11 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginTop: 18, paddingVertical: 10, borderRadius: 18,
     backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
   },
+  carteBox: {
+    height: 210, marginTop: 18, borderRadius: 18, overflow: 'hidden',
+    backgroundColor: colors.ivoryLight, borderWidth: 1, borderColor: colors.border,
+  },
+  storyCarte: { width: 312, height: 250, borderRadius: 18 },
   statsRow: { flexDirection: 'row', marginTop: 18 },
   stat: { flex: 1, alignItems: 'center' },
   statVal: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 26, color: colors.bordeaux },
