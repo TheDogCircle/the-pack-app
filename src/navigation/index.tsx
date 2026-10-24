@@ -809,7 +809,7 @@ export default function Navigation() {
             headerShown: true, presentation: 'card',
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
-            headerTitle: 'Top de la semaine',
+            headerTitle: 'Balades',
             headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
             headerBackTitle: 'Retour',
           }}

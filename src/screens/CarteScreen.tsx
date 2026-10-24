@@ -25,7 +25,7 @@ import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
 import InviteSheet, { chargerInvitant, type Invitant } from '../components/InviteSheet';
-import BaladeResume, { type BaladeTerminee } from '../components/BaladeResume';
+import BaladeResume, { BaladeFiche, type BaladeTerminee } from '../components/BaladeResume';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
 import { startBaladeBackgroundTracking, pauseBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeElapsedSec, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
 
@@ -637,6 +637,7 @@ export default function CarteScreen() {
   const mapRef = useRef<MapView>(null);
   const [invitant, setInvitant] = useState<Invitant | null>(null);
   const [baladeTerminee, setBaladeTerminee] = useState<BaladeTerminee | null>(null);
+  const [ficheBaladeId, setFicheBaladeId] = useState<string | null>(null);
   const shareLieuCardRef = useRef<View>(null);
   const baladeMapCaptureRef = useRef<View>(null);
   const [lieux, setLieux] = useState<Lieu[]>([]);
@@ -3652,7 +3653,7 @@ export default function CarteScreen() {
               onPress={() => navigation.navigate('Classement')}
             >
               <Ionicons name="trophy-outline" size={13} color="#854F0B" />
-              <Text style={[styles.filterLabel, { color: '#854F0B' }]}>Top de la semaine</Text>
+              <Text style={[styles.filterLabel, { color: '#854F0B' }]}>Balades & classement</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
@@ -3825,7 +3826,7 @@ export default function CarteScreen() {
             </View>
           </TouchableOpacity>
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabOpen(false); requireAuth(() => navigation.navigate('Classement')); }}>
-            <Text style={styles.fabMenuLabel}>Top de la semaine</Text>
+            <Text style={styles.fabMenuLabel}>Mes balades & classement</Text>
             <View style={[styles.fabMenuIcon, { backgroundColor: '#BA7517' }]}>
               <Ionicons name="trophy-outline" size={18} color="#fff" />
             </View>
@@ -4596,29 +4597,25 @@ export default function CarteScreen() {
           ) : null}
 
           <View style={[styles.actions, { marginTop: 16 }]}>
-            {baladePost ? (
-              <TouchableOpacity
-                style={styles.actionPrimary}
-                onPress={() => {
-                  mapNavigation.setPendingPost(baladePost.id);
-                  setSelectedBalade(null);
-                  navigation.navigate('Tabs', { screen: 'Meute' });
-                }}
-              >
-                <Ionicons name="chatbubble-outline" size={16} color={colors.ivory} />
-                <Text style={styles.actionPrimaryText}>Voir dans le fil</Text>
-              </TouchableOpacity>
-            ) : null}
+            {/* Fiche complete (trace, stats, partage) -- avant : "Voir dans le fil", qui
+                n'ouvrait rien si le post n'etait pas dans les posts deja charges du fil */}
+            <TouchableOpacity
+              style={styles.actionPrimary}
+              onPress={() => { const id = selectedBalade.id; setSelectedBalade(null); setFicheBaladeId(id); }}
+            >
+              <Ionicons name="footsteps" size={16} color={colors.ivory} />
+              <Text style={styles.actionPrimaryText}>Voir la balade</Text>
+            </TouchableOpacity>
             {selectedBalade.depart_lat != null && selectedBalade.depart_lng != null ? (
               <TouchableOpacity
-                style={baladePost ? styles.actionSecondary : styles.actionPrimary}
+                style={styles.actionSecondary}
                 onPress={() => {
                   const url = `maps://?daddr=${selectedBalade.depart_lat},${selectedBalade.depart_lng}`;
                   Linking.openURL(url).catch(() => Linking.openURL(`https://maps.google.com/?q=${selectedBalade.depart_lat},${selectedBalade.depart_lng}`));
                 }}
               >
                 <Ionicons name="navigate" size={16} color={colors.ivory} />
-                <Text style={baladePost ? styles.actionSecondaryText : styles.actionPrimaryText}>Itinéraire</Text>
+                <Text style={styles.actionSecondaryText}>Itinéraire</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -4754,6 +4751,7 @@ export default function CarteScreen() {
       onClose={() => { setBaladeTerminee(null); proposerInvitationApresBalade(); }}
       onVoirClassement={() => { setBaladeTerminee(null); navigation.navigate('Classement'); }}
     />
+    <BaladeFiche baladeId={ficheBaladeId} onClose={() => setFicheBaladeId(null)} />
     </>
   );
 }

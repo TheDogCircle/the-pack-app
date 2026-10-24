@@ -13,6 +13,11 @@ export type BaladeTerminee = {
   distanceKm: number;
   dureeSec: number;
   trace: { latitude: number; longitude: number; b?: 1 }[];
+  // Mode "fiche" (consultation d'une balade existante)
+  id?: string;
+  auteur?: string | null;
+  date?: string;
+  estAMoi?: boolean;
 };
 
 type Stats = { semaine_km: number; semaine_nb: number; rang: number | null; serie_semaines: number };
@@ -31,9 +36,10 @@ export function formatAllure(km: number, sec: number) {
 const km1 = (v: number) => v.toFixed(1).replace('.', ',');
 
 export default function BaladeResume({
-  balade, onClose, onVoirClassement,
+  balade, onClose, onVoirClassement, mode = 'fin', onVoirCarte,
 }: {
-  balade: BaladeTerminee | null; onClose: () => void; onVoirClassement: () => void;
+  balade: BaladeTerminee | null; onClose: () => void; onVoirClassement?: () => void;
+  mode?: 'fin' | 'fiche'; onVoirCarte?: () => void;
 }) {
   const storyRef = useRef<View>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -68,6 +74,11 @@ export default function BaladeResume({
 
   if (!balade) return null;
   const chien = moi.nom_chien;
+  const fiche = mode === 'fiche';
+  const partageable = !fiche || !!balade.estAMoi;
+  const dateLabel = balade.date
+    ? new Date(balade.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+    : '';
   const allure = formatAllure(balade.distanceKm, balade.dureeSec);
 
   return (
@@ -80,8 +91,19 @@ export default function BaladeResume({
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.bravo}>{chien ? `Bravo ${chien} !` : 'Belle balade !'} 🐾</Text>
-        <Text style={styles.nom} numberOfLines={1}>{balade.nom}</Text>
+        {fiche ? (
+          <>
+            <Text style={styles.bravo} numberOfLines={2}>{balade.nom}</Text>
+            <Text style={styles.nom} numberOfLines={1}>
+              {balade.estAMoi ? 'Ta balade' : `Par ${balade.auteur || 'un membre'}`}{dateLabel ? ` · ${dateLabel}` : ''}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.bravo}>{chien ? `Bravo ${chien} !` : 'Belle balade !'} 🐾</Text>
+            <Text style={styles.nom} numberOfLines={1}>{balade.nom}</Text>
+          </>
+        )}
 
         <View style={styles.traceBox}>
           <TraceDessin trace={balade.trace} width={300} height={170} color={colors.sage} />
@@ -93,6 +115,7 @@ export default function BaladeResume({
           <View style={styles.stat}><Text style={styles.statVal}>{allure}</Text><Text style={styles.statLbl}>/ km</Text></View>
         </View>
 
+        {!fiche ? (
         <TouchableOpacity style={styles.rangBox} onPress={onVoirClassement} activeOpacity={0.8}>
           <Ionicons name="trophy-outline" size={16} color="#854F0B" />
           {stats ? (
@@ -104,7 +127,9 @@ export default function BaladeResume({
           ) : <ActivityIndicator size="small" color="#854F0B" />}
           <Ionicons name="chevron-forward" size={14} color="#854F0B" />
         </TouchableOpacity>
+        ) : null}
 
+        {partageable ? (
         <TouchableOpacity style={styles.cta} onPress={partager} disabled={partage}>
           {partage ? <ActivityIndicator color={colors.ivory} /> : (
             <>
@@ -113,7 +138,14 @@ export default function BaladeResume({
             </>
           )}
         </TouchableOpacity>
-        <Text style={styles.note}>Le tracé est partagé sans fond de carte : ton adresse reste privée.</Text>
+        ) : null}
+        {onVoirCarte ? (
+          <TouchableOpacity style={styles.secondaire} onPress={onVoirCarte}>
+            <Ionicons name="map-outline" size={16} color={colors.bordeaux} />
+            <Text style={styles.secondaireText}>Voir sur la carte</Text>
+          </TouchableOpacity>
+        ) : null}
+        {partageable ? <Text style={styles.note}>Le tracé est partagé sans fond de carte : ton adresse reste privée.</Text> : null}
       </View>
 
       {/* Story 9:16 hors ecran */}
@@ -168,6 +200,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.terra, borderRadius: 14, paddingVertical: 15,
   },
   ctaText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
+  secondaire: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12,
+    borderWidth: 1, borderColor: colors.bordeaux, borderRadius: 14, paddingVertical: 13,
+  },
+  secondaireText: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.bordeaux },
   note: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 10 },
 
   story: {
@@ -188,3 +225,37 @@ const styles = StyleSheet.create({
   storyCodeText: { fontFamily: 'DMSans_500Medium', fontSize: 20, color: '#F5EFE0', letterSpacing: 2 },
   storyUrl: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: 'rgba(196,105,58,0.9)', marginTop: 10 },
 });
+
+// Fiche d'une balade existante, chargee par id. balade_by_id applique la zone de
+// confidentialite des autres membres (debut/fin du trace masques si demande).
+export function BaladeFiche({
+  baladeId, onClose, onVoirCarte,
+}: {
+  baladeId: string | null; onClose: () => void; onVoirCarte?: (id: string) => void;
+}) {
+  const [balade, setBalade] = useState<BaladeTerminee | null>(null);
+  useEffect(() => {
+    setBalade(null);
+    if (!baladeId) return;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data } = await supabase.rpc('balade_by_id', { p_id: baladeId });
+      const b = Array.isArray(data) ? data[0] : null;
+      if (!b) return;
+      setBalade({
+        id: b.id, nom: b.nom, distanceKm: Number(b.distance_km) || 0, dureeSec: b.duree_secondes || 0,
+        trace: Array.isArray(b.trace) ? b.trace : [], auteur: b.prenom, date: b.created_at,
+        estAMoi: !!session && b.user_id === session.user.id,
+      });
+    })();
+  }, [baladeId]);
+  if (!baladeId || !balade) return null;
+  return (
+    <BaladeResume
+      balade={balade}
+      mode="fiche"
+      onClose={onClose}
+      onVoirCarte={onVoirCarte ? () => onVoirCarte(balade.id!) : undefined}
+    />
+  );
+}
