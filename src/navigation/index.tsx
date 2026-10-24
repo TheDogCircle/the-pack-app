@@ -80,12 +80,19 @@ function renderMeuteHeartButton(navigation: any, activityBadge: boolean, setActi
   );
 }
 
+function bottomTabSeenKey(tab: string, userId: string) {
+  return `thepack_bottomtab_seen_${tab}_${userId}`;
+}
+
 function MainTabs() {
   const { session } = useSession();
   const insets = useSafeAreaInsets();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [meuteBadge, setMeuteBadge] = useState(false);
   const [partBadge, setPartBadge] = useState(false);
+  const [carteBadge, setCarteBadge] = useState(false);
+  const [eventsBadge, setEventsBadge] = useState(false);
+  const [profilBadge, setProfilBadge] = useState(false);
   const [activityBadge, setActivityBadge] = useState(false);
 
   useEffect(() => {
@@ -93,34 +100,99 @@ function MainTabs() {
     supabase.from('profils').select('avatar_url').eq('id', session.user.id).single()
       .then(({ data }) => setAvatarUrl(data?.avatar_url ?? null));
     checkBadges(session.user.id);
+    // Recalcule aussi au retour au premier plan (avant : seulement au demarrage)
+    const sub = AppState.addEventListener('change', st => {
+      if (st === 'active') checkBadges(session.user.id);
+    });
+    return () => sub.remove();
   }, [session?.user.id]);
+
+  // Pastille d'onglet = du nouveau depuis la derniere visite de cet onglet
+  // (borne a 14 jours). Avant : fenetre fixe (48 h / 7 j), la pastille
+  // revenait a chaque ouverture meme deja vue.
+  function marquerVu(tab: string) {
+    if (session?.user.id) AsyncStorage.setItem(bottomTabSeenKey(tab, session.user.id), new Date().toISOString()).catch(() => {});
+  }
 
   async function checkBadges(userId: string) {
     const since48h = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
-    const since7d  = new Date(Date.now() -  7 * 86400 * 1000).toISOString();
+    const borne14j = Date.now() - 14 * 86400 * 1000;
+    const vuDepuis = async (tab: string, defaut: number) => {
+      const v = await AsyncStorage.getItem(bottomTabSeenKey(tab, userId)).catch(() => null);
+      const t = v ? new Date(v).getTime() : defaut;
+      return new Date(Math.max(t, borne14j)).toISOString();
+    };
+    const [carteDepuis, meuteDepuis, eventsDepuis, partDepuis] = await Promise.all([
+      vuDepuis('Carte', Date.now() - 7 * 86400 * 1000),
+      vuDepuis('Meute', Date.now() - 48 * 3600 * 1000),
+      vuDepuis('Events', Date.now() - 7 * 86400 * 1000),
+      vuDepuis('Services', Date.now() - 7 * 86400 * 1000),
+    ]);
 
-    // Partenaires : nouveaux posts dans les 7 derniers jours
-    const { count: partCount } = await supabase
-      .from('partenaire_posts').select('id', { count: 'exact', head: true })
-      .eq('actif', true).gte('created_at', since7d);
-    setPartBadge((partCount ?? 0) > 0);
-
-    // Meute : avis/photos des gens suivis dans les 48h + messages non lus
+    const { data: moi } = await supabase.from('profils').select('lat,lng').eq('id', userId).maybeSingle();
     const { data: follows } = await supabase
       .from('follows').select('following_id')
       .eq('follower_id', userId).eq('statut', 'accepte');
+    const suivis = (follows || []).map((f: any) => f.following_id);
+
+    // Carte : nouveaux lieux pres de chez moi (~50 km) ou nouvelles balades des gens
+    // que je suis -- de quoi donner envie d'aller se balader
+    {
+      let lq = supabase.from('lieux').select('id', { count: 'exact', head: true })
+        .eq('actif', true).gt('created_at', carteDepuis);
+      if (moi?.lat && moi?.lng) {
+        lq = lq.gte('lat', moi.lat - 0.45).lte('lat', moi.lat + 0.45).gte('lng', moi.lng - 0.65).lte('lng', moi.lng + 0.65);
+      }
+      const [{ count: nouveauxLieux }, baladesRes] = await Promise.all([
+        lq,
+        suivis.length
+          ? supabase.from('balades').select('id', { count: 'exact', head: true })
+            .in('user_id', suivis).neq('visibilite', 'prive').gt('created_at', carteDepuis)
+          : Promise.resolve({ count: 0 } as any),
+      ]);
+      setCarteBadge(((nouveauxLieux ?? 0) + ((baladesRes as any).count ?? 0)) > 0);
+    }
+
+    // Events : nouveaux events valides, ou un event du jour ou je suis inscrit
+    {
+      const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
+      const finJour = new Date(debutJour); finJour.setDate(finJour.getDate() + 1);
+      const [{ count: nouveaux }, { data: duJour }] = await Promise.all([
+        supabase.from('evenements').select('id', { count: 'exact', head: true })
+          .eq('valide', true).eq('actif', true).gt('created_at', eventsDepuis).gte('date_heure', new Date().toISOString()),
+        supabase.from('participations').select('event_id, evenements!inner(date_heure)')
+          .eq('user_id', userId)
+          .gte('evenements.date_heure', debutJour.toISOString()).lt('evenements.date_heure', finJour.toISOString())
+          .limit(1),
+      ]);
+      const vuAujourdhui = new Date(eventsDepuis) >= debutJour;
+      setEventsBadge((nouveaux ?? 0) > 0 || (!vuAujourdhui && (duJour?.length ?? 0) > 0));
+    }
+
+    // Partenaires : nouvelles actus / avantages depuis la derniere visite
+    const { count: partCount } = await supabase
+      .from('partenaire_posts').select('id', { count: 'exact', head: true })
+      .eq('actif', true).gt('created_at', partDepuis);
+    setPartBadge((partCount ?? 0) > 0);
+
+    // Profil : demandes d'abonnement en attente
+    const { count: demandes } = await supabase.from('follows').select('id', { count: 'exact', head: true })
+      .eq('following_id', userId).eq('statut', 'en_attente');
+    setProfilBadge((demandes ?? 0) > 0);
+
+    // Meute : avis/photos des gens suivis + messages recus, depuis la derniere visite
     let meuteHasActivity = false;
-    if (follows?.length) {
-      const ids = follows.map((f: any) => f.following_id);
+    if (suivis.length) {
+      const ids = suivis;
       const [{ count: a }, { count: p }] = await Promise.all([
-        supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', ids).gte('created_at', since48h),
-        supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', ids).eq('validee', true).gte('created_at', since48h),
+        supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', ids).gt('created_at', meuteDepuis),
+        supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', ids).eq('validee', true).gt('created_at', meuteDepuis),
       ]);
       meuteHasActivity = ((a ?? 0) + (p ?? 0)) > 0;
     }
 
-    // Messages non lus : messages des autres dans mes conversations dans les 24h
-    const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    // Messages des autres dans mes conversations depuis la derniere visite (24 h max)
+    const since24h = new Date(Math.max(new Date(meuteDepuis).getTime(), Date.now() - 24 * 3600 * 1000)).toISOString();
     const { data: myConvs } = await supabase
       .from('conversation_members').select('conversation_id').eq('user_id', userId);
     if (myConvs?.length) {
@@ -207,7 +279,7 @@ function MainTabs() {
         tabBarActiveTintColor: colors.terraPale,
         tabBarInactiveTintColor: 'rgba(245,239,224,0.45)',
         tabBarLabelStyle: { fontFamily: 'DMSans_500Medium', fontSize: 10, letterSpacing: 0.4 },
-        tabBarBadgeStyle: { minWidth: 8, height: 8, borderRadius: 4, padding: 0, top: 2, right: 2, backgroundColor: colors.terra },
+        tabBarBadgeStyle: { minWidth: 9, height: 9, borderRadius: 5, padding: 0, top: 2, right: 2, backgroundColor: '#E5484D' },
         tabBarIcon: ({ focused, color }) => {
           if (route.name === 'Profil' && avatarUrl) {
             return (
@@ -227,7 +299,11 @@ function MainTabs() {
         },
       })}
     >
-      <Tab.Screen name="Carte"      component={CarteScreen}      options={{ title: 'Carte' }} />
+      <Tab.Screen
+        name="Carte" component={CarteScreen}
+        options={{ title: 'Carte', tabBarBadge: carteBadge ? ' ' : undefined }}
+        listeners={{ focus: () => { setCarteBadge(false); marquerVu('Carte'); } }}
+      />
       <Tab.Screen
         name="Meute"
         options={({ navigation }) => ({
@@ -235,7 +311,7 @@ function MainTabs() {
           tabBarBadge: meuteBadge ? ' ' : undefined,
           headerRight: () => renderMeuteHeartButton(navigation, activityBadge, setActivityBadge),
         })}
-        listeners={{ focus: () => setMeuteBadge(false) }}
+        listeners={{ focus: () => { setMeuteBadge(false); marquerVu('Meute'); } }}
       >
         {(props) => (
           <FeedScreen
@@ -249,13 +325,21 @@ function MainTabs() {
           />
         )}
       </Tab.Screen>
-      <Tab.Screen name="Events" component={EvenementsScreen} options={{ title: 'Events' }} />
+      <Tab.Screen
+        name="Events" component={EvenementsScreen}
+        options={{ title: 'Events', tabBarBadge: eventsBadge ? ' ' : undefined }}
+        listeners={{ focus: () => { setEventsBadge(false); marquerVu('Events'); } }}
+      />
       <Tab.Screen
         name="Services" component={PartenairesScreen}
         options={{ title: 'Partenaires', tabBarBadge: partBadge ? ' ' : undefined }}
-        listeners={{ focus: () => setPartBadge(false) }}
+        listeners={{ focus: () => { setPartBadge(false); marquerVu('Services'); } }}
       />
-      <Tab.Screen name="Profil" component={ProfilScreen} options={{ title: 'Mon profil' }} />
+      <Tab.Screen
+        name="Profil" component={ProfilScreen}
+        options={{ title: 'Mon profil', tabBarBadge: profilBadge ? ' ' : undefined }}
+        listeners={{ focus: () => setProfilBadge(false) }}
+      />
     </Tab.Navigator>
   );
 }
