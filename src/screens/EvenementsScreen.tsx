@@ -235,8 +235,9 @@ export default function EvenementsScreen() {
       if (session?.user?.id) synchroniserRappelsUtilisateur(session.user.id);
       const endWeek = new Date(Date.now() + 7 * 86400000).toISOString();
 
+      // nb_participations : nombre d'inscrits en une seule requete (avant : une requete par event)
       let q = supabase.from('evenements')
-        .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url)')
+        .select('*, profils!evenements_organisateur_id_fkey(prenom, username, avatar_url), nb_participations:participations(count)')
         .eq('valide', true).eq('actif', true)
         .or(filtreEvenementsVisibles())
         .order('date_heure', { ascending: true });
@@ -244,23 +245,20 @@ export default function EvenementsScreen() {
       if (filter === 'semaine') q = q.lte('date_heure', endWeek);
 
       const { data } = await q;
-      const events = data || [];
+      const events = (data || []).map((e: any) => ({ ...e, nb_inscrits: e.nb_participations?.[0]?.count ?? 0 }));
 
       try {
         if (session?.user?.id && events.length > 0) {
           const ids = events.map((e: any) => e.id);
-          const [{ data: parts }, { data: favs }, ...counts] = await Promise.all([
+          const [{ data: parts }, { data: favs }] = await Promise.all([
             supabase.from('participations').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
             supabase.from('evenements_favoris').select('event_id').eq('user_id', session.user.id).in('event_id', ids),
-            ...ids.map((id: string) =>
-              supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
-            ),
           ]);
           const inscritIds = new Set((parts || []).map((p: any) => p.event_id));
           const favIds = new Set((favs || []).map((f: any) => f.event_id));
-          const mapped: Evenement[] = events.map((e: any, i: number) => ({
+          const mapped: Evenement[] = events.map((e: any) => ({
             ...e,
-            nb_inscrits: (counts[i] as any).count || 0,
+            nb_inscrits: e.nb_participations?.[0]?.count ?? 0,
             je_suis_inscrit: inscritIds.has(e.id),
             est_enregistre: favIds.has(e.id),
           }));

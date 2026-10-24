@@ -192,6 +192,8 @@ const FAV_FILTER_OPTS: { key: string; label: string; icon: IoniconsName; color: 
   { key: 'deja_teste', label: 'Déjà testé', icon: 'checkmark-circle', color: '#5A9E6F' },
 ];
 
+const LIEUX_CACHE_KEY = 'thepack_lieux_cache_v1';
+
 type Lieu = {
   id: string; nom: string; lat: number; lng: number; cat: string; ville: string; adresse: string;
   zone_rayon_km?: number | null;
@@ -636,6 +638,8 @@ export default function CarteScreen() {
   const shareLieuCardRef = useRef<View>(null);
   const baladeMapCaptureRef = useRef<View>(null);
   const [lieux, setLieux] = useState<Lieu[]>([]);
+  // Vrai des qu'un chargement reseau a abouti : le cache local ne doit alors plus ecraser la carte
+  const lieuxFraisRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [region, setRegion] = useState<Region>({ latitude: 46.8, longitude: 2.3, latitudeDelta: 8, longitudeDelta: 8 });
   const [activeCat, setActiveCat] = useState<string | null>(null);
@@ -974,6 +978,15 @@ export default function CarteScreen() {
     // Chargement initial sur la region par defaut, independant du GPS : on ne peut pas
     // compter sur onRegionChangeComplete pour declencher le tout premier fetch (son
     // declenchement automatique au montage n'est pas garanti selon les versions/plateformes).
+    // Affichage instantane : derniers lieux charges a l'ouverture precedente, puis
+    // rafraichissement reseau par-dessus (le fetch ci-dessous remplace la liste).
+    AsyncStorage.getItem(LIEUX_CACHE_KEY).then(raw => {
+      if (!raw || lieuxFraisRef.current) return;
+      try {
+        const cached = JSON.parse(raw) as Lieu[];
+        if (Array.isArray(cached) && cached.length) { setLieux(cached); setLoading(false); }
+      } catch {}
+    }).catch(() => {});
     fetchLieux(region, null, true);
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -1080,8 +1093,15 @@ export default function CarteScreen() {
         return;
       }
       const newPlaces = data || [];
+      lieuxFraisRef.current = true;
       if (reset) {
         setLieux(newPlaces);
+        // Cache pour la prochaine ouverture (zone courante, sans filtre de categorie)
+        // (borne a ~1,5 Mo : limite par entree d'AsyncStorage sur Android)
+        if (!cat) {
+          const json = JSON.stringify(newPlaces);
+          if (json.length < 1_500_000) AsyncStorage.setItem(LIEUX_CACHE_KEY, json).catch(() => {});
+        }
       } else {
         setLieux(prev => {
           const existing = new Set(prev.map(l => l.id));
@@ -2166,7 +2186,7 @@ export default function CarteScreen() {
   async function loadMapEvents() {
     const { data } = await supabase
       .from('evenements')
-      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils!evenements_organisateur_id_fkey(prenom,username)')
+      .select('id,titre,date_heure,adresse,ville,lat,lng,max_participants,payant,prix,site_web,code_promo,partenaires_mentions,profils!evenements_organisateur_id_fkey(prenom,username),nb_participations:participations(count)')
       .eq('valide', true).eq('actif', true)
       .or(filtreEvenementsVisibles())
       .not('lat', 'is', null)
@@ -2174,18 +2194,13 @@ export default function CarteScreen() {
     const list = (data || []) as any[];
     if (!list.length) { setMapEvents([]); return; }
     const ids = list.map((e: any) => e.id);
-    const [partsRes, ...counts] = await Promise.all([
-      userId
-        ? supabase.from('participations').select('event_id').eq('user_id', userId).in('event_id', ids)
-        : Promise.resolve({ data: null }),
-      ...ids.map((id: string) =>
-        supabase.from('participations').select('*', { count: 'exact', head: true }).eq('event_id', id)
-      ),
-    ]);
+    const partsRes = userId
+      ? await supabase.from('participations').select('event_id').eq('user_id', userId).in('event_id', ids)
+      : { data: null };
     const inscritIds = new Set(((partsRes as any).data || []).map((p: any) => p.event_id));
-    setMapEvents(list.map((e: any, i: number) => ({
+    setMapEvents(list.map((e: any) => ({
       ...e,
-      nb_inscrits: (counts[i] as any).count || 0,
+      nb_inscrits: e.nb_participations?.[0]?.count ?? 0,
       je_suis_inscrit: inscritIds.has(e.id),
     })));
   }
