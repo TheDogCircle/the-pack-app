@@ -47,6 +47,7 @@ type Suggestion = {
 };
 
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
+type CodeStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 
 export default function OnboardingScreen() {
   const navigation = useNavigation<any>();
@@ -74,6 +75,10 @@ export default function OnboardingScreen() {
   const [usernameError, setUsernameError] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
   const [dateNaissanceError, setDateNaissanceError] = useState(false);
+  const [codeParrainage, setCodeParrainage] = useState('');
+  const [codeStatus, setCodeStatus] = useState<CodeStatus>('idle');
+  const [codeParrain, setCodeParrain] = useState<{ prenom: string | null; nom_chien: string | null } | null>(null);
+  const [codeError, setCodeError] = useState(false);
 
   // Pays picker
   const [paysModal, setPaysModal] = useState(false);
@@ -145,6 +150,21 @@ export default function OnboardingScreen() {
     return () => clearTimeout(t);
   }, [username]);
 
+  // Code de parrainage : verification en direct (debounced 500ms)
+  useEffect(() => {
+    setCodeParrain(null);
+    if (!codeParrainage) { setCodeStatus('idle'); return; }
+    if (codeParrainage.replace('@', '').length < 3) { setCodeStatus('idle'); return; }
+    setCodeStatus('checking');
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('verifier_code_parrainage', { p_code: codeParrainage });
+      const row = Array.isArray(data) ? data[0] : null;
+      setCodeParrain(row || null);
+      setCodeStatus(row ? 'valid' : 'invalid');
+    }, 500);
+    return () => clearTimeout(t);
+  }, [codeParrainage]);
+
   async function pickAvatar() {
     if (!session) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -186,13 +206,15 @@ export default function OnboardingScreen() {
     const og = !ownerGenre;
     const humanBirth = dateMode === 'date' ? dateNaissance.trim() : ageVal.trim();
     const d = !humanBirth;
+    const c = !!codeParrainage && codeStatus !== 'valid';
     setPrenomError(p);
     setNomError(n);
     setEmailError(e);
     setUsernameError(u);
     setOwnerGenreError(og);
     setDateNaissanceError(d);
-    if (p || n || e || u || og || d) return;
+    setCodeError(c);
+    if (p || n || e || u || og || d || c) return;
     setStep(2);
   }
 
@@ -233,6 +255,12 @@ export default function OnboardingScreen() {
       date_naissance_chien: dogBirth,
     });
     if (upsertError) { setSaving(false); Alert.alert('Erreur', upsertError.message); return; }
+
+    // Parrainage : apres le profil, pour qu'il soit valide tout de suite (profil complet)
+    if (codeParrainage && codeStatus === 'valid') {
+      const { data: resultat } = await supabase.rpc('appliquer_code_parrainage', { p_code: codeParrainage });
+      track('parrainage_code_saisi', { source: 'onboarding', resultat: resultat || 'erreur' });
+    }
 
     // Insert first dog into chiens table
     await supabase.from('chiens').insert({
@@ -494,6 +522,37 @@ export default function OnboardingScreen() {
                 </View>
               )}
               {dateNaissanceError && <Text style={styles.errorText}>L'anniversaire est requis</Text>}
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Code ou pseudo de ton parrain</Text>
+              <TextInput
+                style={[styles.input, codeError && styles.inputError]}
+                placeholder="Ex : ALBUS-7K2 ou @marie_et_rex (optionnel)"
+                placeholderTextColor={colors.textMuted}
+                value={codeParrainage}
+                onChangeText={t => {
+                  setCodeParrainage(t.replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 21));
+                  setCodeError(false);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+              />
+              {codeStatus === 'checking' && (
+                <View style={styles.usernameHint}>
+                  <ActivityIndicator size="small" color={colors.textMuted} />
+                  <Text style={styles.usernameHintText}>Vérification…</Text>
+                </View>
+              )}
+              {codeStatus === 'valid' && (
+                <View style={styles.usernameHint}>
+                  <Ionicons name="checkmark-circle" size={14} color="#2E7D32" />
+                  <Text style={[styles.usernameHintText, { color: '#2E7D32' }]}>
+                    Tu rejoins la meute de {codeParrain?.prenom || 'ton parrain'}{codeParrain?.nom_chien ? ` et ${codeParrain.nom_chien}` : ''} !
+                  </Text>
+                </View>
+              )}
+              {codeStatus === 'invalid' && <Text style={styles.errorText}>Aucun membre avec ce code ou ce pseudo</Text>}
+              {codeError && codeStatus !== 'invalid' && <Text style={styles.errorText}>Vérifie le code ou laisse le champ vide</Text>}
             </View>
 
             <TouchableOpacity style={styles.btn} onPress={goStep2}>

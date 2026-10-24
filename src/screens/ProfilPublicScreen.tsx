@@ -10,7 +10,7 @@ import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
-import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
+import { AmbassadeurBadge, ParrainBadge } from '../components/AmbassadeurBadge';
 
 const SCREEN_W = Dimensions.get('window').width;
 const PHOTO_W = (SCREEN_W - 16 * 2 - 8) / 2;
@@ -65,6 +65,7 @@ export default function ProfilPublicScreen() {
   const [followList, setFollowList] = useState<{ id: string; prenom: string | null; username: string | null; avatar_url: string | null; ville: string | null }[]>([]);
   const [followListLoading, setFollowListLoading] = useState(false);
   const [avatarViewerVisible, setAvatarViewerVisible] = useState(false);
+  const [nbFilleuls, setNbFilleuls] = useState(0);
 
   useEffect(() => { if (userId) init(); }, [userId]);
 
@@ -84,6 +85,7 @@ export default function ProfilPublicScreen() {
     ]);
 
     setProfil(p);
+    supabase.rpc('nb_filleuls', { p_user: userId }).then(({ data: n }) => setNbFilleuls(typeof n === 'number' ? n : 0));
     setPhotos((photosRaw || []).map((ph: any) => ({ id: ph.id, url: ph.url, lieu_id: ph.lieu_id || null })));
 
     // Two-step: collect all lieu IDs then fetch info
@@ -235,6 +237,7 @@ export default function ProfilPublicScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={styles.nom}>{profil.prenom || 'Membre'}</Text>
               {profil.ambassadeur ? <AmbassadeurBadge /> : null}
+              <ParrainBadge nbFilleuls={nbFilleuls} />
             </View>
             {profil.username ? <Text style={styles.username}>@{profil.username}</Text> : null}
             {profil.ville ? (

@@ -23,6 +23,7 @@ import { mapNavigation } from '../lib/mapNavigation';
 import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
+import InviteSheet, { chargerInvitant, type Invitant } from '../components/InviteSheet';
 import { loadUserSignals, rankForYou, filterFriendPicks } from '../lib/recommendations';
 import { startBaladeBackgroundTracking, resumeBaladeBackgroundTracking, stopBaladeBackgroundTracking, getBaladeTrace, getBaladeStartMs, clearBaladeTrace, distanceKmOf } from '../lib/baladeTracking';
 
@@ -630,6 +631,7 @@ export default function CarteScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const mapRef = useRef<MapView>(null);
+  const [invitant, setInvitant] = useState<Invitant | null>(null);
   const shareLieuCardRef = useRef<View>(null);
   const baladeMapCaptureRef = useRef<View>(null);
   const [lieux, setLieux] = useState<Lieu[]>([]);
@@ -1461,6 +1463,33 @@ export default function CarteScreen() {
     discardBaladeTracking();
     triggerPointsAnim();
     setShowBalades(true);
+    proposerInvitationApresBalade();
+  }
+
+  // Une seule fois par appareil, apres une balade : c'est le moment ou l'on a
+  // envie de partager. Alerte native, rien d'ajoute a l'interface sinon.
+  async function proposerInvitationApresBalade() {
+    try {
+      if (await AsyncStorage.getItem('thepack_invite_apres_balade')) return;
+      await AsyncStorage.setItem('thepack_invite_apres_balade', '1');
+    } catch { return; }
+    setTimeout(() => {
+      Alert.alert(
+        'Belle balade ! 🐾',
+        'Tes amis promènent aussi leur chien ? Invite-les dans ta meute.',
+        [
+          { text: 'Plus tard', style: 'cancel', onPress: () => track('parrainage_prompt', { moment: 'balade', choix: 'plus_tard' }) },
+          {
+            text: 'Inviter',
+            onPress: async () => {
+              track('parrainage_prompt', { moment: 'balade', choix: 'inviter' });
+              const i = await chargerInvitant();
+              if (i) setInvitant(i);
+            },
+          },
+        ],
+      );
+    }, 1500);
   }
 
   function onCatPress(cat: string | null) {
@@ -4670,6 +4699,9 @@ export default function CarteScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+    )}
+    {invitant && (
+      <InviteSheet visible onClose={() => setInvitant(null)} invitant={invitant} />
     )}
     </>
   );

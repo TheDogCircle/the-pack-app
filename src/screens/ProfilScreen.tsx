@@ -17,6 +17,7 @@ import AuthGate from '../components/AuthGate';
 import { savePushToken, sendPushNotification } from '../lib/notifications';
 import { mapNavigation } from '../lib/mapNavigation';
 import { AmbassadeurBadge } from '../components/AmbassadeurBadge';
+import ParrainageCard from '../components/ParrainageCard';
 import { RACES } from '../constants/races';
 
 const NIVEAUX = [
@@ -512,6 +513,9 @@ export default function ProfilScreen() {
           <Text style={styles.shareBtnText}>Lien de profil</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Parrainage */}
+      <ParrainageCard />
 
       {/* Mes rendez-vous */}
       <TouchableOpacity style={styles.resaBannerRow} onPress={() => navigation.navigate('MesReservations' as any)} activeOpacity={0.85}>
