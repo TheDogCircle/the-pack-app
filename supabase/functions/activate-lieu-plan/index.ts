@@ -40,6 +40,11 @@ Deno.serve(async (req) => {
     const { lieu_id, plan } = await req.json()
     if (!lieu_id || !plan) throw new Error('lieu_id et plan requis')
     if (!['decouverte', 'essentiel', 'premium'].includes(plan)) throw new Error('plan invalide')
+    // Decision de Marine (2026-10-25) : fin de l'activation gratuite. Essentiel /
+    // Premium ne s'activent plus que par le paiement Stripe (lien d'abonnement,
+    // client_reference_id = lieu, puis stripe-webhook checkout.session.completed).
+    // Cette fonction ne sert plus qu'a revenir a la formule gratuite.
+    if (plan !== 'decouverte') throw new Error('Cette formule s\'active après paiement : utilisez le bouton « S\'abonner ».')
 
     const { data: lieu, error: lieuErr } = await supabaseAdmin
       .from('lieux').select('id, manager_user_id').eq('id', lieu_id).maybeSingle()
