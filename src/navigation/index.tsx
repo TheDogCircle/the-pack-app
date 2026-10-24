@@ -36,6 +36,7 @@ import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import NpsPromptModal, { NpsPending } from '../components/NpsPromptModal';
+import NouveautesModal from '../components/NouveautesModal';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -897,6 +898,12 @@ export default function Navigation() {
     )}
     {session && !needsOnboarding && !missingFields && npsPending && (
       <NpsPromptModal pending={npsPending} onDone={() => setNpsPending(null)} />
+    )}
+    {session && onboardingChecked && !needsOnboarding && !missingFields && !npsPending && (
+      <NouveautesModal
+        creeLe={session.user.created_at}
+        onBalade={() => { if (navigationRef.isReady()) navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any); }}
+      />
     )}
     {highlight && (
       <HighlightBanner highlight={highlight} topOffset={insets.top} onDismiss={() => setHighlight(null)} />
