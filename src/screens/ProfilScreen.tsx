@@ -11,6 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -262,8 +263,17 @@ export default function ProfilScreen() {
   useEffect(() => { load(); }, [session?.user.id]);
 
   async function load() {
-    setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
+    // Affichage immediat du profil tel qu'au dernier chargement
+    const cleCache = session ? `profil:${session.user.id}` : null;
+    const enCache = cleCache ? await lireCache<any>(cleCache) : null;
+    if (enCache?.profil) {
+      setProfil(enCache.profil); setChiens(enCache.chiens || []); setExplorateur(enCache.explorateur || null);
+      setFollowersCount(enCache.followers ?? 0); setFollowingCount(enCache.following ?? 0);
+      setFavoris(enCache.favoris || []); setAvis(enCache.avis || []); setMyPhotos(enCache.photos || []);
+      setMyLieux(enCache.lieux || []); setMyBalades(enCache.balades || []);
+      setLoading(false);
+    } else setLoading(true);
     if (!session) {
       setProfil(null); setFavoris([]); setAvis([]); setMyPhotos([]);
       setFollowersCount(0); setFollowingCount(0);
@@ -302,13 +312,20 @@ export default function ProfilScreen() {
       : { data: [] };
     const lieuxMap: Record<string, LieuMini> = Object.fromEntries((lieuxData || []).map((l: any) => [l.id, l]));
 
-    setFavoris((favsRaw || []).map((f: any) => ({
+    const favorisListe = (favsRaw || []).map((f: any) => ({
       id: f.id, lieu_id: f.lieu_id, liste: f.liste || 'favori', lieux: lieuxMap[f.lieu_id] || null,
-    })));
-    setAvis((avisRaw || []).map((a: any) => ({
+    }));
+    const avisListe = (avisRaw || []).map((a: any) => ({
       id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
       lieu_id: a.lieu_id, lieux: lieuxMap[a.lieu_id] || null,
-    })));
+    }));
+    setFavoris(favorisListe);
+    setAvis(avisListe);
+    if (cleCache && p) ecrireCache(cleCache, {
+      profil: p, chiens: mesChiens || [], explorateur: expData || null,
+      followers: followersRes.count ?? 0, following: followingRes.count ?? 0,
+      favoris: favorisListe, avis: avisListe, photos: photosList || [], lieux: mesLieux || [], balades: mesBalades || [],
+    });
     setMyPhotos(photosList || []);
     setMyLieux((mesLieux || []) as { id: string; nom: string; cat: string; ville: string; actif: boolean }[]);
     setMyBalades((mesBalades || []) as { id: string; nom: string; distance_km: number | null; duree_secondes: number | null; created_at: string }[]);

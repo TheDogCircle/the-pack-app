@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, trackEvent } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -912,18 +913,27 @@ export default function PartenairesScreen() {
   async function init() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setHasProfile(false); setLoading(false); return; }
-    const { data: profil } = await supabase.from('profils').select('prenom').eq('id', session.user.id).single();
-    if (!profil?.prenom) { setHasProfile(false); setLoading(false); return; }
+    // Profil complet deja verifie au demarrage (navigation) : on charge tout de
+    // suite et on verifie le profil en parallele au lieu de l'attendre.
+    const verif = supabase.from('profils').select('prenom').eq('id', session.user.id).single();
     setHasProfile(true);
-    await load();
+    load();
+    const { data: profil } = await verif;
+    if (!profil?.prenom) { setHasProfile(false); setLoading(false); return; }
   }
 
   async function load() {
-    setLoading(true);
-    const { data: parts } = await supabase.from('partenaires').select('*').eq('actif', true).order('created_at', { ascending: true });
+    // Affichage immediat de la derniere version connue, puis mise a jour
+    const enCache = await lireCache<{ parts: any[]; posts: any[] }>('partenaires');
+    if (enCache?.parts?.length) { setPartenaires(enCache.parts); setAllPosts(enCache.posts || []); setLoading(false); } else setLoading(true);
+    // Partenaires et offres en parallele (les offres de partenaires inactifs sont filtrees ensuite)
+    const [{ data: parts }, { data: postsTous }] = await Promise.all([
+      supabase.from('partenaires').select('*').eq('actif', true).order('created_at', { ascending: true }),
+      supabase.from('partenaire_posts').select('*').eq('actif', true).order('created_at', { ascending: false }),
+    ]);
     if (!parts?.length) { setPartenaires([]); setAllPosts([]); setLoading(false); return; }
-    const ids = parts.map((p: any) => p.id);
-    const { data: posts } = await supabase.from('partenaire_posts').select('*').in('partenaire_id', ids).eq('actif', true).order('created_at', { ascending: false });
+    const idsActifs = new Set(parts.map((p: any) => p.id));
+    const posts = (postsTous || []).filter((p: any) => idsActifs.has(p.partenaire_id));
     // Meme filtrage cote client que sur le web (partenaires.html) : date_debut/date_expiration
     // permettent de programmer une offre a une heure precise, pas seulement "actif=true".
     const now = new Date();
@@ -934,6 +944,7 @@ export default function PartenairesScreen() {
     });
     setPartenaires(parts);
     setAllPosts(visiblePosts);
+    ecrireCache('partenaires', { parts, posts: visiblePosts });
 
     // Prestataires (promeneurs/educateurs mobiles) : leur fiche lieux est actif:false
     // (jamais epinglee sur la carte), donc on va chercher leur ville separement plutot

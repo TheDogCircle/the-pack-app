@@ -12,6 +12,7 @@ import { savePushToken, clearBadge } from '../lib/notifications';
 import { track } from '../lib/tracking';
 import { usePastillesActives } from '../lib/pastilles';
 import { mapNavigation } from '../lib/mapNavigation';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import SplashLoader from '../components/SplashLoader';
 
 import { useSession } from '../hooks/useSession';
@@ -726,6 +727,10 @@ export default function Navigation() {
 
     setOnboardingChecked(false);
     const userId = session.user.id;
+    // Demarrage rapide : profil deja complet lors d'un lancement precedent ->
+    // on affiche l'app tout de suite, la verification ci-dessous tourne en
+    // arriere-plan (et repasse en onboarding si le profil a ete vide entre-temps).
+    lireCache<boolean>(`profil_complet:${userId}`).then(ok => { if (ok) setOnboardingChecked(true); });
     async function checkOnboarding(retriesLeft = 2) {
       const { data, error } = await supabase.from('profils')
         .select('prenom, nom, date_naissance_humain, nom_chien').eq('id', userId).maybeSingle();
@@ -742,6 +747,7 @@ export default function Navigation() {
         return;
       }
       setNeedsOnboarding(!data?.prenom);
+      ecrireCache(`profil_complet:${userId}`, !!data?.prenom);
       if (data?.prenom) {
         const missing = { nom: !data.nom, dateNaissance: !data.date_naissance_humain, nomChien: !data.nom_chien };
         setMissingFields((missing.nom || missing.dateNaissance || missing.nomChien) ? missing : null);

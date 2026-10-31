@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
 import { colors } from '../lib/theme';
 import { filtreEvenementsVisibles, estEvenementVisible } from '../utils/evenementsVisibles';
@@ -229,7 +230,11 @@ export default function EvenementsScreen() {
   }, []);
 
   async function load() {
-    setLoading(true);
+    // Affichage immediat de la derniere liste connue pour ce filtre
+    const cleCache = `events:${filter}:${session?.user?.id || 'anon'}`;
+    const enCache = await lireCache<Evenement[]>(cleCache);
+    if (enCache?.length) { setEvenements(enCache); setLoading(false); } else setLoading(true);
+    const setEvenementsEtCache = (liste: Evenement[]) => { setEvenements(liste); ecrireCache(cleCache, liste); };
     try {
       // Recale les rappels locaux des events enregistres (non bloquant)
       if (session?.user?.id) synchroniserRappelsUtilisateur(session.user.id);
@@ -263,14 +268,14 @@ export default function EvenementsScreen() {
             est_enregistre: favIds.has(e.id),
           }));
           if (filter === 'mesEvents') {
-            setEvenements(await buildMesEvents(mapped, session.user.id));
+            setEvenementsEtCache(await buildMesEvents(mapped, session.user.id));
           } else {
-            setEvenements(mapped);
+            setEvenementsEtCache(mapped);
           }
         } else if (filter === 'mesEvents' && session?.user?.id) {
-          setEvenements(await buildMesEvents([], session.user.id));
+          setEvenementsEtCache(await buildMesEvents([], session.user.id));
         } else {
-          setEvenements(filter === 'mesEvents' ? [] : events);
+          setEvenementsEtCache(filter === 'mesEvents' ? [] : events);
         }
       } catch {
         setEvenements(filter === 'mesEvents' ? [] : events);

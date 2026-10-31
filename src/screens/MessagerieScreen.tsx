@@ -12,6 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
 import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
@@ -533,7 +534,11 @@ export default function MessagerieScreen({
   // ── Conversations ──
   async function loadConversations(silencieux = false) {
     if (!myUserId) return;
-    if (!silencieux) setLoading(true);
+    if (!silencieux) {
+      // Affichage immediat des conversations connues, puis mise a jour
+      const enCache = await lireCache<Conversation[]>(`conversations:${myUserId}`);
+      if (enCache?.length) { setConversations(enCache); setLoading(false); } else setLoading(true);
+    }
     const { data: memberRows } = await supabase
       .from('conversation_members').select('conversation_id,last_read_at').eq('user_id', myUserId);
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }
@@ -595,6 +600,7 @@ export default function MessagerieScreen({
     });
     setConversations(list);
     setLoading(false);
+    ecrireCache(`conversations:${myUserId}`, list);
   }
 
   // ── Liste en direct ──

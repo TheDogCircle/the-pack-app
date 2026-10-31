@@ -13,6 +13,7 @@ import * as Contacts from 'expo-contacts';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, uploadToR2 } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -1342,9 +1343,14 @@ export default function FeedScreen() {
   // ── Feed ──
 
   async function loadFeed(silencieux = false) {
-    if (!silencieux) setFeedLoading(true);
-
     const myId = session?.user?.id || null;
+    const cleCache = `feed:${myId || 'anon'}`;
+    if (!silencieux) {
+      // Affichage immediat des derniers posts connus, puis mise a jour
+      const enCache = await lireCache<any[]>(cleCache);
+      if (enCache?.length) { setPosts(enCache); setFeedLoading(false); } else setFeedLoading(true);
+    }
+
     const COMMUNITY_POST_FIELDS = 'id, type, image_url, images, caption, lieu_id, auto_generated, created_at, user_id, visibilite, balade_id, balades (distance_km, duree_secondes), community_post_likes (user_id), community_post_comments (id)';
 
     const [communityPhotoRes, communityLieuRes, restrictedBaladeRes, followingRes, photosRes] = await Promise.all([
@@ -1481,6 +1487,7 @@ export default function FeedScreen() {
 
     setPosts(merged);
     setFeedLoading(false);
+    ecrireCache(cleCache, merged.slice(0, 40));
   }
 
   async function notifyPhotoLike(ownerId: string, postId: string) {
