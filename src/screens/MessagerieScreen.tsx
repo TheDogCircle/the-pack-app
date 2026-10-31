@@ -336,6 +336,9 @@ export default function MessagerieScreen({
   // avant la migration) : on masque alors la fonction au lieu de casser la messagerie
   const [replyDispo, setReplyDispo] = useState(true);
   const replyDispoRef = useRef(true);
+  // Notifications envoyees par le serveur (colonne messages.notif_serveur). Faux si la
+  // migration n'est pas encore en base : l'app envoie alors elle-meme, comme avant.
+  const notifServeurRef = useRef(true);
   const [citesExtra, setCitesExtra] = useState<Record<string, Citation>>({});
   const [surbrillanceId, setSurbrillanceId] = useState<string | null>(null);
 
@@ -724,6 +727,20 @@ export default function MessagerieScreen({
     }
   }
 
+  // Insere un message en demandant au serveur d'envoyer les notifications ; si la
+  // colonne n'existe pas encore (OTA publiee avant la migration), reessaie sans.
+  async function insererMessage(champs: Record<string, any>) {
+    const essai = (serveur: boolean) => supabase.from('messages')
+      .insert(serveur ? { ...champs, notif_serveur: true } : champs)
+      .select('id,created_at').single();
+    let res = await essai(notifServeurRef.current);
+    if (res.error && notifServeurRef.current && (res.error.code === 'PGRST204' || res.error.code === '42703' || /notif_serveur/.test(res.error.message || ''))) {
+      notifServeurRef.current = false;
+      res = await essai(false);
+    }
+    return { ...res, notifParServeur: notifServeurRef.current };
+  }
+
   async function pickAndSendPhoto() {
     if (!selectedConv || !myUserId || sendingPhoto) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -744,10 +761,10 @@ export default function MessagerieScreen({
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
       const reponseA = replyDispo ? replyTo : null;
-      const { data, error } = await supabase.from('messages').insert({
+      const { data, error, notifParServeur } = await insererMessage({
         conversation_id: selectedConv.id, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
         ...(reponseA ? { reply_to_id: reponseA.id } : {}),
-      }).select('id,created_at').single();
+      });
       if (error) throw error;
       if (reponseA) setReplyTo(null);
       const optimistic: Message = {
@@ -756,7 +773,7 @@ export default function MessagerieScreen({
         likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null,
       };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
-      notifyOtherMembers('📷 Photo', selectedConv);
+      if (!notifParServeur) notifyOtherMembers('📷 Photo', selectedConv);
     } catch (e: any) {
       Alert.alert('Erreur', e.message || "Impossible d'envoyer la photo.");
     } finally {
@@ -771,14 +788,14 @@ export default function MessagerieScreen({
     setInputText('');
     setReplyTo(null);
     setSending(true);
-    const { data, error } = await supabase.from('messages').insert({
+    const { data, error, notifParServeur } = await insererMessage({
       conversation_id: selectedConv.id, user_id: myUserId, contenu: text,
       ...(reponseA ? { reply_to_id: reponseA.id } : {}),
-    }).select('id,created_at').single();
+    });
     if (!error) {
       const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
-      notifyOtherMembers(text, selectedConv);
+      if (!notifParServeur) notifyOtherMembers(text, selectedConv);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
       setInputText(text);
@@ -816,6 +833,8 @@ export default function MessagerieScreen({
     Alert.alert(newMuted ? 'Sourdine activée' : 'Notifications réactivées', newMuted ? "Tu ne recevras plus de notification pour ce groupe." : "Tu seras de nouveau prévenu·e des nouveaux messages.");
   }
 
+  // Ancien circuit (envoi depuis le telephone), garde uniquement en secours tant que
+  // la migration des notifications serveur n'est pas en base.
   async function notifyOtherMembers(text: string, conv: Conversation) {
     const otherIds = conv.members.filter(m => m.user_id !== myUserId).map(m => m.user_id);
     if (!otherIds.length) return;
