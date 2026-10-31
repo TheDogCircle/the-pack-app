@@ -36,7 +36,8 @@ const NON_LU_MAX_AGE_MS = 14 * 86400000;
 type Message = {
   id: string; user_id: string; contenu: string; image_url: string | null; created_at: string;
   prenom: string; avatar_url: string | null;
-  likeCount: number; likedByMe: boolean;
+  // Reactions emoji : nombre par emoji, et la mienne (une par personne)
+  reactions: Record<string, number>; maReaction: string | null;
   // Message cite (reponse a un message precis)
   reply_to_id?: string | null;
 };
@@ -49,6 +50,8 @@ type Groupe = {
   image_url: string | null; created_by: string; conversation_id: string;
   type: GroupeType; membre_count?: number;
 };
+
+const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🐶'];
 
 const GROUPE_TYPE_LABELS: Record<GroupeType, string> = { balade: 'Balade', education: 'Éducation', rencontre: 'Rencontre' };
 const GROUPE_TYPES: GroupeType[] = ['balade', 'education', 'rencontre'];
@@ -342,6 +345,20 @@ export default function MessagerieScreen({
   const [citesExtra, setCitesExtra] = useState<Record<string, Citation>>({});
   const [surbrillanceId, setSurbrillanceId] = useState<string | null>(null);
 
+  // ── Reactions / vu / en train d'ecrire ──
+  const [menuMessage, setMenuMessage] = useState<Message | null>(null);
+  // Faux tant que la colonne message_likes.emoji n'existe pas (OTA avant migration) :
+  // seul le coeur est alors propose
+  const reactionsDispoRef = useRef(true);
+  const [reactionsDispo, setReactionsDispo] = useState(true);
+  // Derniere lecture des autres membres de la conversation ouverte
+  const [lectures, setLectures] = useState<Record<string, number>>({});
+  // Qui ecrit en ce moment (user_id -> fin d'affichage)
+  const [ecrivent, setEcrivent] = useState<Record<string, number>>({});
+  const dernierEcritEnvoyeRef = useRef(0);
+  // Conversation a laquelle le canal temps reel ouvert appartient
+  const canalConvIdRef = useRef<string | null>(null);
+
   // ── Groupes state ──
   const [groupes, setGroupes] = useState<Groupe[]>([]);
   const [myConvIds, setMyConvIds] = useState<Set<string>>(new Set());
@@ -465,6 +482,21 @@ export default function MessagerieScreen({
     };
   }, [selectedConv, myMuted, actif]);
 
+  // L'indicateur "en train d'ecrire" s'efface 4 s apres le dernier signal
+  useEffect(() => {
+    const ids = Object.keys(ecrivent);
+    if (!ids.length) return;
+    const t = setInterval(() => {
+      const now = Date.now();
+      setEcrivent(prev => {
+        const next: Record<string, number> = {};
+        Object.entries(prev).forEach(([k, v]) => { if (v > now) next[k] = v; });
+        return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [ecrivent]);
+
   // Retour sur l'onglet : rafraichissement discret (sans roue de chargement)
   const dejaActifRef = useRef(false);
   useEffect(() => {
@@ -587,12 +619,23 @@ export default function MessagerieScreen({
     supabase.from('conversation_members').update({ last_read_at: lu })
       .eq('conversation_id', convId).eq('user_id', myUserId)
       .then(() => {}, () => {});
+    // Previent les autres membres en direct (affichage "Vu")
+    if (selectedConvIdRef.current === convId) envoyerSignal('lu', { at: lu });
   }
 
   async function openConversation(conv: Conversation) {
     selectedConvIdRef.current = conv.id;
     setSelectedConv(conv);
     setReplyTo(null);
+    setLectures({});
+    setEcrivent({});
+    supabase.from('conversation_members').select('user_id,last_read_at').eq('conversation_id', conv.id)
+      .then(({ data }) => {
+        if (selectedConvIdRef.current !== conv.id) return;
+        const l: Record<string, number> = {};
+        (data || []).forEach((r: any) => { if (r.user_id !== myUserId && r.last_read_at) l[r.user_id] = Date.parse(r.last_read_at); });
+        setLectures(l);
+      }, () => {});
     markConversationRead(conv.id, conv.last_message?.created_at);
     // Reouverture : messages deja vus affiches tout de suite, rafraichis en arriere-plan
     const enCache = messagesCacheRef.current.get(conv.id);
@@ -613,36 +656,114 @@ export default function MessagerieScreen({
       setMsgLoading(false);
     }
     if (channelRef.current) channelRef.current.unsubscribe();
-    channelRef.current = supabase.channel(`conv:${conv.id}`)
+    canalConvIdRef.current = conv.id;
+    let premierAbonnement = true;
+    channelRef.current = supabase.channel(`conv:${conv.id}`, { config: { broadcast: { self: false } } })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
         async (payload) => {
           const m = payload.new as any;
           const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
-          const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null, likeCount: 0, likedByMe: false };
+          const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null, reactions: {}, maReaction: null };
           setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
+          // Son message est arrive : il n'ecrit plus
+          setEcrivent(prev => { if (!(m.user_id in prev)) return prev; const n = { ...prev }; delete n[m.user_id]; return n; });
           // Recu pendant que la conversation est ouverte : lu
           if (m.user_id !== myUserId && selectedConvIdRef.current === conv.id) markConversationRead(conv.id, m.created_at);
         })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_likes' },
+      // Reactions : on relit celles du message concerne (ou de tous les messages
+      // affiches pour une suppression, dont Realtime ne donne pas le message)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_likes' },
         (payload) => {
-          const l = payload.new as any;
-          setMessages(prev => prev.map(m => m.id === l.message_id
-            ? { ...m, likeCount: m.likeCount + (l.user_id === myUserId ? 0 : 1) }
-            : m));
+          const id = (payload.new as any)?.message_id;
+          rafraichirReactions(conv.id, id ? [id] : null);
         })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_likes' },
-        (payload) => {
-          const l = payload.old as any;
-          setMessages(prev => prev.map(m => m.id === l.message_id
-            ? { ...m, likeCount: Math.max(0, m.likeCount - (l.user_id === myUserId ? 0 : 1)) }
-            : m));
-        })
-      .subscribe();
+      .on('broadcast', { event: 'ecrit' }, ({ payload }) => {
+        const uid = payload?.user_id;
+        if (!uid || uid === myUserId) return;
+        setEcrivent(prev => ({ ...prev, [uid]: Date.now() + 4000 }));
+      })
+      .on('broadcast', { event: 'lu' }, ({ payload }) => {
+        const uid = payload?.user_id;
+        const at = payload?.at ? Date.parse(payload.at) : NaN;
+        if (!uid || uid === myUserId || !Number.isFinite(at)) return;
+        setLectures(prev => (prev[uid] && prev[uid] >= at ? prev : { ...prev, [uid]: at }));
+      })
+      .subscribe((status) => {
+        // A l'ouverture : je signale ma lecture une fois le canal pret
+        if (status === 'SUBSCRIBED' && premierAbonnement) {
+          premierAbonnement = false;
+          envoyerSignal('lu', { at: new Date().toISOString() });
+        }
+      });
+  }
+
+  function envoyerSignal(event: 'ecrit' | 'lu', payload: Record<string, any> = {}) {
+    if (!myUserId || !channelRef.current || canalConvIdRef.current !== selectedConvIdRef.current) return;
+    channelRef.current.send({ type: 'broadcast', event, payload: { ...payload, user_id: myUserId } }).catch?.(() => {});
+  }
+
+  function onSaisie(texte: string) {
+    setInputText(texte);
+    // Signal "en train d'ecrire", au plus toutes les 2,5 s
+    const now = Date.now();
+    if (texte.trim() && now - dernierEcritEnvoyeRef.current > 2500) {
+      dernierEcritEnvoyeRef.current = now;
+      envoyerSignal('ecrit');
+    }
+  }
+
+  // Relit les reactions (petit delai pour regrouper les evenements rapproches)
+  const reactionsTimerRef = useRef<any>(null);
+  const reactionsIdsRef = useRef<Set<string> | null>(new Set());
+  function rafraichirReactions(convId: string, ids: string[] | null) {
+    if (ids === null) reactionsIdsRef.current = null;
+    else if (reactionsIdsRef.current) ids.forEach(i => reactionsIdsRef.current!.add(i));
+    clearTimeout(reactionsTimerRef.current);
+    reactionsTimerRef.current = setTimeout(async () => {
+      const cibles = reactionsIdsRef.current;
+      reactionsIdsRef.current = new Set();
+      if (selectedConvIdRef.current !== convId) return;
+      const affiches = (messagesCacheRef.current.get(convId) || []).map(m => m.id).filter(id => !id.startsWith('tmp-'));
+      const liste = cibles ? [...cibles].filter(id => affiches.includes(id)) : affiches;
+      if (!liste.length) return;
+      const { data } = await chargerReactions(liste);
+      if (!data || selectedConvIdRef.current !== convId) return;
+      const parMessage = regrouperReactions(data);
+      setMessages(prev => prev.map(m => liste.includes(m.id)
+        ? { ...m, reactions: parMessage.compte[m.id] || {}, maReaction: parMessage.mienne[m.id] || null }
+        : m));
+    }, 400);
+  }
+
+  async function chargerReactions(messageIds: string[]) {
+    let res: any = await supabase.from('message_likes')
+      .select(reactionsDispoRef.current ? 'message_id,user_id,emoji' : 'message_id,user_id').in('message_id', messageIds);
+    if (res.error && reactionsDispoRef.current && (res.error.code === '42703' || /emoji/.test(res.error.message || ''))) {
+      reactionsDispoRef.current = false;
+      setReactionsDispo(false);
+      res = await supabase.from('message_likes').select('message_id,user_id').in('message_id', messageIds);
+    }
+    return res as { data: any[] | null };
+  }
+
+  function regrouperReactions(rows: any[]) {
+    const compte: Record<string, Record<string, number>> = {};
+    const mienne: Record<string, string> = {};
+    rows.forEach((l: any) => {
+      const e = l.emoji || '❤️';
+      compte[l.message_id] = compte[l.message_id] || {};
+      compte[l.message_id][e] = (compte[l.message_id][e] || 0) + 1;
+      if (l.user_id === myUserId) mienne[l.message_id] = e;
+    });
+    return { compte, mienne };
   }
 
   function closeConversation() {
     channelRef.current?.unsubscribe();
     channelRef.current = null;
+    canalConvIdRef.current = null;
+    setMenuMessage(null);
+    setEcrivent({});
     selectedConvIdRef.current = null;
     setSelectedConv(null);
     setMessages([]);
@@ -679,22 +800,17 @@ export default function MessagerieScreen({
     const messageIds = data.map((m: any) => m.id);
     const [{ data: profils }, { data: likes }] = await Promise.all([
       supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds),
-      supabase.from('message_likes').select('message_id,user_id').in('message_id', messageIds),
+      chargerReactions(messageIds),
     ]);
     const pm: Record<string, any> = {};
     (profils || []).forEach((p: any) => { pm[p.id] = p; });
-    const likeCounts: Record<string, number> = {};
-    const likedByMeSet = new Set<string>();
-    (likes || []).forEach((l: any) => {
-      likeCounts[l.message_id] = (likeCounts[l.message_id] || 0) + 1;
-      if (l.user_id === myUserId) likedByMeSet.add(l.message_id);
-    });
+    const { compte, mienne } = regrouperReactions(likes || []);
     const liste: Message[] = data.map((m: any) => ({
       ...m,
       prenom: pm[m.user_id]?.prenom || 'Membre',
       avatar_url: pm[m.user_id]?.avatar_url || null,
-      likeCount: likeCounts[m.id] || 0,
-      likedByMe: likedByMeSet.has(m.id),
+      reactions: compte[m.id] || {},
+      maReaction: mienne[m.id] || null,
     }));
     if (citesRows?.length) {
       setCitesExtra(prev => {
@@ -710,21 +826,33 @@ export default function MessagerieScreen({
     if (selectedConvIdRef.current === convId) setMessages(liste);
   }
 
-  async function toggleLike(message: Message) {
-    if (!myUserId) return;
-    const wasLiked = message.likedByMe;
-    setMessages(prev => prev.map(m => m.id === message.id
-      ? { ...m, likedByMe: !wasLiked, likeCount: m.likeCount + (wasLiked ? -1 : 1) }
-      : m));
-    if (wasLiked) {
-      await supabase.from('message_likes').delete().eq('message_id', message.id).eq('user_id', myUserId);
+  // Reagir a un message : meme emoji = retirer, autre emoji = changer
+  async function reagir(message: Message, emoji: string) {
+    if (!myUserId || message.id.startsWith('tmp-')) return;
+    const avant = message.maReaction;
+    const apres = avant === emoji ? null : emoji;
+    const appliquer = (m: Message, de: string | null, vers: string | null): Message => {
+      const r = { ...m.reactions };
+      if (de) { r[de] = (r[de] || 1) - 1; if (r[de] <= 0) delete r[de]; }
+      if (vers) r[vers] = (r[vers] || 0) + 1;
+      return { ...m, reactions: r, maReaction: vers };
+    };
+    setMessages(prev => prev.map(m => (m.id === message.id ? appliquer(m, avant, apres) : m)));
+    let error: any = null;
+    if (!apres) {
+      ({ error } = await supabase.from('message_likes').delete().eq('message_id', message.id).eq('user_id', myUserId));
+    } else if (avant) {
+      ({ error } = await supabase.from('message_likes').update({ emoji: apres }).eq('message_id', message.id).eq('user_id', myUserId));
     } else {
-      const { error } = await supabase.from('message_likes').insert({ message_id: message.id, user_id: myUserId });
-      // Contrainte unique : si deja like (course entre deux taps rapides), on ignore l'erreur.
-      if (error && error.code !== '23505') {
-        setMessages(prev => prev.map(m => m.id === message.id ? { ...m, likedByMe: false, likeCount: Math.max(0, m.likeCount - 1) } : m));
-      }
+      ({ error } = await supabase.from('message_likes').insert(
+        reactionsDispoRef.current ? { message_id: message.id, user_id: myUserId, emoji: apres } : { message_id: message.id, user_id: myUserId }));
+      // Contrainte unique : deja une reaction (double tap rapide) -> on relit l'etat reel
+      if (error?.code === '23505') error = null;
     }
+    if (error) {
+      setMessages(prev => prev.map(m => (m.id === message.id ? appliquer(m, apres, avant) : m)));
+    }
+    if (selectedConvIdRef.current) rafraichirReactions(selectedConvIdRef.current, [message.id]);
   }
 
   // Insere un message en demandant au serveur d'envoyer les notifications ; si la
@@ -770,7 +898,7 @@ export default function MessagerieScreen({
       const optimistic: Message = {
         id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
         created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null,
-        likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null,
+        reactions: {}, maReaction: null, reply_to_id: reponseA?.id ?? null,
       };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       if (!notifParServeur) notifyOtherMembers('📷 Photo', selectedConv);
@@ -793,7 +921,7 @@ export default function MessagerieScreen({
       ...(reponseA ? { reply_to_id: reponseA.id } : {}),
     });
     if (!error) {
-      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null };
+      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, reactions: {}, maReaction: null, reply_to_id: reponseA?.id ?? null };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       if (!notifParServeur) notifyOtherMembers(text, selectedConv);
     } else {
@@ -1152,6 +1280,31 @@ export default function MessagerieScreen({
     setTimeout(() => setSurbrillanceId(cur => (cur === id ? null : cur)), 1600);
   }
 
+  // "Vu" sous mon dernier message (s'il est le plus recent de la conversation)
+  function renderVu(m: Message) {
+    if (!selectedConv || m.id.startsWith('tmp-')) return null;
+    const envoyeA = Date.parse(m.created_at);
+    const autres = selectedConv.members.filter(x => x.user_id !== myUserId);
+    const ontVu = autres.filter(x => (lectures[x.user_id] || 0) >= envoyeA);
+    let texte: string;
+    if (estMessageDirect(selectedConv)) texte = ontVu.length ? 'Vu' : 'Envoyé';
+    else if (!ontVu.length) return null;
+    else if (ontVu.length === autres.length && autres.length > 1) texte = 'Vu par tout le monde';
+    else texte = ontVu.length === 1 ? `Vu par ${ontVu[0].prenom}` : `Vu par ${ontVu.length}`;
+    return <Text style={s.vuText}>{texte}</Text>;
+  }
+
+  function renderEcrivent() {
+    if (!selectedConv) return null;
+    const ids = Object.keys(ecrivent);
+    if (!ids.length) return null;
+    const noms = ids.map(id => selectedConv.members.find(x => x.user_id === id)?.prenom || 'Quelqu’un');
+    const texte = noms.length === 1 ? `${noms[0]} est en train d’écrire…`
+      : noms.length === 2 ? `${noms[0]} et ${noms[1]} écrivent…`
+      : 'Plusieurs personnes écrivent…';
+    return <Text style={s.ecritText} numberOfLines={1}>{texte}</Text>;
+  }
+
   function renderCitation(m: Message, isMe: boolean) {
     if (!m.reply_to_id) return null;
     const charge = messagesParId.get(m.reply_to_id);
@@ -1320,7 +1473,7 @@ export default function MessagerieScreen({
                   <View style={[s.msgBubbleWrap, isMe && s.msgBubbleWrapMe]}>
                     {showSender && <Text style={s.msgSender}>{m.prenom}</Text>}
                     {renderCitation(m, isMe)}
-                    <TouchableOpacity activeOpacity={0.85} onLongPress={() => toggleLike(m)}>
+                    <TouchableOpacity activeOpacity={0.85} delayLongPress={300} onLongPress={() => { if (!m.id.startsWith('tmp-')) { Keyboard.dismiss(); setMenuMessage(m); } }}>
                       {m.image_url ? (
                         <Image source={{ uri: m.image_url }} style={s.msgImage} resizeMode="cover" />
                       ) : (
@@ -1331,11 +1484,20 @@ export default function MessagerieScreen({
                     </TouchableOpacity>
                     <View style={[s.msgFooterRow, isMe && s.msgFooterRowMe]}>
                       {showTime && <Text style={[s.msgTime, isMe && s.msgTimeMe]}>{fmtTime(m.created_at)}</Text>}
-                      <TouchableOpacity style={s.likeBtn} onPress={() => toggleLike(m)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                        <Ionicons name={m.likedByMe ? 'heart' : 'heart-outline'} size={14} color={m.likedByMe ? colors.terra : colors.textMuted} />
-                        {m.likeCount > 0 && <Text style={s.likeCount}>{m.likeCount}</Text>}
-                      </TouchableOpacity>
+                      {Object.keys(m.reactions).length ? (
+                        (Object.entries(m.reactions) as [string, number][]).sort((x, y) => y[1] - x[1]).map(([emoji, n]) => (
+                          <TouchableOpacity key={emoji} style={[s.reactionChip, m.maReaction === emoji && s.reactionChipMine]} onPress={() => reagir(m, emoji)} hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}>
+                            <Text style={s.reactionEmoji}>{emoji}</Text>
+                            {n > 1 ? <Text style={s.likeCount}>{n}</Text> : null}
+                          </TouchableOpacity>
+                        ))
+                      ) : (
+                        <TouchableOpacity style={s.likeBtn} onPress={() => reagir(m, '❤️')} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }} accessibilityLabel="Aimer">
+                          <Ionicons name="heart-outline" size={14} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      )}
                     </View>
+                    {index === 0 && isMe ? renderVu(m) : null}
                   </View>
                 </View>
                 </SwipeRepondre>
@@ -1343,6 +1505,7 @@ export default function MessagerieScreen({
             }}
           />
         )}
+        {renderEcrivent()}
         {replyTo ? (
           <View style={s.replyBar}>
             <View style={s.replyBarAccent} />
@@ -1359,7 +1522,7 @@ export default function MessagerieScreen({
           <TouchableOpacity style={s.photoBtn} onPress={pickAndSendPhoto} disabled={sendingPhoto}>
             {sendingPhoto ? <ActivityIndicator size="small" color={colors.terra} /> : <Ionicons name="image-outline" size={22} color={colors.terra} />}
           </TouchableOpacity>
-          <TextInput ref={inputRef} style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
+          <TextInput ref={inputRef} style={s.input} value={inputText} onChangeText={onSaisie} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
           <TouchableOpacity style={[s.sendBtn, (!inputText.trim() || sending) && s.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim() || sending}>
             {sending ? <ActivityIndicator size="small" color={colors.ivory} /> : <Ionicons name="send" size={18} color={colors.ivory} />}
           </TouchableOpacity>
@@ -1457,6 +1620,30 @@ export default function MessagerieScreen({
           </View>
         </Modal>
         {renderModalMembres()}
+
+        {/* Appui long sur un message : reactions + repondre */}
+        <Modal visible={!!menuMessage} animationType="fade" transparent onRequestClose={() => setMenuMessage(null)}>
+          <TouchableOpacity style={s.reactOverlay} activeOpacity={1} onPress={() => setMenuMessage(null)}>
+            {menuMessage ? (
+              <View style={s.reactSheet}>
+                <Text style={s.reactApercu} numberOfLines={3}>{menuMessage.image_url ? '📷 Photo' : menuMessage.contenu}</Text>
+                <View style={s.reactBar}>
+                  {(reactionsDispo ? REACTIONS : ['❤️']).map(e => (
+                    <TouchableOpacity key={e} style={[s.reactBtn, menuMessage.maReaction === e && s.reactBtnMine]} onPress={() => { const m = menuMessage; setMenuMessage(null); reagir(m, e); }}>
+                      <Text style={s.reactBtnEmoji}>{e}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {replyDispo ? (
+                  <TouchableOpacity style={s.reactAction} onPress={() => { const m = menuMessage; setMenuMessage(null); repondreA(m); }}>
+                    <Ionicons name="arrow-undo-outline" size={18} color={colors.bordeaux} />
+                    <Text style={s.reactActionText}>Répondre</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        </Modal>
       </View>
       </View>
       </ErrorBoundary>
@@ -1749,6 +1936,20 @@ const s = StyleSheet.create({
   msgFooterRowMe: { flexDirection: 'row-reverse' },
   likeBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 2 },
   likeCount: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
+  reactionChip: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+  reactionChipMine: { borderColor: colors.terra, backgroundColor: colors.ivoryPale },
+  reactionEmoji: { fontSize: 12 },
+  vuText: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, alignSelf: 'flex-end', marginTop: 1 },
+  ecritText: { fontFamily: 'DMSans_400Regular', fontStyle: 'italic', fontSize: 12, color: colors.textMuted, paddingHorizontal: 16, paddingVertical: 4 },
+  reactOverlay: { flex: 1, backgroundColor: 'rgba(30,10,10,0.35)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  reactSheet: { width: '100%', maxWidth: 360, backgroundColor: colors.white, borderRadius: 20, padding: 14, gap: 12 },
+  reactApercu: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, paddingHorizontal: 4 },
+  reactBar: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: colors.ivoryPale, borderRadius: 24, paddingHorizontal: 8, paddingVertical: 6 },
+  reactBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  reactBtnMine: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.terra },
+  reactBtnEmoji: { fontSize: 24 },
+  reactAction: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 4 },
+  reactActionText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
   photoBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   input: { flex: 1, minHeight: 40, maxHeight: 110, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.bordeaux, backgroundColor: colors.ivoryPale },
