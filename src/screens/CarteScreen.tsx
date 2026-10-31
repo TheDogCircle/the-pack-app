@@ -217,7 +217,7 @@ type LieuFull = Lieu & {
   // Phase Pro 3 : profil pro / badge verifie
   facebook_url: string | null; certifications: string[] | null;
   zone_rayon_km: number | null; zone_polygon: { type: string; coordinates: number[][][] } | null;
-  photo_profil_url: string | null; certifie_at: string | null;
+  photo_profil_url: string | null; certifie_at: string | null; ddpp_verifie_at?: string | null;
 };
 // react-native-maps prend un instantane statique du contenu des marqueurs
 // personnalises (tracksViewChanges) plutot que de les re-rendre en continu, pour la
@@ -2862,6 +2862,12 @@ export default function CarteScreen() {
                 <View style={[styles.certInlineBadge, { backgroundColor: 'rgba(196,160,82,0.14)' }]}>
                   <Ionicons name="shield-checkmark" size={11} color="#c4a052" />
                   <Text style={[styles.certInlineText, { color: '#8a6a28' }]}>Vérifié par The Pack</Text>
+                </View>
+              )}
+              {(selectedLieu as any).ddpp_verifie_at && (
+                <View style={[styles.certInlineBadge, { backgroundColor: 'rgba(43,92,160,0.10)' }]}>
+                  <Ionicons name="ribbon" size={11} color="#2b5ca0" />
+                  <Text style={[styles.certInlineText, { color: '#24497d' }]}>Déclaré DDPP</Text>
                 </View>
               )}
             </View>
