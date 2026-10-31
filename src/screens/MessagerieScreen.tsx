@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard,
-  Modal, Image, Alert, Share, Linking, LayoutAnimation,
+  Modal, Image, Alert, Share, Linking, LayoutAnimation, Animated,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,7 +37,11 @@ type Message = {
   id: string; user_id: string; contenu: string; image_url: string | null; created_at: string;
   prenom: string; avatar_url: string | null;
   likeCount: number; likedByMe: boolean;
+  // Message cite (reponse a un message precis)
+  reply_to_id?: string | null;
 };
+// Message cite introuvable dans les messages charges (plus ancien, ou supprime)
+type Citation = { id: string; user_id: string; contenu: string; image_url: string | null; prenom: string; supprime: boolean };
 type Contact = { id: string; prenom: string; avatar_url: string | null; ville: string | null };
 type GroupeType = 'balade' | 'education' | 'rencontre';
 type Groupe = {
@@ -54,6 +59,86 @@ function fmtTime(dateStr: string) {
   if (diff < 86400000) return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   if (diff < 604800000) return d.toLocaleDateString('fr-FR', { weekday: 'short' });
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+// ── Liens cliquables ─────────────────────────────────────────────────────────
+
+// Domaines "nus" (exemple.fr) reconnus uniquement avec ces extensions, pour ne pas
+// transformer en lien un "ok.merci" tape sans espace.
+const TLDS = 'fr|com|org|net|io|app|co|be|ch|eu|info|dev|me|ly|gg|tv|shop|store|club|pet|dog|bzh|paris|ca|uk|de|es|it|lu';
+const URL_RE = new RegExp(
+  `(?:https?:\\/\\/|www\\.)[^\\s<>"]+|[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.(?:${TLDS})\\b(?:\\/[^\\s<>"]*)?`,
+  'gi',
+);
+
+type Morceau = { texte: string; url?: string };
+
+export function decouperLiens(texte: string): Morceau[] {
+  const out: Morceau[] = [];
+  let dernier = 0;
+  URL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(texte))) {
+    const debut = m.index;
+    let brut = m[0];
+    const avant = debut > 0 ? texte[debut - 1] : '';
+    // Morceau d'adresse e-mail (marine@exemple.fr) ou de mot plus long : pas un lien
+    if (avant && /[\w@.\-\/]/.test(avant)) continue;
+    if (texte[debut + brut.length] === '@') continue;
+    // Ponctuation finale ("va voir exemple.fr !", "(www.site.fr)")
+    const fin = brut.match(/[.,!?;:)\]'"»…]+$/);
+    if (fin) brut = brut.slice(0, brut.length - fin[0].length);
+    if (!brut) continue;
+    if (debut > dernier) out.push({ texte: texte.slice(dernier, debut) });
+    out.push({ texte: brut, url: /^https?:\/\//i.test(brut) ? brut : `https://${brut}` });
+    dernier = debut + brut.length;
+    URL_RE.lastIndex = dernier;
+  }
+  if (dernier < texte.length) out.push({ texte: texte.slice(dernier) });
+  return out;
+}
+
+function ouvrirLien(url: string) {
+  Linking.openURL(url).catch(() => Alert.alert('Lien', "Impossible d'ouvrir ce lien."));
+}
+
+function TexteAvecLiens({ texte, style, lienStyle }: { texte: string; style: any; lienStyle: any }) {
+  const morceaux = useMemo(() => decouperLiens(texte), [texte]);
+  if (!morceaux.some(x => x.url)) return <Text style={style}>{texte}</Text>;
+  return (
+    <Text style={style}>
+      {morceaux.map((x, i) => x.url
+        ? <Text key={i} style={lienStyle} onPress={() => ouvrirLien(x.url!)} suppressHighlighting={false}>{x.texte}</Text>
+        : <Text key={i}>{x.texte}</Text>)}
+    </Text>
+  );
+}
+
+// ── Swipe vers la droite pour repondre ──────────────────────────────────────
+
+function SwipeRepondre({ actif, onRepondre, children }: { actif: boolean; onRepondre: () => void; children: React.ReactNode }) {
+  const ref = useRef<Swipeable>(null);
+  if (!actif) return <>{children}</>;
+  return (
+    <Swipeable
+      ref={ref}
+      friction={2}
+      leftThreshold={50}
+      overshootLeft={false}
+      // Ne demarre qu'apres un vrai mouvement horizontal, et abandonne des que le doigt
+      // part a la verticale : le defilement de la conversation reste prioritaire
+      dragOffsetFromLeftEdge={14}
+      failOffsetY={[-12, 12]}
+      renderLeftActions={(progress) => (
+        <Animated.View style={[s.swipeReplyAction, { opacity: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }) }]}>
+          <View style={s.swipeReplyIcon}><Ionicons name="arrow-undo" size={16} color={colors.bordeaux} /></View>
+        </Animated.View>
+      )}
+      onSwipeableOpen={() => { onRepondre(); ref.current?.close(); }}
+    >
+      {children}
+    </Swipeable>
+  );
 }
 
 // ── Groupe card ──────────────────────────────────────────────────────────────
@@ -235,6 +320,16 @@ export default function MessagerieScreen({
   const [membersModalVisible, setMembersModalVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const channelRef = useRef<any>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  // ── Reponse a un message ──
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // Faux tant que la colonne messages.reply_to_id n'existe pas en base (OTA publiee
+  // avant la migration) : on masque alors la fonction au lieu de casser la messagerie
+  const [replyDispo, setReplyDispo] = useState(true);
+  const replyDispoRef = useRef(true);
+  const [citesExtra, setCitesExtra] = useState<Record<string, Citation>>({});
+  const [surbrillanceId, setSurbrillanceId] = useState<string | null>(null);
 
   // ── Groupes state ──
   const [groupes, setGroupes] = useState<Groupe[]>([]);
@@ -441,6 +536,7 @@ export default function MessagerieScreen({
   async function openConversation(conv: Conversation) {
     selectedConvIdRef.current = conv.id;
     setSelectedConv(conv);
+    setReplyTo(null);
     markConversationRead(conv.id, conv.last_message?.created_at);
     // Reouverture : messages deja vus affiches tout de suite, rafraichis en arriere-plan
     const enCache = messagesCacheRef.current.get(conv.id);
@@ -495,6 +591,7 @@ export default function MessagerieScreen({
     setSelectedConv(null);
     setMessages([]);
     setInputText('');
+    setReplyTo(null);
     setMyMuted(false);
     loadConversations();
   }
@@ -503,12 +600,26 @@ export default function MessagerieScreen({
     // Les 100 plus RECENTS, remis dans l'ordre chronologique. Avant : tri croissant +
     // limit 100 = les 100 plus anciens, donc au-dela de 100 messages les derniers
     // n'apparaissaient pas.
-    const { data: recents } = await supabase.from('messages')
-      .select('id,user_id,contenu,image_url,created_at').eq('conversation_id', convId).eq('actif', true)
+    const charger = (avecReponse: boolean) => supabase.from('messages')
+      .select(avecReponse ? 'id,user_id,contenu,image_url,created_at,reply_to_id' : 'id,user_id,contenu,image_url,created_at')
+      .eq('conversation_id', convId).eq('actif', true)
       .order('created_at', { ascending: false }).limit(100);
-    const data = (recents || []).reverse();
+    let res: any = await charger(replyDispoRef.current);
+    if (res.error && replyDispoRef.current && (res.error.code === '42703' || /reply_to_id/.test(res.error.message || ''))) {
+      replyDispoRef.current = false;
+      setReplyDispo(false);
+      res = await charger(false);
+    }
+    if (res.error) throw res.error;
+    const data: any[] = (res.data || []).reverse();
     if (!data.length) { setMessages([]); messagesCacheRef.current.set(convId, []); return; }
-    const userIds = [...new Set(data.map((m: any) => m.user_id))];
+    // Messages cites absents des 100 charges (plus anciens ou supprimes)
+    const chargesIds = new Set(data.map((m: any) => m.id));
+    const citesManquants = [...new Set(data.map((m: any) => m.reply_to_id).filter((id: any) => id && !chargesIds.has(id)))] as string[];
+    const { data: citesRows } = citesManquants.length
+      ? await supabase.from('messages').select('id,user_id,contenu,image_url,actif').in('id', citesManquants)
+      : { data: [] as any[] };
+    const userIds = [...new Set([...data.map((m: any) => m.user_id), ...(citesRows || []).map((c: any) => c.user_id)])];
     const messageIds = data.map((m: any) => m.id);
     const [{ data: profils }, { data: likes }] = await Promise.all([
       supabase.from('profils').select('id,prenom,avatar_url').in('id', userIds),
@@ -529,6 +640,15 @@ export default function MessagerieScreen({
       likeCount: likeCounts[m.id] || 0,
       likedByMe: likedByMeSet.has(m.id),
     }));
+    if (citesRows?.length) {
+      setCitesExtra(prev => {
+        const next = { ...prev };
+        citesRows.forEach((c: any) => {
+          next[c.id] = { id: c.id, user_id: c.user_id, contenu: c.contenu || '', image_url: c.image_url, prenom: pm[c.user_id]?.prenom || 'Membre', supprime: c.actif === false };
+        });
+        return next;
+      });
+    }
     messagesCacheRef.current.set(convId, liste);
     // Ne pas ecraser une autre conversation ouverte entre-temps
     if (selectedConvIdRef.current === convId) setMessages(liste);
@@ -570,14 +690,17 @@ export default function MessagerieScreen({
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, formData, { upsert: true });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+      const reponseA = replyDispo ? replyTo : null;
       const { data, error } = await supabase.from('messages').insert({
         conversation_id: selectedConv.id, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
+        ...(reponseA ? { reply_to_id: reponseA.id } : {}),
       }).select('id,created_at').single();
       if (error) throw error;
+      if (reponseA) setReplyTo(null);
       const optimistic: Message = {
         id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: '', image_url: pub.publicUrl,
         created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null,
-        likeCount: 0, likedByMe: false,
+        likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null,
       };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       notifyOtherMembers('📷 Photo', selectedConv);
@@ -591,18 +714,22 @@ export default function MessagerieScreen({
   async function sendMessage() {
     if (!inputText.trim() || !selectedConv || !myUserId || sending) return;
     const text = inputText.trim();
+    const reponseA = replyDispo ? replyTo : null;
     setInputText('');
+    setReplyTo(null);
     setSending(true);
     const { data, error } = await supabase.from('messages').insert({
       conversation_id: selectedConv.id, user_id: myUserId, contenu: text,
+      ...(reponseA ? { reply_to_id: reponseA.id } : {}),
     }).select('id,created_at').single();
     if (!error) {
-      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, likeCount: 0, likedByMe: false };
+      const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, likeCount: 0, likedByMe: false, reply_to_id: reponseA?.id ?? null };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
       notifyOtherMembers(text, selectedConv);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
       setInputText(text);
+      setReplyTo(reponseA);
     }
     setSending(false);
   }
@@ -859,6 +986,49 @@ export default function MessagerieScreen({
   // Pour la liste inversee (cf. plus bas) : ordre du plus recent au plus ancien.
   // Memoise pour ne pas recalculer a chaque frappe dans le champ de saisie.
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  const messagesParId = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages]);
+
+  function nomPour(userId: string, prenom: string) {
+    return userId === myUserId ? 'toi' : prenom;
+  }
+
+  function repondreA(m: Message) {
+    setReplyTo(m);
+    inputRef.current?.focus();
+  }
+
+  function allerAuMessage(id: string) {
+    const index = reversedMessages.findIndex(x => x.id === id);
+    if (index < 0) return;
+    flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    setSurbrillanceId(id);
+    setTimeout(() => setSurbrillanceId(cur => (cur === id ? null : cur)), 1600);
+  }
+
+  function renderCitation(m: Message, isMe: boolean) {
+    if (!m.reply_to_id) return null;
+    const charge = messagesParId.get(m.reply_to_id);
+    const extra = citesExtra[m.reply_to_id];
+    const cite = charge
+      ? { user_id: charge.user_id, prenom: charge.prenom, contenu: charge.contenu, image_url: charge.image_url, supprime: false }
+      : extra;
+    const apercu = !cite ? 'Message précédent'
+      : cite.supprime ? 'Message supprimé'
+      : cite.image_url ? '📷 Photo' : cite.contenu;
+    return (
+      <TouchableOpacity
+        activeOpacity={charge ? 0.6 : 1}
+        onPress={charge ? () => allerAuMessage(charge.id) : undefined}
+        style={[s.quote, isMe && s.quoteMe]}
+      >
+        <Text style={s.quoteTitle} numberOfLines={1}>
+          <Ionicons name="arrow-undo" size={11} color={colors.textMuted} />{' '}
+          {isMe ? 'Tu as répondu' : `${m.prenom} a répondu`}{cite ? ` à ${nomPour(cite.user_id, cite.prenom)}` : ''}
+        </Text>
+        <Text style={s.quoteText} numberOfLines={2}>{apercu}</Text>
+      </TouchableOpacity>
+    );
+  }
 
   if (sessionLoading) return <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />;
   if (!session) return <AuthGate navigation={navigation} message="Connecte-toi pour accéder à la messagerie et organiser des balades avec la meute." />;
@@ -882,6 +1052,14 @@ export default function MessagerieScreen({
             data={reversedMessages}
             keyExtractor={m => m.id}
             contentContainerStyle={[s.messagesList, messages.length === 0 && { flex: 1 }]}
+            keyboardShouldPersistTaps="handled"
+            // Message cite pas encore rendu : on s'en approche puis on reessaie
+            onScrollToIndexFailed={info => {
+              flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
+              setTimeout(() => {
+                if (info.index < reversedMessages.length) flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              }, 350);
+            }}
             // scaleY(-1) contre-inverse : sur une liste inverted, le ListEmptyComponent
             // s'affiche autrement a l'envers (aucune donnee pour compenser le flip de liste).
             ListEmptyComponent={<View style={[s.emptyChat, { transform: [{ scaleY: -1 }] }]}><Ionicons name="chatbubbles-outline" size={44} color={colors.border} /><Text style={s.emptyChatText}>Commencez la conversation !</Text></View>}
@@ -892,7 +1070,8 @@ export default function MessagerieScreen({
               const showSender = !isMe && m.user_id !== reversedMessages[index + 1]?.user_id;
               const showTime = !reversedMessages[index - 1] || new Date(reversedMessages[index - 1].created_at).getTime() - new Date(m.created_at).getTime() > 300000;
               return (
-                <View style={[s.msgRow, isMe && s.msgRowMe]}>
+                <SwipeRepondre actif={replyDispo && !m.id.startsWith('tmp-')} onRepondre={() => repondreA(m)}>
+                <View style={[s.msgRow, isMe && s.msgRowMe, surbrillanceId === m.id && s.msgRowHighlight]}>
                   {!isMe && (
                     <View style={s.msgAvatarWrap}>
                       {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.msgAvatar} /> : <View style={[s.msgAvatar, s.msgAvatarFallback]}><Text style={s.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
@@ -900,12 +1079,13 @@ export default function MessagerieScreen({
                   )}
                   <View style={[s.msgBubbleWrap, isMe && s.msgBubbleWrapMe]}>
                     {showSender && <Text style={s.msgSender}>{m.prenom}</Text>}
+                    {renderCitation(m, isMe)}
                     <TouchableOpacity activeOpacity={0.85} onLongPress={() => toggleLike(m)}>
                       {m.image_url ? (
                         <Image source={{ uri: m.image_url }} style={s.msgImage} resizeMode="cover" />
                       ) : (
                         <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
-                          <Text style={[s.msgText, isMe && s.msgTextMe]}>{m.contenu}</Text>
+                          <TexteAvecLiens texte={m.contenu} style={[s.msgText, isMe && s.msgTextMe]} lienStyle={[s.msgLink, isMe && s.msgLinkMe]} />
                         </View>
                       )}
                     </TouchableOpacity>
@@ -918,15 +1098,28 @@ export default function MessagerieScreen({
                     </View>
                   </View>
                 </View>
+                </SwipeRepondre>
               );
             }}
           />
         )}
+        {replyTo ? (
+          <View style={s.replyBar}>
+            <View style={s.replyBarAccent} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.replyBarTitle} numberOfLines={1}>Réponse à {nomPour(replyTo.user_id, replyTo.prenom)}</Text>
+              <Text style={s.replyBarText} numberOfLines={1}>{replyTo.image_url ? '📷 Photo' : replyTo.contenu}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <View style={[s.inputBar, { paddingBottom: kbVisible ? 10 : Math.max(insets.bottom, 10) }]}>
           <TouchableOpacity style={s.photoBtn} onPress={pickAndSendPhoto} disabled={sendingPhoto}>
             {sendingPhoto ? <ActivityIndicator size="small" color={colors.terra} /> : <Ionicons name="image-outline" size={22} color={colors.terra} />}
           </TouchableOpacity>
-          <TextInput style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
+          <TextInput ref={inputRef} style={s.input} value={inputText} onChangeText={setInputText} placeholder="Message…" placeholderTextColor={colors.textMuted} multiline maxLength={1000} returnKeyType="send" blurOnSubmit={false} onSubmitEditing={sendMessage} />
           <TouchableOpacity style={[s.sendBtn, (!inputText.trim() || sending) && s.sendBtnDisabled]} onPress={sendMessage} disabled={!inputText.trim() || sending}>
             {sending ? <ActivityIndicator size="small" color={colors.ivory} /> : <Ionicons name="send" size={18} color={colors.ivory} />}
           </TouchableOpacity>
@@ -1413,6 +1606,19 @@ const s = StyleSheet.create({
   msgBubbleThem: { backgroundColor: colors.white, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.border },
   msgText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMid, lineHeight: 20 },
   msgTextMe: { color: colors.ivory },
+  msgLink: { color: colors.terra, textDecorationLine: 'underline' },
+  msgLinkMe: { color: colors.ivory },
+  msgRowHighlight: { backgroundColor: 'rgba(229,72,77,0.10)', borderRadius: 12 },
+  quote: { alignSelf: 'flex-start', maxWidth: '100%', marginBottom: 2, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderLeftWidth: 3, borderLeftColor: colors.terra, backgroundColor: 'rgba(0,0,0,0.05)' },
+  quoteMe: { alignSelf: 'flex-end' },
+  quoteTitle: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, marginBottom: 1 },
+  quoteText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMid, lineHeight: 16 },
+  swipeReplyAction: { width: 56, justifyContent: 'center', alignItems: 'center' },
+  swipeReplyIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  replyBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border },
+  replyBarAccent: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.terra },
+  replyBarTitle: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.bordeaux },
+  replyBarText: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   msgTime: { fontFamily: 'DMSans_400Regular', fontSize: 10, color: colors.textMuted, marginLeft: 12, marginTop: 2 },
   msgTimeMe: { marginLeft: 0, marginRight: 12 },
   msgImage: { width: 200, height: 200, borderRadius: 16 },
