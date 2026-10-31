@@ -2,13 +2,12 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard,
-  Modal, Image, Alert, Share, Linking,
+  Modal, Image, Alert, Share, Linking, LayoutAnimation,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
@@ -17,6 +16,7 @@ import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { sendPushNotification } from '../lib/notifications';
+import { usePastillesActives } from '../lib/pastilles';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,13 @@ type Conversation = {
   id: string; nom: string | null; created_by: string; type?: string | null;
   members: ConvMember[];
   last_message: { contenu: string; image_url: string | null; created_at: string; user_id: string } | null;
+  // Messages d'autres membres plus recents que ma derniere lecture (conversation_members.last_read_at)
+  unread?: number;
 };
+
+// last_read_at vaut l'heure d'arrivee dans la conversation tant qu'elle n'a jamais ete
+// mise a jour : sans plancher, toutes les vieilles conversations s'allumeraient d'un coup.
+const NON_LU_MAX_AGE_MS = 14 * 86400000;
 type Message = {
   id: string; user_id: string; contenu: string; image_url: string | null; created_at: string;
   prenom: string; avatar_url: string | null;
@@ -140,19 +146,65 @@ export default function MessagerieScreen({
   pendingConversationId, onConsumedPendingConversation, defaultHeaderRight, actif = true,
 }: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode; actif?: boolean } = {}) {
   const navigation = useNavigation<any>();
-  const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const { session, loading: sessionLoading } = useSession();
   const myUserId = session?.user?.id ?? null;
+  const pastilles = usePastillesActives();
+
+  // ── Clavier ──
+  // KeyboardAvoidingView ne marchait pas ici : sur iOS son calcul suppose que son parent
+  // commence juste sous l'en-tete (keyboardVerticalOffset = headerHeight), or il est rendu
+  // sous les sous-onglets Feed / Messages / Membres de FeedScreen -> il manquait leur
+  // hauteur et le clavier mangeait la barre de saisie. Sur Android (edge-to-edge impose
+  // depuis SDK 54), la fenetre n'est plus redimensionnee et le behavior etait `undefined`
+  // -> aucune compensation. On mesure donc directement ou se trouve le bas de la zone de
+  // chat a l'ecran et on ajoute juste ce qui depasse sous le haut du clavier.
+  const [kbPad, setKbPad] = useState(0);
   const [kbVisible, setKbVisible] = useState(false);
+  const kbTopRef = useRef<number | null>(null);
+  const chatZoneRef = useRef<View>(null);
+  const recalcKbPad = useCallback((animDuration?: number) => {
+    const kbTop = kbTopRef.current;
+    const apply = (v: number) => {
+      if (Platform.OS === 'ios' && animDuration) {
+        LayoutAnimation.configureNext({ duration: animDuration, update: { duration: animDuration, type: 'keyboard' } });
+      }
+      setKbPad(prev => (prev === v ? prev : v));
+    };
+    if (kbTop == null) { apply(0); return; }
+    const zone = chatZoneRef.current;
+    if (!zone) return;
+    zone.measureInWindow((_x, y, _w, h) => {
+      // Zone cachee (autre sous-onglet affiche) : mesures a 0
+      if (!h) return;
+      apply(Math.max(0, Math.round(y + h - kbTop)));
+    });
+  }, []);
 
   useEffect(() => {
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvt, () => setKbVisible(true));
-    const hideSub = Keyboard.addListener(hideEvt, () => setKbVisible(false));
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
+    const onShow = (e: any) => {
+      kbTopRef.current = e?.endCoordinates?.screenY ?? null;
+      setKbVisible(true);
+      recalcKbPad(e?.duration);
+    };
+    const onHide = (e: any) => {
+      kbTopRef.current = null;
+      setKbVisible(false);
+      recalcKbPad(e?.duration);
+    };
+    const subs = Platform.OS === 'ios'
+      ? [
+          Keyboard.addListener('keyboardWillShow', onShow),
+          // Barre de suggestions qui apparait/disparait, changement de clavier...
+          Keyboard.addListener('keyboardWillChangeFrame', e => { if (kbTopRef.current != null) onShow(e); }),
+          Keyboard.addListener('keyboardWillHide', onHide),
+        ]
+      : [
+          Keyboard.addListener('keyboardDidShow', onShow),
+          Keyboard.addListener('keyboardDidHide', onHide),
+        ];
+    return () => subs.forEach(sub => sub.remove());
+  }, [recalcKbPad]);
 
   const [activeTab, setActiveTab] = useState<'messages' | 'groupes'>('groupes');
 
@@ -312,9 +364,15 @@ export default function MessagerieScreen({
     if (!myUserId) return;
     if (!silencieux) setLoading(true);
     const { data: memberRows } = await supabase
-      .from('conversation_members').select('conversation_id').eq('user_id', myUserId);
+      .from('conversation_members').select('conversation_id,last_read_at').eq('user_id', myUserId);
     if (!memberRows?.length) { setConversations([]); setLoading(false); return; }
     const convIds = memberRows.map((r: any) => r.conversation_id);
+    const plancher = Date.now() - NON_LU_MAX_AGE_MS;
+    const luDepuis: Record<string, number> = {};
+    memberRows.forEach((r: any) => {
+      const lu = r.last_read_at ? Date.parse(r.last_read_at) : NaN;
+      luDepuis[r.conversation_id] = Number.isFinite(lu) && lu > plancher ? lu : plancher;
+    });
     const [{ data: convData }, { data: allMembers }, { data: recentMsgs }] = await Promise.all([
       supabase.from('conversations').select('id,nom,created_by,type').in('id', convIds).eq('actif', true),
       supabase.from('conversation_members').select('conversation_id,user_id').in('conversation_id', convIds),
@@ -343,11 +401,20 @@ export default function MessagerieScreen({
     // chaque conversation a au moins un message parmi les 500 plus recents (largement
     // le cas en pratique).
     const lastMessages: Record<string, any> = {};
-    (recentMsgs || []).forEach((m: any) => { if (!lastMessages[m.conversation_id]) lastMessages[m.conversation_id] = m; });
+    const nonLus: Record<string, number> = {};
+    (recentMsgs || []).forEach((m: any) => {
+      if (!lastMessages[m.conversation_id]) lastMessages[m.conversation_id] = m;
+      // Conversation ouverte en ce moment : deja lue
+      if (m.user_id !== myUserId && m.conversation_id !== selectedConvIdRef.current
+          && Date.parse(m.created_at) > (luDepuis[m.conversation_id] ?? plancher)) {
+        nonLus[m.conversation_id] = (nonLus[m.conversation_id] || 0) + 1;
+      }
+    });
     const list: Conversation[] = (convData || []).map((c: any) => ({
       id: c.id, nom: c.nom, created_by: c.created_by, type: c.type,
       members: membersByConv[c.id] || [],
       last_message: lastMessages[c.id] || null,
+      unread: nonLus[c.id] || 0,
     })).sort((a, b) => {
       // Pas de localeCompare (cf. villeRegion.ts / normalizeText) : comparaison
       // simple, suffisante pour des dates ISO 8601.
@@ -358,9 +425,23 @@ export default function MessagerieScreen({
     setLoading(false);
   }
 
+  // Marque la conversation comme lue (en base + pastille de la liste)
+  function markConversationRead(convId: string, dernierMessageAt?: string | null) {
+    if (!myUserId) return;
+    // Horloge du telephone en retard sur le serveur : on prend au moins la date du
+    // dernier message vu, sinon il resterait "non lu"
+    const msgMs = dernierMessageAt ? Date.parse(dernierMessageAt) : NaN;
+    const lu = new Date(Number.isFinite(msgMs) && msgMs + 1 > Date.now() ? msgMs + 1 : Date.now()).toISOString();
+    setConversations(prev => prev.map(c => (c.id === convId && c.unread ? { ...c, unread: 0 } : c)));
+    supabase.from('conversation_members').update({ last_read_at: lu })
+      .eq('conversation_id', convId).eq('user_id', myUserId)
+      .then(() => {}, () => {});
+  }
+
   async function openConversation(conv: Conversation) {
     selectedConvIdRef.current = conv.id;
     setSelectedConv(conv);
+    markConversationRead(conv.id, conv.last_message?.created_at);
     // Reouverture : messages deja vus affiches tout de suite, rafraichis en arriere-plan
     const enCache = messagesCacheRef.current.get(conv.id);
     if (enCache?.length) setMessages(enCache);
@@ -387,6 +468,8 @@ export default function MessagerieScreen({
           const { data: p } = await supabase.from('profils').select('prenom,avatar_url').eq('id', m.user_id).single();
           const newMsg: Message = { ...m, prenom: p?.prenom || 'Membre', avatar_url: p?.avatar_url || null, likeCount: 0, likedByMe: false };
           setMessages(prev => prev.some(x => x.id === newMsg.id) ? prev : [...prev, newMsg]);
+          // Recu pendant que la conversation est ouverte : lu
+          if (m.user_id !== myUserId && selectedConvIdRef.current === conv.id) markConversationRead(conv.id, m.created_at);
         })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_likes' },
         (payload) => {
@@ -762,6 +845,17 @@ export default function MessagerieScreen({
     );
   }
 
+  function renderUnreadBadge(conv: Conversation) {
+    if (!pastilles || !conv.unread) return <Ionicons name="chevron-forward" size={16} color={colors.border} />;
+    return (
+      <View style={s.unreadBadge}>
+        <Text style={s.unreadBadgeText}>{conv.unread > 9 ? '9+' : conv.unread}</Text>
+      </View>
+    );
+  }
+  const unreadDirect = directConversations.some(c => !!c.unread);
+  const unreadGroupes = groupChatConversations.some(c => !!c.unread);
+
   // Pour la liste inversee (cf. plus bas) : ordre du plus recent au plus ancien.
   // Memoise pour ne pas recalculer a chaque frappe dans le champ de saisie.
   const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
@@ -774,7 +868,8 @@ export default function MessagerieScreen({
     const isCreator = selectedConv.created_by === myUserId;
     return (
       <ErrorBoundary label="chat_view" onClose={closeConversation}>
-      <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}>
+      <View ref={chatZoneRef} style={s.container} onLayout={() => recalcKbPad()}>
+      <View style={{ flex: 1, paddingBottom: kbPad }}>
         {msgLoading ? <ActivityIndicator style={{ flex: 1 }} color={colors.terra} /> : (
           <FlatList
             ref={flatListRef}
@@ -921,7 +1016,8 @@ export default function MessagerieScreen({
             </View>
           </View>
         </Modal>
-      </KeyboardAvoidingView>
+      </View>
+      </View>
       </ErrorBoundary>
     );
   }
@@ -935,6 +1031,7 @@ export default function MessagerieScreen({
         <TouchableOpacity style={[s.tab, activeTab === 'groupes' && s.tabActive]} onPress={() => { setActiveTab('groupes'); if (!groupes.length) loadGroupes(); }}>
           <View style={[s.tabIcon, activeTab === 'groupes' && s.tabIconActive]}>
             <Ionicons name="people-outline" size={18} color={activeTab === 'groupes' ? colors.ivory : colors.textMuted} />
+            {pastilles && unreadGroupes ? <View style={s.tabUnreadDot} /> : null}
           </View>
           <View>
             <Text style={[s.tabTitle, activeTab === 'groupes' && s.tabTitleActive]}>Groupes</Text>
@@ -944,6 +1041,7 @@ export default function MessagerieScreen({
         <TouchableOpacity style={[s.tab, activeTab === 'messages' && s.tabActive]} onPress={() => setActiveTab('messages')}>
           <View style={[s.tabIcon, activeTab === 'messages' && s.tabIconActive]}>
             <Ionicons name="chatbubbles-outline" size={18} color={activeTab === 'messages' ? colors.ivory : colors.textMuted} />
+            {pastilles && unreadDirect ? <View style={s.tabUnreadDot} /> : null}
           </View>
           <View>
             <Text style={[s.tabTitle, activeTab === 'messages' && s.tabTitleActive]}>Messages</Text>
@@ -978,12 +1076,12 @@ export default function MessagerieScreen({
                     {renderConvAvatar(conv)}
                     <View style={s.convInfo}>
                       <View style={s.convTopRow}>
-                        <Text style={s.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
-                        {lastMsg && <Text style={s.convTime}>{fmtTime(lastMsg.created_at)}</Text>}
+                        <Text style={[s.convName, pastilles && !!conv.unread && s.convNameUnread]} numberOfLines={1}>{convDisplayName(conv)}</Text>
+                        {lastMsg && <Text style={[s.convTime, pastilles && !!conv.unread && s.convTimeUnread]}>{fmtTime(lastMsg.created_at)}</Text>}
                       </View>
-                      <Text style={s.convPreview} numberOfLines={1}>{preview}</Text>
+                      <Text style={[s.convPreview, pastilles && !!conv.unread && s.convPreviewUnread]} numberOfLines={1}>{preview}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.border} />
+                    {renderUnreadBadge(conv)}
                   </TouchableOpacity>
                 );
               }}
@@ -1019,12 +1117,12 @@ export default function MessagerieScreen({
                           {renderConvAvatar(conv)}
                           <View style={s.convInfo}>
                             <View style={s.convTopRow}>
-                              <Text style={s.convName} numberOfLines={1}>{convDisplayName(conv)}</Text>
-                              {lastMsg && <Text style={s.convTime}>{fmtTime(lastMsg.created_at)}</Text>}
+                              <Text style={[s.convName, pastilles && !!conv.unread && s.convNameUnread]} numberOfLines={1}>{convDisplayName(conv)}</Text>
+                              {lastMsg && <Text style={[s.convTime, pastilles && !!conv.unread && s.convTimeUnread]}>{fmtTime(lastMsg.created_at)}</Text>}
                             </View>
-                            <Text style={s.convPreview} numberOfLines={1}>{preview}</Text>
+                            <Text style={[s.convPreview, pastilles && !!conv.unread && s.convPreviewUnread]} numberOfLines={1}>{preview}</Text>
                           </View>
-                          <Ionicons name="chevron-forward" size={16} color={colors.border} />
+                          {renderUnreadBadge(conv)}
                         </TouchableOpacity>
                       );
                     })}
@@ -1287,6 +1385,12 @@ const s = StyleSheet.create({
   convName: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.bordeaux, flex: 1, marginRight: 8 },
   convTime: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted },
   convPreview: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  convNameUnread: { fontFamily: 'DMSans_500Medium', fontWeight: '700' },
+  convTimeUnread: { color: '#E5484D', fontFamily: 'DMSans_500Medium' },
+  convPreviewUnread: { color: colors.bordeaux, fontFamily: 'DMSans_500Medium' },
+  unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, backgroundColor: '#E5484D', alignItems: 'center', justifyContent: 'center' },
+  unreadBadgeText: { color: '#FFFFFF', fontFamily: 'DMSans_500Medium', fontSize: 11 },
+  tabUnreadDot: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: '#E5484D', borderWidth: 1.5, borderColor: colors.white },
 
   fab: { position: 'absolute', bottom: 28, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', shadowColor: colors.bordeaux, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8 },
 
