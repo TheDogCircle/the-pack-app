@@ -151,8 +151,7 @@ export default function ProfilPublicScreen() {
     try {
       const cid = await findOrCreateDM(myId, userId);
       if (!cid) { Alert.alert('Erreur', "Impossible d'ouvrir la conversation, réessaie."); return; }
-      mapNavigation.setPendingConversation(cid);
-      navigation.navigate('Tabs', { screen: 'Meute' });
+      navigation.navigate('Messages', { conversationId: cid, t: Date.now() });
     } finally {
       setMessaging(false);
     }

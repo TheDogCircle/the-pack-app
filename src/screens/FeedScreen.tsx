@@ -25,7 +25,6 @@ import { useSession } from '../hooks/useSession';
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AmbassadeurBadge, ExplorateurBadge, BirthdayBadge } from '../components/AmbassadeurBadge';
-import MessagerieScreen from './MessagerieScreen';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -969,14 +968,14 @@ function NewPostModal({
 
 // ─── FeedScreen ───────────────────────────────────────────────────────────────
 
-const SOUS_ONGLETS = { feed: 'Meute · Fil', messages: 'Meute · Messages', membres: 'Meute · Membres' } as const;
+const SOUS_ONGLETS = { feed: 'Meute · Fil', membres: 'Meute · Membres' } as const;
 
-export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?: () => React.ReactNode } = {}) {
+export default function FeedScreen() {
   const navigation = useNavigation<any>();
   const { session, loading: sessionLoading } = useSession();
-  const [tab, setTab] = useState<'feed' | 'messages' | 'membres'>('feed');
+  // Les messages ont leur propre ecran (bulle en haut a droite) : Feed et Membres ici
+  const [tab, setTab] = useState<'feed' | 'membres'>('feed');
   const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [pendingConvId, setPendingConvId] = useState<string | null>(null);
   const [sendPost, setSendPost] = useState<CommunityPost | null>(null);
   const [sendFriends, setSendFriends] = useState<{ id: string; username: string | null; prenom: string | null; avatar_url: string | null }[] | null>(null);
   const [sendFriendsLoading, setSendFriendsLoading] = useState(false);
@@ -984,18 +983,16 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
 
   // Pastilles "nouveau contenu" sur les onglets Feed / Chat / Membres
   const [feedBadge, setFeedBadge] = useState(false);
-  const [chatBadge, setChatBadge] = useState(false);
   const [membresBadge, setMembresBadge] = useState(false);
 
-  function tabLastSeenKey(tabKey: 'feed' | 'messages' | 'membres', userId: string) {
+  function tabLastSeenKey(tabKey: 'feed' | 'membres', userId: string) {
     return `tab_last_seen_${tabKey}_${userId}`;
   }
 
-  function selectTab(key: 'feed' | 'messages' | 'membres') {
+  function selectTab(key: 'feed' | 'membres') {
     if (key !== tab) track('screen_viewed', { screen: SOUS_ONGLETS[key] });
     setTab(key);
     if (key === 'feed') setFeedBadge(false);
-    else if (key === 'messages') setChatBadge(false);
     else setMembresBadge(false);
     // Session lue a la volee (pas via l'etat myUserId) : cette fonction est aussi
     // appelee depuis un useFocusEffect fige au premier rendu, ou myUserId vaudrait
@@ -1008,9 +1005,8 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   // Verifie s'il y a du contenu plus recent que la derniere visite de chaque onglet
   const checkTabBadges = useCallback(async (userId: string) => {
     const defaultSince = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
-    const [feedSince, chatSince, membresSince] = await Promise.all([
+    const [feedSince, membresSince] = await Promise.all([
       AsyncStorage.getItem(tabLastSeenKey('feed', userId)),
-      AsyncStorage.getItem(tabLastSeenKey('messages', userId)),
       AsyncStorage.getItem(tabLastSeenKey('membres', userId)),
     ]);
 
@@ -1022,16 +1018,6 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
         .eq('validee', true).neq('user_id', userId).gt('created_at', feedSince || defaultSince),
     ]);
     setFeedBadge(((newPosts ?? 0) + (newPhotos ?? 0)) > 0);
-
-    // Chat : messages non lus dans mes conversations
-    const { data: myConvs } = await supabase
-      .from('conversation_members').select('conversation_id').eq('user_id', userId);
-    if (myConvs?.length) {
-      const convIds = myConvs.map((r: any) => r.conversation_id);
-      const { count: newMessages } = await supabase.from('messages').select('id', { count: 'exact', head: true })
-        .in('conversation_id', convIds).neq('user_id', userId).gt('created_at', chatSince || defaultSince);
-      setChatBadge((newMessages ?? 0) > 0);
-    }
 
     // Membres : nouveaux profils crees recemment
     const { count: newMembres } = await supabase.from('profils').select('id', { count: 'exact', head: true })
@@ -1057,28 +1043,15 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   // tapee, si FeedScreen est deja monte (quasi toujours vrai, un onglet reste monte une
   // fois visite), la conversation/le post s'ouvre immediatement, sans dependre d'un
   // evenement de focus qui peut ne jamais arriver.
+  // (Les conversations s'ouvrent desormais dans l'ecran Messages, cf. MessagesScreen.)
   useFocusEffect(useCallback(() => {
-    const cid = mapNavigation.consumeConversation();
-    supabase.from('push_debug_logs').insert({
-      to_token: 'FEED_FOCUS', title: 'FeedScreen useFocusEffect',
-      detail: JSON.stringify({ consumedConversationId: cid }),
-    }).then(() => {}, () => {});
-    if (cid) { selectTab('messages'); setPendingConvId(cid); }
     const pid = mapNavigation.consumePost();
     if (pid) { selectTab('feed'); setPendingPostId(pid); }
   }, []));
 
   useEffect(() => {
-    mapNavigation.onConversationPending((cid) => {
-      supabase.from('push_debug_logs').insert({
-        to_token: 'FEED_SUBSCRIBE', title: 'FeedScreen onConversationPending',
-        detail: JSON.stringify({ conversationId: cid }),
-      }).then(() => {}, () => {});
-      selectTab('messages');
-      setPendingConvId(cid);
-    });
     mapNavigation.onPostPending((pid) => { selectTab('feed'); setPendingPostId(pid); });
-    return () => { mapNavigation.onConversationPending(null); mapNavigation.onPostPending(null); };
+    return () => { mapNavigation.onPostPending(null); };
   }, []);
 
   // Feed
@@ -1098,7 +1071,6 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   // Membres
   const [membres, setMembres] = useState<MembreItem[]>([]);
   const [membresLoading, setMembresLoading] = useState(false);
-  const [messagesVu, setMessagesVu] = useState(false);
   const pastilles = usePastillesActives();
   const [membresRefreshing, setMembresRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -1183,7 +1155,6 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
   // deja chargee restant affichee. Avant : tout etait recharge a chaque passage.
   const dernierChargementRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (tab === 'messages') { setMessagesVu(true); return; }
     const cle = `${tab}:${session?.user?.id || ''}`;
     const dernier = dernierChargementRef.current[cle];
     if (dernier && Date.now() - dernier < 30_000) return;
@@ -1834,7 +1805,6 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
       <View style={styles.tabsWrap}>
         {([
           { key: 'feed',     label: 'Feed',     badge: feedBadge },
-          { key: 'messages', label: 'Messages', badge: chatBadge },
           { key: 'membres',  label: 'Membres',  badge: membresBadge },
         ] as const).map(t => (
           <TouchableOpacity
@@ -1848,21 +1818,8 @@ export default function FeedScreen({ defaultHeaderRight }: { defaultHeaderRight?
         ))}
       </View>
 
-      {/* Chat : garde monte apres la premiere visite (plus de rechargement complet a chaque passage) */}
-      {messagesVu ? (
-        <View style={{ flex: 1, display: tab === 'messages' ? 'flex' : 'none' }}>
-          <MessagerieScreen
-            pendingConversationId={pendingConvId}
-            onConsumedPendingConversation={() => setPendingConvId(null)}
-            defaultHeaderRight={defaultHeaderRight}
-            actif={tab === 'messages'}
-          />
-        </View>
-      ) : null}
-      {tab === 'messages' ? null
-
-      /* Feed */
-      : tab === 'feed' ? (
+      {/* Feed */}
+      {tab === 'feed' ? (
         <>
           {feedLoading ? (
             <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />

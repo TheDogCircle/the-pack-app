@@ -18,6 +18,7 @@ import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { sendPushNotification } from '../lib/notifications';
 import { usePastillesActives } from '../lib/pastilles';
+import { setNonLus } from '../lib/nonLus';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -231,8 +232,8 @@ function GroupeCard({
 // ── Main screen ──────────────────────────────────────────────────────────────
 
 export default function MessagerieScreen({
-  pendingConversationId, onConsumedPendingConversation, defaultHeaderRight, actif = true,
-}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode; actif?: boolean } = {}) {
+  pendingConversationId, onConsumedPendingConversation, defaultHeaderRight, actif = true, titreListe = 'La Meute',
+}: { pendingConversationId?: string | null; onConsumedPendingConversation?: () => void; defaultHeaderRight?: () => React.ReactNode; actif?: boolean; titreListe?: string } = {}) {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { session, loading: sessionLoading } = useSession();
@@ -393,6 +394,7 @@ export default function MessagerieScreen({
   // ── Effects ──
   useEffect(() => { if (myUserId) { loadConversations(); loadGroupes(); } }, [myUserId]);
 
+  const pendingRechargeRef = useRef<string | null>(null);
   // Ouvre directement une conversation quand on arrive via une notification push
   useEffect(() => {
     if (!pendingConversationId) return;
@@ -400,13 +402,17 @@ export default function MessagerieScreen({
       to_token: 'MSG_EFFECT', title: 'MessagerieScreen pendingConversationId effect',
       detail: JSON.stringify({ pendingConversationId, conversationsCount: conversations.length, ids: conversations.map(c => c.id) }),
     }).then(() => {}, () => {});
-    if (!conversations.length) return;
+    if (loading) return;
     const conv = conversations.find(c => c.id === pendingConversationId);
     if (conv) {
       openConversation(conv);
       onConsumedPendingConversation?.();
+    } else if (pendingRechargeRef.current !== pendingConversationId) {
+      // Conversation toute neuve (message direct qui vient d'etre cree) : liste a jour
+      pendingRechargeRef.current = pendingConversationId;
+      loadConversations(true);
     }
-  }, [pendingConversationId, conversations]);
+  }, [pendingConversationId, conversations, loading]);
 
   // Deep link: thepack://groupe?id=xxx
   useEffect(() => {
@@ -442,12 +448,14 @@ export default function MessagerieScreen({
   useEffect(() => {
     // Onglet garde monte mais cache (FeedScreen) : il ne doit pas piloter l'en-tete
     if (!actif) {
-      navigation.setOptions({ title: 'Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
+      navigation.setOptions({ title: titreListe, headerLeft: undefined, headerRight: defaultHeaderRight });
       return;
     }
     if (selectedConv) {
       navigation.setOptions({
         title: convDisplayName(selectedConv),
+        // Ecran Messages (pile) : le geste de retour fermerait tout l'ecran
+        gestureEnabled: false,
         headerLeft: () => (
           <TouchableOpacity onPress={closeConversation} style={{ marginLeft: 4, padding: 4 }}>
             <Ionicons name="chevron-back" size={26} color={colors.ivory} />
@@ -472,15 +480,32 @@ export default function MessagerieScreen({
       // n'est pas sa propre Screen, juste un composant rendu dans FeedScreen) -- remettre
       // headerRight a undefined ici effacait silencieusement le coeur d'activite du header
       // Meute des qu'on revenait a la liste des conversations, sans jamais le restaurer.
-      navigation.setOptions({ title: 'La Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
+      navigation.setOptions({ title: titreListe, headerLeft: undefined, headerRight: defaultHeaderRight, gestureEnabled: true });
     }
     // Demonte quand on quitte l'onglet Chat de FeedScreen (rendu conditionnel) : sans ce
     // cleanup, le header restait bloque sur l'etat "conversation fermee" (donc sans coeur)
     // meme apres avoir quitte cet onglet.
     return () => {
-      navigation.setOptions({ title: 'Meute', headerLeft: undefined, headerRight: defaultHeaderRight });
+      navigation.setOptions({ title: titreListe, headerLeft: undefined, headerRight: defaultHeaderRight });
     };
   }, [selectedConv, myMuted, actif]);
+
+  // Bouton retour Android / retour de la pile : ferme d'abord la conversation ouverte
+  const closeConversationRef = useRef<() => void>(() => {});
+  closeConversationRef.current = () => closeConversation();
+  useEffect(() => {
+    const unsub = navigation.addListener?.('beforeRemove', (e: any) => {
+      if (!selectedConvIdRef.current) return;
+      e.preventDefault();
+      closeConversationRef.current();
+    });
+    return () => { unsub?.(); };
+  }, [navigation]);
+
+  // Compteur de la bulle Messages, tenu a jour depuis la liste
+  useEffect(() => {
+    if (!loading) setNonLus(conversations.filter(c => !!c.unread).length);
+  }, [conversations, loading]);
 
   // L'indicateur "en train d'ecrire" s'efface 4 s apres le dernier signal
   useEffect(() => {

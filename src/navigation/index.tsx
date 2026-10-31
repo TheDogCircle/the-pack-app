@@ -33,6 +33,8 @@ import CarnetSanteScreen from '../screens/CarnetSanteScreen';
 import ContactScreen from '../screens/ContactScreen';
 import ContactDetailScreen from '../screens/ContactDetailScreen';
 import IdeesScreen from '../screens/IdeesScreen';
+import MessagesScreen from '../screens/MessagesScreen';
+import BulleMessages from '../components/BulleMessages';
 import ActiviteScreen, { activityLastSeenKey } from '../screens/ActiviteScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
@@ -55,6 +57,8 @@ export type RootStackParamList = {
   Contact: undefined;
   ContactDetail: { ticketId: string };
   Idees: undefined;
+  // t : change a chaque demande, pour rouvrir la meme conversation si besoin
+  Messages: { conversationId?: string; t?: number } | undefined;
 };
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -97,6 +101,7 @@ const NOMS_ECRANS: Record<string, string> = {
   Classement: 'Balades & classement', MesReservations: 'Mes rendez-vous', Settings: 'Paramètres',
   CarnetSante: 'Carnet de santé', ProfilPublic: "Profil d'un membre", Activite: 'Activité',
   Anniversaires: 'Anniversaires', Booking: 'Réservation', Idees: 'Idées', Contact: 'Contact', ContactDetail: 'Contact',
+  Messages: 'Messages',
 };
 let dernierEcran: string | null = null;
 function suivreEcran() {
@@ -279,7 +284,9 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      screenOptions={({ route, navigation }) => ({
+        // Bulle Messages (avec compteur de non-lus) en haut a droite de chaque onglet
+        headerRight: () => <BulleMessages navigation={navigation} />,
         headerStyle: { backgroundColor: colors.bordeaux },
         headerTitleStyle: { color: colors.ivory, fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18 },
         headerTintColor: colors.ivory,
@@ -333,21 +340,16 @@ function MainTabs() {
         options={({ navigation }) => ({
           title: 'Meute',
           tabBarBadge: pastilles && meuteBadge ? ' ' : undefined,
-          headerRight: () => renderMeuteHeartButton(navigation, pastilles && activityBadge, setActivityBadge),
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {renderMeuteHeartButton(navigation, pastilles && activityBadge, setActivityBadge)}
+              <BulleMessages navigation={navigation} />
+            </View>
+          ),
         })}
         listeners={{ focus: () => { setMeuteBadge(false); marquerVu('Meute'); } }}
       >
-        {(props) => (
-          <FeedScreen
-            {...props}
-            // MessagerieScreen (rendue a l'interieur de FeedScreen, pas comme sa propre
-            // Screen) reutilise cette meme navigation pour gerer son propre header une
-            // fois dans une conversation -- sans ca, elle n'a aucun moyen de restaurer
-            // le coeur d'activite en revenant a la liste des conversations, et le
-            // remplace silencieusement par rien (voir MessagerieScreen).
-            defaultHeaderRight={() => renderMeuteHeartButton(props.navigation, pastilles && activityBadge, setActivityBadge)}
-          />
-        )}
+        {() => <FeedScreen />}
       </Tab.Screen>
       <Tab.Screen
         name="Events" component={EvenementsScreen}
@@ -369,7 +371,7 @@ function MainTabs() {
 }
 
 const headerStyles = StyleSheet.create({
-  heartBtn: { marginRight: 12, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  heartBtn: { marginRight: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   heartDot: {
     position: 'absolute', top: 2, right: 2,
     width: 8, height: 8, borderRadius: 4,
@@ -501,12 +503,11 @@ export default function Navigation() {
       // Le "|| (!data.type && data.conversationId)" gere les anciennes notifications
       // envoyees avant l'ajout du champ type, qui ne portaient que conversationId.
       if (data.conversationId) {
-        mapNavigation.setPendingConversation(data.conversationId);
         supabase.from('push_debug_logs').insert({
           to_token: 'APPLY_MSG', title: 'applyNotificationData message branch',
           detail: JSON.stringify({ conversationId: data.conversationId }),
         }).then(() => {}, () => {});
-        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
+        navigationRef.navigate('Messages' as any, { conversationId: data.conversationId, t: Date.now() } as any);
       }
     } else if (data.type === 'broadcast') {
       if (data.targetType === 'lieu' && lieuId) {
@@ -516,8 +517,7 @@ export default function Navigation() {
         mapNavigation.setPendingEvent(data.eventId);
         navigationRef.navigate('Tabs' as any, { screen: 'Events' } as any);
       } else if (data.targetType === 'conversation' && data.conversationId) {
-        mapNavigation.setPendingConversation(data.conversationId);
-        navigationRef.navigate('Tabs' as any, { screen: 'Meute' } as any);
+        navigationRef.navigate('Messages' as any, { conversationId: data.conversationId, t: Date.now() } as any);
       } else if (data.targetType === 'url' && data.url) {
         Linking.openURL(data.url);
       } else if (data.targetType === 'partenaire' && data.partenaireId) {
@@ -784,6 +784,18 @@ export default function Navigation() {
             headerStyle: { backgroundColor: colors.bordeaux },
             headerTintColor: colors.ivory,
             headerTitle: '', headerBackTitle: 'Retour',
+          }}
+        />
+        <Stack.Screen
+          name="Messages"
+          component={MessagesScreen}
+          options={{
+            headerShown: true, presentation: 'card',
+            headerStyle: { backgroundColor: colors.bordeaux },
+            headerTintColor: colors.ivory,
+            title: 'Messages',
+            headerTitleStyle: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 18, color: colors.ivory },
+            headerBackTitle: 'Retour',
           }}
         />
         <Stack.Screen

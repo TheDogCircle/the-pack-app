@@ -658,8 +658,7 @@ export default function EvenementsScreen() {
 
   function openPrivateChat(convId: string) {
     setSelectedPrivate(null);
-    mapNavigation.setPendingConversation(convId);
-    navigation.navigate('Tabs', { screen: 'Meute' });
+    navigation.navigate('Messages', { conversationId: convId, t: Date.now() });
   }
 
   function resetForm() {
