@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -67,6 +67,13 @@ function TraceContour({ trace, width, height, epaisseur }: { trace: DonneesStory
 // que la mention legale du fournisseur de carte sorte du champ.
 export function CarteStory({ trace, onPrete }: { trace: DonneesStory['trace']; onPrete?: () => void }) {
   const ref = useRef<MapView>(null);
+  // onMapLoaded ne se declenche pas toujours sur iOS (Apple Plans) : le bouton
+  // Partager restait alors en chargement sans fin. Filet : pret au plus tard
+  // 3 s apres l'affichage (les tuiles sont chargees bien avant en pratique).
+  useEffect(() => {
+    const t = setTimeout(() => onPrete?.(), 3000);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <View style={s.carteCadre} pointerEvents="none">
       <MapView
@@ -78,6 +85,7 @@ export function CarteStory({ trace, onPrete }: { trace: DonneesStory['trace']; o
           if (trace.length > 1) ref.current?.fitToCoordinates(trace, {
             edgePadding: { top: 130, right: 80, bottom: 160, left: 80 }, animated: false,
           });
+          setTimeout(() => onPrete?.(), 1500);
         }}
         onMapLoaded={() => setTimeout(() => onPrete?.(), 500)}
       >

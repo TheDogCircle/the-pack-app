@@ -162,7 +162,7 @@ export default function BaladeResume({
             </View>
             {MISES_EN_PAGE.find(m => m.key === miseEnPage)?.transparent ? (
               <Text style={[styles.astuce, { marginHorizontal: 22, marginTop: 12 }]}>
-                Fond transparent : dans le partage, choisis « Copier » (ou « Enregistrer l'image »), puis dans ta story Instagram colle-la par-dessus ta photo.
+                Fond transparent : appuie sur Partager puis fais défiler la liste vers le bas jusqu'à « Copier » (ou « Enregistrer l'image »). Ouvre ensuite ta story Instagram, ajoute ta photo et colle l'image par-dessus.
               </Text>
             ) : null}
           </ScrollView>

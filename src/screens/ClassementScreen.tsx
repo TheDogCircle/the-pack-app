@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
 import { BaladeFiche, formatDuree } from '../components/BaladeResume';
+import PartageClassement, { type DonneesClassement } from '../components/PartageClassement';
 
 // Espace Balades : classement du mois (km, calcule cote serveur :
 // classement_balades_mois / mes_stats_balades / mes_badges_balades), historique perso, dernieres
@@ -56,6 +57,7 @@ export default function ClassementScreen() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [moiId, setMoiId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [partageClassement, setPartageClassement] = useState<DonneesClassement | null>(null);
 
   const charger = useCallback(async (p: Portee) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -233,6 +235,31 @@ export default function ClassementScreen() {
         ))}
       </View>
       <Text style={styles.sub}>Classement de {NOM_MOIS()} · {finDuMois()} · en kilomètres</Text>
+      {(() => {
+        // Partage : rang dans la portee affichee (Toute la meute, Ma ville...),
+        // top 3 + ma ligne si je suis hors podium.
+        const maLigne = lignes?.find(l => l.user_id === moiId);
+        if (!lignes || !maLigne) return null;
+        const nomLigne = (l: Ligne) => (l.user_id === moiId ? 'Moi' : (l.prenom || 'Membre')) + (l.nom_chien ? ` & ${l.nom_chien}` : '');
+        const extrait = lignes.filter(l => l.rang <= 3 || l.user_id === moiId).slice(0, 4);
+        return (
+          <TouchableOpacity
+            style={styles.partagerBtn}
+            onPress={() => setPartageClassement({
+              mois: NOM_MOIS(),
+              portee: (PORTEES.find(([k]) => k === portee) || [portee, ''])[1],
+              rang: maLigne.rang,
+              km: maLigne.km,
+              nb: maLigne.nb,
+              titre: (maLigne.prenom || 'Moi') + (maLigne.nom_chien ? ` & ${maLigne.nom_chien}` : ''),
+              lignes: extrait.map(l => ({ rang: l.rang, nom: nomLigne(l), km: l.km, moi: l.user_id === moiId })),
+            })}
+          >
+            <Ionicons name="share-outline" size={15} color={colors.bordeaux} />
+            <Text style={styles.partagerTexte}>Partager mon classement</Text>
+          </TouchableOpacity>
+        );
+      })()}
 
       {lignes === null ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.terra} />
@@ -280,12 +307,18 @@ export default function ClassementScreen() {
       </>
       )}
       <BaladeFiche baladeId={ficheId} onClose={() => setFicheId(null)} onVoirCarte={voirSurCarte} />
+      <PartageClassement donnees={partageClassement} onClose={() => setPartageClassement(null)} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.ivoryPale },
+  partagerBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'center',
+    marginTop: 10, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: colors.bordeaux,
+  },
+  partagerTexte: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
   statsCard: {
     flexDirection: 'row', margin: 16, marginBottom: 6, padding: 16, borderRadius: 16,
     backgroundColor: colors.bordeaux,
