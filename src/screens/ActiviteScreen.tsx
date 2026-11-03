@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 
 type ActivityType = 'like_post' | 'like_photo' | 'comment_post' | 'comment_photo' | 'follow' | 'birthday';
 
@@ -75,121 +76,40 @@ export default function ActiviteScreen() {
   const load = useCallback(async () => {
     const userId = session?.user?.id;
     if (!userId) { setLoading(false); return; }
-
-    const [{ data: myPosts }, { data: myPhotos }] = await Promise.all([
-      supabase.from('community_posts').select('id, image_url, images').eq('user_id', userId),
-      supabase.from('photos').select('id, url').eq('user_id', userId),
-    ]);
-
-    const postThumb = new Map((myPosts || []).map((p: any) => [p.id, (p.images && p.images[0]) || p.image_url || null]));
-    const photoThumb = new Map((myPhotos || []).map((p: any) => [p.id, p.url]));
-    const myPostIds = Array.from(postThumb.keys());
-    const myPhotoIds = Array.from(photoThumb.keys());
-
-    const [
-      { data: postLikes },
-      { data: photoLikes },
-      { data: postComments },
-      { data: photoComments },
-      { data: followRows },
-      { data: followingRows },
-    ] = await Promise.all([
-      myPostIds.length
-        ? supabase.from('community_post_likes').select('id, post_id, user_id, created_at').in('post_id', myPostIds).neq('user_id', userId)
-        : Promise.resolve({ data: [] as any[] }),
-      myPhotoIds.length
-        ? supabase.from('photo_likes').select('id, photo_id, user_id, created_at').in('photo_id', myPhotoIds).neq('user_id', userId)
-        : Promise.resolve({ data: [] as any[] }),
-      myPostIds.length
-        ? supabase.from('community_post_comments').select('id, post_id, user_id, content, created_at').in('post_id', myPostIds).neq('user_id', userId)
-        : Promise.resolve({ data: [] as any[] }),
-      myPhotoIds.length
-        ? supabase.from('photo_comments').select('id, photo_id, user_id, content, created_at').in('photo_id', myPhotoIds).neq('user_id', userId)
-        : Promise.resolve({ data: [] as any[] }),
-      supabase.from('follows').select('id, follower_id, statut, created_at').eq('following_id', userId),
-      supabase.from('follows').select('following_id').eq('follower_id', userId).eq('statut', 'accepte'),
-    ]);
-
-    const followingIds = (followingRows || []).map((f: any) => f.following_id);
-    let birthdayDogs: { user_id: string; nom: string }[] = [];
-    if (followingIds.length) {
-      const { data: dogs } = await supabase
-        .from('chiens').select('user_id, nom, date_naissance_parsed')
-        .in('user_id', followingIds).not('date_naissance_parsed', 'is', null);
-      const now = new Date();
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const dd = String(now.getDate()).padStart(2, '0');
-      birthdayDogs = (dogs || [])
-        .filter((d: any) => d.date_naissance_parsed?.slice(5, 7) === mm && d.date_naissance_parsed?.slice(8, 10) === dd)
-        .map((d: any) => ({ user_id: d.user_id, nom: d.nom }));
+    // Affichage immediat de la derniere activite connue, puis mise a jour
+    if (!items.length) {
+      const enCache = await lireCache<ActivityItem[]>(`activite:${userId}`);
+      if (enCache?.length) { setItems(enCache); setLoading(false); }
     }
 
-    const actorIds = new Set<string>();
-    (postLikes || []).forEach((r: any) => actorIds.add(r.user_id));
-    (photoLikes || []).forEach((r: any) => actorIds.add(r.user_id));
-    (postComments || []).forEach((r: any) => actorIds.add(r.user_id));
-    (photoComments || []).forEach((r: any) => actorIds.add(r.user_id));
-    (followRows || []).forEach((r: any) => actorIds.add(r.follower_id));
-    birthdayDogs.forEach(d => actorIds.add(d.user_id));
+    // Une seule requete serveur par source (avant : 4 allers-retours, dont un
+    // .in() avec tous les posts de l'utilisateur, tres lent pour un gros compte)
+    const [{ data: evts, error }, { data: chiens }] = await Promise.all([
+      supabase.rpc('mon_activite', { p_limite: 120 }),
+      supabase.rpc('anniversaires_suivis'),
+    ]);
+    if (error) { setLoading(false); setRefreshing(false); return; }
 
-    const { data: profils } = actorIds.size
-      ? await supabase.from('profils').select('id, prenom, avatar_url').in('id', Array.from(actorIds))
-      : { data: [] as any[] };
-    const profilMap = new Map((profils || []).map((p: any) => [p.id, p]));
+    const merged: ActivityItem[] = (evts || []).map((r: any) => ({
+      id: r.id, type: r.type as ActivityType, actorId: r.actor_id,
+      actorPrenom: r.actor_prenom || 'Un membre', actorAvatarUrl: r.actor_avatar ?? null,
+      createdAt: r.created_at, thumbnailUrl: r.thumbnail ?? null,
+      commentContent: r.commentaire ?? undefined, followStatut: r.follow_statut ?? undefined,
+    }));
 
-    const merged: ActivityItem[] = [];
-
-    (postLikes || []).forEach((r: any) => {
-      const p = profilMap.get(r.user_id);
+    const now = new Date();
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    (chiens || []).filter((d: any) => (d.date_naissance || '').slice(5, 10) === mmdd).forEach((d: any) => {
       merged.push({
-        id: `like_post_${r.id}`, type: 'like_post', actorId: r.user_id,
-        actorPrenom: p?.prenom || 'Un membre', actorAvatarUrl: p?.avatar_url ?? null,
-        createdAt: r.created_at, thumbnailUrl: postThumb.get(r.post_id) || null,
-      });
-    });
-    (photoLikes || []).forEach((r: any) => {
-      const p = profilMap.get(r.user_id);
-      merged.push({
-        id: `like_photo_${r.id}`, type: 'like_photo', actorId: r.user_id,
-        actorPrenom: p?.prenom || 'Un membre', actorAvatarUrl: p?.avatar_url ?? null,
-        createdAt: r.created_at, thumbnailUrl: photoThumb.get(r.photo_id) || null,
-      });
-    });
-    (postComments || []).forEach((r: any) => {
-      const p = profilMap.get(r.user_id);
-      merged.push({
-        id: `comment_post_${r.id}`, type: 'comment_post', actorId: r.user_id,
-        actorPrenom: p?.prenom || 'Un membre', actorAvatarUrl: p?.avatar_url ?? null,
-        createdAt: r.created_at, thumbnailUrl: postThumb.get(r.post_id) || null, commentContent: r.content,
-      });
-    });
-    (photoComments || []).forEach((r: any) => {
-      const p = profilMap.get(r.user_id);
-      merged.push({
-        id: `comment_photo_${r.id}`, type: 'comment_photo', actorId: r.user_id,
-        actorPrenom: p?.prenom || 'Un membre', actorAvatarUrl: p?.avatar_url ?? null,
-        createdAt: r.created_at, thumbnailUrl: photoThumb.get(r.photo_id) || null, commentContent: r.content,
-      });
-    });
-    (followRows || []).forEach((r: any) => {
-      const p = profilMap.get(r.follower_id);
-      merged.push({
-        id: `follow_${r.id}`, type: 'follow', actorId: r.follower_id,
-        actorPrenom: p?.prenom || 'Un membre', actorAvatarUrl: p?.avatar_url ?? null,
-        createdAt: r.created_at, followStatut: r.statut,
-      });
-    });
-    birthdayDogs.forEach(d => {
-      const p = profilMap.get(d.user_id);
-      merged.push({
-        id: `birthday_${d.user_id}_${d.nom}`, type: 'birthday', actorId: d.user_id,
-        actorPrenom: p?.prenom || 'un copain', actorAvatarUrl: p?.avatar_url ?? null,
+        id: `birthday_${d.chien_id}`, type: 'birthday', actorId: d.user_id,
+        actorPrenom: d.prenom || 'un copain', actorAvatarUrl: d.avatar_url ?? null,
         createdAt: new Date().toISOString(), chienNom: d.nom,
       });
     });
 
     merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     setItems(merged.slice(0, 80));
+    ecrireCache(`activite:${userId}`, merged.slice(0, 80));
     setLoading(false);
     setRefreshing(false);
 

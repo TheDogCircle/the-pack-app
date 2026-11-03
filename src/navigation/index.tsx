@@ -243,32 +243,10 @@ function MainTabs() {
     const lastSeenActivity = await AsyncStorage.getItem(activityLastSeenKey(userId));
     const sinceActivity = lastSeenActivity || since48h;
 
-    const [{ data: myPosts }, { data: myPhotos }] = await Promise.all([
-      supabase.from('community_posts').select('id').eq('user_id', userId),
-      supabase.from('photos').select('id').eq('user_id', userId),
-    ]);
-    const myPostIds = (myPosts || []).map((p: any) => p.id);
-    const myPhotoIds = (myPhotos || []).map((p: any) => p.id);
-
+    // Derniere activite recue (une seule requete serveur, cf. mon_activite)
     let activityCount = 0;
-    if (myPostIds.length) {
-      const [{ count: lp }, { count: cp }] = await Promise.all([
-        supabase.from('community_post_likes').select('id', { count: 'exact', head: true }).in('post_id', myPostIds).neq('user_id', userId).gt('created_at', sinceActivity),
-        supabase.from('community_post_comments').select('id', { count: 'exact', head: true }).in('post_id', myPostIds).neq('user_id', userId).gt('created_at', sinceActivity),
-      ]);
-      activityCount += (lp ?? 0) + (cp ?? 0);
-    }
-    if (myPhotoIds.length) {
-      const [{ count: lph }, { count: cph }] = await Promise.all([
-        supabase.from('photo_likes').select('id', { count: 'exact', head: true }).in('photo_id', myPhotoIds).neq('user_id', userId).gt('created_at', sinceActivity),
-        supabase.from('photo_comments').select('id', { count: 'exact', head: true }).in('photo_id', myPhotoIds).neq('user_id', userId).gt('created_at', sinceActivity),
-      ]);
-      activityCount += (lph ?? 0) + (cph ?? 0);
-    }
-    const { count: newFollows } = await supabase
-      .from('follows').select('id', { count: 'exact', head: true })
-      .eq('following_id', userId).gt('created_at', sinceActivity);
-    activityCount += newFollows ?? 0;
+    const { data: derniere } = await supabase.rpc('mon_activite', { p_limite: 1 });
+    if (derniere?.[0] && new Date(derniere[0].created_at) > new Date(sinceActivity)) activityCount = 1;
 
     let hasBirthdayToday = false;
     if (follows?.length) {

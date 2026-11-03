@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshCo
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
 
@@ -55,33 +56,23 @@ export default function AnniversairesScreen() {
     const userId = session?.user?.id;
     if (!userId) { setLoading(false); return; }
 
-    const { data: followRows } = await supabase
-      .from('follows').select('following_id')
-      .eq('follower_id', userId).eq('statut', 'accepte');
-    const followingIds = (followRows || []).map((f: any) => f.following_id);
+    // Affichage immediat de la derniere liste connue, puis mise a jour
+    if (!rows.length) {
+      const enCache = await lireCache<BirthdayRow[]>(`anniversaires:${userId}`);
+      if (enCache?.length) { setRows(enCache); setLoading(false); }
+    }
 
-    if (!followingIds.length) {
+    // Une seule requete serveur (avant : abonnements, puis chiens, puis profils)
+    const { data: liste, error } = await supabase.rpc('anniversaires_suivis');
+    if (error) { setLoading(false); setRefreshing(false); return; }
+    const dogs = (liste || []).map((d: any) => ({ id: d.chien_id, nom: d.nom, user_id: d.user_id, date_naissance_parsed: d.date_naissance }));
+    if (!dogs.length) {
       setRows([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
-
-    const { data: dogs } = await supabase
-      .from('chiens').select('id, nom, user_id, date_naissance_parsed')
-      .in('user_id', followingIds).not('date_naissance_parsed', 'is', null);
-
-    if (!dogs?.length) {
-      setRows([]);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
-    const ownerIds = Array.from(new Set(dogs.map((d: any) => d.user_id)));
-    const { data: profils } = await supabase
-      .from('profils').select('id, prenom, avatar_url').in('id', ownerIds);
-    const profilMap = new Map((profils || []).map((p: any) => [p.id, p]));
+    const profilMap = new Map<string, { prenom: string | null; avatar_url: string | null }>((liste || []).map((d: any) => [d.user_id, { prenom: d.prenom, avatar_url: d.avatar_url }]));
 
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
@@ -104,6 +95,7 @@ export default function AnniversairesScreen() {
 
     computed.sort((a, b) => a.daysUntil - b.daysUntil);
     setRows(computed);
+    ecrireCache(`anniversaires:${userId}`, computed);
     setLoading(false);
     setRefreshing(false);
   }, [session?.user?.id]);
