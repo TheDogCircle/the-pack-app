@@ -2056,6 +2056,7 @@ export default function CarteScreen() {
     setAvisLoading(false);
     if (error) { Alert.alert('Erreur', error.message); return; }
     const isNewAvis = !myAvis;
+    const avisCommentPartage = avisComment.trim();
     setMyAvis({ note: avisNote, commentaire: avisComment.trim() || null });
     setAvisModal(false); setAvisNote(0); setAvisComment('');
     if (isNewAvis && userId) {
@@ -2073,7 +2074,28 @@ export default function CarteScreen() {
       (avisProfils || []).forEach((p: any) => { avisProfilMap[p.id] = p; });
       setFicheAvis((avisRaw || []).map((a: any) => ({ id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at, prenom: avisProfilMap[a.user_id]?.prenom || 'Membre', username: avisProfilMap[a.user_id]?.username || null, reponse_pro: a.reponse_pro || null, ambassadeur: avisProfilMap[a.user_id]?.ambassadeur || null })));
     }
-    Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
+    if (isNewAvis) {
+      // Moment ideal pour publier : proposer une photo de ce lieu dans le feed
+      const lieuPost = { id: selectedLieu.id, nom: selectedLieu.nom, cat: selectedLieu.cat, ville: selectedLieu.ville };
+      const texte = avisCommentPartage;
+      Alert.alert(
+        'Merci pour ton avis !',
+        `Partage une photo de ton chien chez ${selectedLieu.nom} pour faire découvrir ce lieu à la meute.`,
+        [
+          { text: 'Plus tard', style: 'cancel' },
+          {
+            text: 'Publier une photo',
+            onPress: () => {
+              track('publication_proposee', { moment: 'avis', choix: 'publier' });
+              mapNavigation.setPendingNouveauPost({ lieu: lieuPost, caption: texte || undefined });
+              navigation.navigate('Meute' as never);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Merci !', 'Ton avis a bien été enregistré.');
+    }
   }
 
   // Phase Pro 3 : "Contacter" sur la fiche publique. Reutilise conversations/

@@ -35,6 +35,9 @@ const eventPending = createPending<string>();
 const postPending = createPending<string>();
 const partenairePending = createPending<{ partenaireId: string; postId?: string }>();
 const eventsFilterPending = createPending<string>();
+// Ouvrir le formulaire "Nouveau post" du feed deja rempli (apres un avis, un badge...)
+export type NouveauPostPreRempli = { lieu?: { id: string; nom: string; cat: string; ville: string } | null; caption?: string };
+const nouveauPostPending = createPending<NouveauPostPreRempli>();
 
 let _returnCallback: (() => void) | null = null;
 
@@ -84,4 +87,8 @@ export const mapNavigation = {
   setPendingEventsFilter(filter: string) { eventsFilterPending.set(filter); },
   consumeEventsFilter(): string | null { return eventsFilterPending.consume(); },
   onEventsFilterPending(cb: ((filter: string) => void) | null) { eventsFilterPending.subscribe(cb); },
+
+  setPendingNouveauPost(v: NouveauPostPreRempli) { nouveauPostPending.set(v); },
+  consumeNouveauPost(): NouveauPostPreRempli | null { return nouveauPostPending.consume(); },
+  onNouveauPostPending(cb: ((v: NouveauPostPreRempli) => void) | null) { nouveauPostPending.subscribe(cb); },
 };

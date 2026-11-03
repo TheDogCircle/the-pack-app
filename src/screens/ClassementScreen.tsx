@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
+import { track } from '../lib/tracking';
 import { BaladeFiche, formatDuree } from '../components/BaladeResume';
 import PartageClassement, { type DonneesClassement } from '../components/PartageClassement';
 
@@ -174,6 +175,17 @@ export default function ClassementScreen() {
                     Dernier badge · {new Date(dernier.date!).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
                   </Text>
                   <Text style={styles.vedetteCompte}>{nb} / {badges.length} badges</Text>
+                  <TouchableOpacity
+                    style={[styles.partagerBtn, { marginTop: 14 }]}
+                    onPress={() => {
+                      track('publication_proposee', { moment: 'badge', choix: 'publier', badge: dernier.code });
+                      mapNavigation.setPendingNouveauPost({ caption: `🏅 Nouveau badge débloqué : ${dernier.titre} !` });
+                      navigation.navigate('Tabs', { screen: 'Meute' });
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={15} color={colors.bordeaux} />
+                    <Text style={styles.partagerTexte}>Partager dans le feed</Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 <View style={styles.vide}>

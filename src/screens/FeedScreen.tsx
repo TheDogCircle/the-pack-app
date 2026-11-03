@@ -16,7 +16,7 @@ import { supabase, uploadToR2 } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
 import { findOrCreateDM } from '../lib/conversations';
-import { mapNavigation } from '../lib/mapNavigation';
+import { mapNavigation, NouveauPostPreRempli } from '../lib/mapNavigation';
 import { normalizePhone } from '../lib/phone';
 import { getRegion, REGIONS, normalizeText } from '../utils/villeRegion';
 import { colors } from '../lib/theme';
@@ -64,6 +64,7 @@ type CommunityPost = {
   nom_chien?: string | null;
   realPhotoId?: string | null;
   photoGroupIds?: string[];
+  groupe?: CommunityPost[]; // type 'lieux_groupe' : annonces "nouveau lieu" d'une meme semaine
 };
 
 type Comment = {
@@ -300,6 +301,94 @@ function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds }: 
         </View>
         {lieu ? <Ionicons name="chevron-forward" size={16} color={colors.textMuted} /> : null}
       </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Regroupement des annonces "nouveau lieu" ─────────────────────────────────
+// Les annonces automatiques (une par lieu ajoute) noyaient les publications des
+// membres : on les regroupe en une seule carte par semaine.
+
+function lundiDe(iso: string): string {
+  const d = new Date(iso);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  // Date locale (toISOString passerait en UTC et donnerait le dimanche)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function grouperNouveauxLieux(posts: CommunityPost[]): CommunityPost[] {
+  const parSemaine = new Map<string, CommunityPost[]>();
+  posts.forEach(p => {
+    if (p.type !== 'nouveau_lieu') return;
+    const k = lundiDe(p.created_at);
+    if (!parSemaine.has(k)) parSemaine.set(k, []);
+    parSemaine.get(k)!.push(p);
+  });
+  const dejaPlace = new Set<string>();
+  const res: CommunityPost[] = [];
+  posts.forEach(p => {
+    if (p.type !== 'nouveau_lieu') { res.push(p); return; }
+    const k = lundiDe(p.created_at);
+    const groupe = parSemaine.get(k)!;
+    if (groupe.length < 2) { res.push(p); return; }
+    if (dejaPlace.has(k)) return;
+    dejaPlace.add(k);
+    res.push({
+      id: `lieux-${k}`, user_id: '', type: 'lieux_groupe', image_url: null, caption: null, lieu_id: null,
+      auto_generated: true, created_at: groupe[0].created_at, profils: null, lieux: null,
+      community_post_likes: [], community_post_comments: [], groupe,
+    });
+  });
+  return res;
+}
+
+function LieuxGroupeCard({ post, onLieuPress }: { post: CommunityPost; onLieuPress: (id: string) => void }) {
+  const [ouvert, setOuvert] = useState(false);
+  const groupe = (post.groupe || []).filter(p => p.lieux);
+  const n = groupe.length;
+  const lundi = lundiDe(post.created_at);
+  const periode = lundi === lundiDe(new Date().toISOString())
+    ? 'cette semaine'
+    : `la semaine du ${new Date(lundi + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`;
+  const visibles = ouvert ? groupe : groupe.slice(0, 3);
+  if (n === 0) return null;
+
+  return (
+    <View style={[styles.postCard, styles.lieuCard]}>
+      <View style={styles.postHeader}>
+        <View style={styles.nouveauLieuIconWrap}>
+          <Ionicons name="location" size={22} color={colors.terra} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.postAuthor}>{n} nouveau{n > 1 ? 'x' : ''} lieu{n > 1 ? 'x' : ''} dog-friendly</Text>
+          <Text style={styles.postTime}>ajouté{n > 1 ? 's' : ''} à la carte {periode}</Text>
+        </View>
+      </View>
+      <View style={styles.lieuxGroupeListe}>
+        {visibles.map((p, i) => (
+          <TouchableOpacity
+            key={p.id}
+            style={[styles.lieuxGroupeLigne, i > 0 && styles.lieuxGroupeSep]}
+            onPress={() => onLieuPress(p.lieux!.id)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={styles.nouveauLieuNom} numberOfLines={1}>{p.lieux!.nom}</Text>
+              <Text style={styles.nouveauLieuMeta} numberOfLines={1}>
+                {[p.lieux!.cat, p.lieux!.ville].filter(Boolean).join(' · ')}
+                {p.profils?.prenom ? ` · par ${p.profils.prenom}` : ''}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ))}
+      </View>
+      {n > 3 ? (
+        <TouchableOpacity onPress={() => setOuvert(o => !o)} style={styles.lieuxGroupeVoir} hitSlop={8}>
+          <Text style={styles.lieuxGroupeVoirTexte}>{ouvert ? 'Voir moins' : `Voir les ${n} lieux`}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -714,13 +803,14 @@ async function notifyFollowersNewPost(userId: string, postId: string) {
 }
 
 function NewPostModal({
-  visible, onClose, myUserId, onPosted, navigation,
+  visible, onClose, myUserId, onPosted, navigation, preRempli,
 }: {
   visible: boolean;
   onClose: () => void;
   myUserId: string;
   onPosted: () => void;
   navigation: any;
+  preRempli?: NouveauPostPreRempli | null;
 }) {
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [caption, setCaption] = useState('');
@@ -731,6 +821,13 @@ function NewPostModal({
   const [uploading, setUploading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const MAX_PHOTOS = 5;
+
+  // Ouverture depuis un avis ou un badge : lieu et texte deja remplis
+  useEffect(() => {
+    if (!visible || !preRempli) return;
+    if (preRempli.lieu) setSelectedLieu(preRempli.lieu as LieuResult);
+    if (preRempli.caption) setCaption(preRempli.caption);
+  }, [visible, preRempli]);
 
   function reset() {
     setImageUris([]);
@@ -1053,6 +1150,17 @@ export default function FeedScreen() {
   useEffect(() => {
     mapNavigation.onPostPending((pid) => { selectTab('feed'); setPendingPostId(pid); });
     return () => { mapNavigation.onPostPending(null); };
+  }, []);
+
+  // "Publier" propose apres un avis ou un badge : ouvre le formulaire deja rempli
+  const [preRempliPost, setPreRempliPost] = useState<NouveauPostPreRempli | null>(null);
+  useFocusEffect(useCallback(() => {
+    const v = mapNavigation.consumeNouveauPost();
+    if (v) { selectTab('feed'); setPreRempliPost(v); setNewPostVisible(true); }
+  }, []));
+  useEffect(() => {
+    mapNavigation.onNouveauPostPending((v) => { selectTab('feed'); setPreRempliPost(v); setNewPostVisible(true); });
+    return () => { mapNavigation.onNouveauPostPending(null); };
   }, []);
 
   // Feed
@@ -1481,9 +1589,9 @@ export default function FeedScreen() {
       };
     });
 
-    const merged = [...communityPosts, ...mapPosts].sort(
+    const merged = grouperNouveauxLieux([...communityPosts, ...mapPosts].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    ));
 
     setPosts(merged);
     setFeedLoading(false);
@@ -1850,7 +1958,16 @@ export default function FeedScreen() {
                 </View>
               }
               ListHeaderComponent={
-                visibleSuggestions.length > 0 ? (
+                <>
+                {myUserId ? (
+                  <TouchableOpacity style={styles.composer} onPress={() => setNewPostVisible(true)} activeOpacity={0.8}>
+                    <Ionicons name="camera-outline" size={22} color={colors.terra} />
+                    <View style={styles.composerChamp}>
+                      <Text style={styles.composerTexte}>Partage un moment avec ton chien…</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+                {visibleSuggestions.length > 0 ? (
                   <View style={styles.suggestWrap}>
                     <TouchableOpacity style={styles.suggestTitleRow} onPress={toggleSuggestionsCollapsed} activeOpacity={0.7}>
                       <Text style={styles.suggestTitle}>Suggestions pour toi</Text>
@@ -1895,10 +2012,13 @@ export default function FeedScreen() {
                     </ScrollView>
                     )}
                   </View>
-                ) : null
+                ) : null}
+                </>
               }
               renderItem={({ item }) =>
-                item.type === 'nouveau_lieu' ? (
+                item.type === 'lieux_groupe' ? (
+                  <LieuxGroupeCard post={item} onLieuPress={openLieu} />
+                ) : item.type === 'nouveau_lieu' ? (
                   <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} birthdayUserIds={birthdayUserIds} />
                 ) : item.type === 'balade' ? (
                   <BaladeCard
@@ -2063,7 +2183,8 @@ export default function FeedScreen() {
         <>
           <NewPostModal
             visible={newPostVisible}
-            onClose={() => setNewPostVisible(false)}
+            onClose={() => { setNewPostVisible(false); setPreRempliPost(null); }}
+            preRempli={preRempliPost}
             myUserId={myUserId}
             onPosted={() => { setTab('feed'); loadFeed(true); }}
             navigation={navigation}
@@ -2467,6 +2588,23 @@ const styles = StyleSheet.create({
   nouveauLieuLabel: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
   nouveauLieuNom:   { fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
   nouveauLieuMeta:  { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  lieuxGroupeListe: {
+    marginHorizontal: 14, marginBottom: 12, paddingHorizontal: 14,
+    backgroundColor: colors.ivoryPale, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+  },
+  lieuxGroupeLigne: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11 },
+  lieuxGroupeSep: { borderTopWidth: 1, borderTopColor: colors.border },
+  lieuxGroupeVoir: { alignSelf: 'center', marginTop: -2, marginBottom: 14 },
+  lieuxGroupeVoirTexte: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  composer: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white,
+    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
+  },
+  composerChamp: {
+    flex: 1, borderRadius: 20, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.ivoryPale, paddingHorizontal: 14, paddingVertical: 9,
+  },
+  composerTexte: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.textMuted },
 
   // Membres
   list:       { paddingHorizontal: 16, gap: 10, paddingBottom: 20 },
