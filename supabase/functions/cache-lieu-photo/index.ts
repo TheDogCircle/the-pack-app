@@ -19,7 +19,7 @@ const corsHeaders = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-const PLAFOND_JOUR = 150;
+const PLAFOND_JOUR = 90; // sous le quota Google GetPhotoMediaRequest (100 / jour)
 const LIEN_GOOGLE = /^https:\/\/places\.googleapis\.com\/v1\/(places\/[^/]+\/photos\/[^/?]+)\/media/;
 
 serve(async (req) => {
