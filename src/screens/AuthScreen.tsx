@@ -40,7 +40,7 @@ export default function AuthScreen() {
       return;
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://thepackclub.fr/reset-password.html',
+      redirectTo: 'https://thepacklameute.fr/reset-password.html',
     });
     if (error) {
       Alert.alert('Erreur', error.message);
