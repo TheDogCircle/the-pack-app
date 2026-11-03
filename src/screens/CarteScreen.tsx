@@ -55,9 +55,15 @@ async function fetchAndCacheGooglePhoto(lieuData: { id: string; nom: string; vil
     if (res.status === 403) { googlePlacesApiBlocked = true; return null; }
     const json = await res.json();
     const photoName = json.places?.[0]?.photos?.[0]?.name;
-    if (!photoName) return null;
+    if (!photoName) {
+      // Aucune photo chez Google : on le note ('none' = deja cherche, meme
+      // convention que le site) pour ne pas relancer une recherche payante a
+      // chaque ouverture de la fiche.
+      if (res.ok) supabase.rpc('memoriser_photo_google', { p_lieu: lieuData.id, p_url: 'none' }).then(() => {});
+      return null;
+    }
     const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-    supabase.from('lieux').update({ google_photo_url: url }).eq('id', lieuData.id).then(() => {});
+    supabase.rpc('memoriser_photo_google', { p_lieu: lieuData.id, p_url: url }).then(() => {});
     return url;
   } catch {
     return null;
@@ -419,9 +425,8 @@ function ListCardPhoto({ uri, hasCommunityPhoto, lieu, style }: { uri: string; h
       style={style}
       resizeMode="cover"
       onError={() => {
-        if (hasCommunityPhoto || retried.current) { setSrc(''); return; }
-        retried.current = true;
-        fetchAndCacheGooglePhoto(lieu).then(url => setSrc(url || ''));
+        // Photos Google : seulement sur la fiche (facture Google Cloud)
+        setSrc('');
       }}
     />
   );
@@ -429,10 +434,10 @@ function ListCardPhoto({ uri, hasCommunityPhoto, lieu, style }: { uri: string; h
 
 function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
   const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
-  const [photo, setPhoto] = useState(lieu.photoUrl || lieu.google_photo_url || null);
+  const [photo, setPhoto] = useState(lieu.photoUrl || null);
   const retried = useRef(false);
   useEffect(() => {
-    setPhoto(lieu.photoUrl || lieu.google_photo_url || null);
+    setPhoto(lieu.photoUrl || null);
     retried.current = false;
   }, [lieu.id, lieu.photoUrl, lieu.google_photo_url]);
   if (photo) return (
@@ -441,9 +446,7 @@ function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
       style={style}
       resizeMode="cover"
       onError={() => {
-        if (lieu.photoUrl || retried.current) { setPhoto(null); return; }
-        retried.current = true;
-        fetchAndCacheGooglePhoto(lieu).then(setPhoto);
+        setPhoto(null);
       }}
     />
   );
@@ -489,10 +492,10 @@ function DiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => vo
 
 function FeaturedDiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: () => void }) {
   const cfg = CAT_CONFIG[lieu.cat] || CAT_CONFIG.autre;
-  const [photo, setPhoto] = useState(lieu.photoUrl || lieu.google_photo_url || null);
+  const [photo, setPhoto] = useState(lieu.photoUrl || null);
   const retried = useRef(false);
   useEffect(() => {
-    setPhoto(lieu.photoUrl || lieu.google_photo_url || null);
+    setPhoto(lieu.photoUrl || null);
     retried.current = false;
   }, [lieu.id, lieu.photoUrl, lieu.google_photo_url]);
   return (
@@ -503,9 +506,7 @@ function FeaturedDiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: 
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
           onError={() => {
-            if (lieu.photoUrl || retried.current) { setPhoto(null); return; }
-            retried.current = true;
-            fetchAndCacheGooglePhoto(lieu).then(setPhoto);
+            setPhoto(null);
           }}
         />
       ) : (
@@ -613,39 +614,7 @@ async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string
   return map;
 }
 
-// Photos Google des lieux, chargees seulement pour la vue liste : les inclure
-// dans le chargement de la carte doublait son poids (~560 caracteres par lieu).
-async function fetchGooglePhotoUrls(ids: string[]): Promise<Record<string, string>> {
-  if (!ids.length) return {};
-  const CHUNK_SIZE = 150;
-  const lots: string[][] = [];
-  for (let i = 0; i < ids.length; i += CHUNK_SIZE) lots.push(ids.slice(i, i + CHUNK_SIZE));
-  const res = await Promise.all(lots.map(chunk => supabase
-    .from('lieux').select('id,google_photo_url').in('id', chunk).not('google_photo_url', 'is', null)));
-  const map: Record<string, string> = {};
-  res.forEach(({ data }) => (data || []).forEach((l: any) => { map[l.id] = l.google_photo_url; }));
-  return map;
-}
 
-async function fetchGooglePhotoFor(lieu: { id: string; nom: string; ville: string }): Promise<string | null> {
-  if (googlePlacesApiBlocked) return null;
-  try {
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'places.photos' },
-      body: JSON.stringify({ textQuery: `${lieu.nom} ${lieu.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
-    });
-    if (res.status === 403) { googlePlacesApiBlocked = true; return null; }
-    const json = await res.json();
-    const photoName = json.places?.[0]?.photos?.[0]?.name;
-    if (!photoName) return null;
-    const photoUrl = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-    await supabase.from('lieux').update({ google_photo_url: photoUrl }).eq('id', lieu.id);
-    return photoUrl;
-  } catch {
-    return null;
-  }
-}
 
 export default function CarteScreen() {
   const insets = useSafeAreaInsets();
@@ -769,7 +738,6 @@ export default function CarteScreen() {
   const [discoverPhotoLikes, setDiscoverPhotoLikes] = useState<Record<string, number>>({});
   const [discoverPhotoLikedByMe, setDiscoverPhotoLikedByMe] = useState<Set<string>>(new Set());
   const [listPhotoMap, setListPhotoMap] = useState<Record<string, string>>({});
-  const [listGoogleMap, setListGoogleMap] = useState<Record<string, string>>({});
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1080,12 +1048,6 @@ export default function CarteScreen() {
     if (missing.length) fetchPhotosForLieux(missing).then(map => {
       if (Object.keys(map).length) setListPhotoMap(prev => ({ ...prev, ...map }));
     });
-    const sansGoogle = lieux.filter(l => !l.google_photo_url && !(l.id in listGoogleMap)).map(l => l.id);
-    if (sansGoogle.length) fetchGooglePhotoUrls(sansGoogle).then(map => {
-      const complet: Record<string, string> = {};
-      sansGoogle.forEach(id => { complet[id] = map[id] || ''; });
-      setListGoogleMap(prev => ({ ...prev, ...complet }));
-    });
   }, [listView, lieux]);
 
   // Rafraîchit "Près de toi" une fois la position GPS connue si déjà en liste
@@ -1153,15 +1115,15 @@ export default function CarteScreen() {
     const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const qTop = supabase.from('lieux')
-      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,created_at,mise_en_avant')
       .eq('actif', true).not('note_moyenne', 'is', null).order('note_moyenne', { ascending: false }).limit(20);
 
     const qRecent = supabase.from('lieux')
-      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,created_at,mise_en_avant')
       .eq('actif', true).gte('created_at', since30days).order('created_at', { ascending: false }).limit(10);
 
     let qNearby = supabase.from('lieux')
-      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant').eq('actif', true);
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,created_at,mise_en_avant').eq('actif', true);
     if (userLat && userLng) {
       const delta = (10 / 111) * 1.3;
       qNearby = (qNearby as any)
@@ -1171,7 +1133,7 @@ export default function CarteScreen() {
     qNearby = (qNearby as any).limit(60);
 
     const qEducateurs = supabase.from('lieux')
-      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant,plan')
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,created_at,mise_en_avant,plan')
       .eq('actif', true).eq('cat', 'educateur').limit(20);
 
     // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
@@ -1215,7 +1177,9 @@ export default function CarteScreen() {
     // Une seule requête photo pour toutes les sections
     const allIds = [...new Set([...top, ...recent, ...nearby, ...recommended, ...friendPicks, ...educateurs].map(l => l.id))];
     const photoMap = await fetchPhotosForLieux(allIds);
-    const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || l.google_photo_url || null });
+    // Photos des membres uniquement : les photos Google (payantes a chaque
+    // affichage) sont reservees a la fiche du lieu.
+    const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || null });
 
     const topE = top.slice(0, 10).map(enrich);
     const recentE = recent.map(enrich);
@@ -1236,19 +1200,6 @@ export default function CarteScreen() {
 
     setDiscoverLoading(false);
     setDiscoverLoaded(true);
-
-    // Récupération Google Photos en tâche de fond pour les lieux sans photo, dédupliquée
-    const seen = new Set<string>();
-    [...topE, ...recentE, ...nearbyE, ...recommendedE, ...friendPicksE, ...educateursE]
-      .filter(l => !l.photoUrl && !seen.has(l.id) && (seen.add(l.id), true))
-      .forEach(l => fetchGooglePhotoFor(l).then(url => {
-        if (!url) return;
-        const patch = (list: DiscoverLieu[]) => list.map(p => p.id === l.id ? { ...p, photoUrl: url } : p);
-        setTopDiscoverLieux(patch); setRecentDiscoverLieux(patch);
-        setNearbyDiscoverLieux(patch); setRecommendedLieux(patch); setFriendPickLieux(patch);
-        setEducateurDiscoverLieux(patch);
-        setFeaturedDiscoverLieu(fp => fp?.id === l.id ? { ...fp, photoUrl: url } : fp);
-      }));
   }
 
   async function loadDiscoverPhotos() {
@@ -1689,7 +1640,9 @@ export default function CarteScreen() {
         setPhotos([]);
         // Fallback photo Google pour les lieux sans photo communauté
         if (lieuData) {
-          if (lieuData.google_photo_url) {
+          if (lieuData.google_photo_url === 'none') {
+            setGooglePhotoUrl(null); // deja cherche, pas de photo Google
+          } else if (lieuData.google_photo_url) {
             setGooglePhotoUrl(lieuData.google_photo_url);
           } else {
             setGooglePhotoUrl(null);
@@ -3579,7 +3532,7 @@ export default function CarteScreen() {
                   const dist = (userLat !== null && userLng !== null)
                     ? haversine(userLat, userLng, item.lat, item.lng)
                     : null;
-                  const photo = listPhotoMap[item.id] || item.google_photo_url || listGoogleMap[item.id] || null;
+                  const photo = listPhotoMap[item.id] || null;
                   return (
                     <TouchableOpacity
                       key={item.id}
