@@ -15,16 +15,25 @@ import { sendTrackedPush } from '../_shared/pushTracking.ts'
 // l'organisateur (valider/refuser) et les inscrits (annuler), qui ne sont
 // couverts par aucun mecanisme existant.
 
+// (03/11) En-tetes CORS : sans eux le navigateur bloquait l'appel depuis le
+// back office (« Failed to fetch ») et la validation ne marchait jamais.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
     const authHeader = req.headers.get('Authorization') ?? ''
     const { event_id, action, motif } = await req.json()
 
     if (!event_id || !['valider', 'refuser', 'annuler'].includes(action)) {
-      return new Response(JSON.stringify({ error: 'paramètres invalides' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: 'paramètres invalides' }), { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
     if ((action === 'refuser' || action === 'annuler') && !(motif && String(motif).trim())) {
-      return new Response(JSON.stringify({ error: 'motif requis' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: 'motif requis' }), { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
     const sb = createClient(
@@ -35,14 +44,14 @@ Deno.serve(async (req) => {
 
     const { data: isModerator } = await sb.rpc('is_admin', { role_min: 'moderator' })
     if (!isModerator) {
-      return new Response(JSON.stringify({ error: 'accès refusé' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: 'accès refusé' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
     const { data: event, error: eFetch } = await sb.from('evenements')
       .select('id, titre, organisateur_id, date_heure, ville, adresse')
       .eq('id', event_id).single()
     if (eFetch || !event) {
-      return new Response(JSON.stringify({ error: 'événement introuvable' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: 'événement introuvable' }), { status: 404, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
     let patch: Record<string, unknown>
@@ -56,7 +65,7 @@ Deno.serve(async (req) => {
 
     const { error: eUpdate } = await sb.from('evenements').update(patch).eq('id', event_id)
     if (eUpdate) {
-      return new Response(JSON.stringify({ error: eUpdate.message }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: eUpdate.message }), { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
     if (action === 'valider' || action === 'refuser') {
@@ -90,8 +99,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } })
   }
 })
