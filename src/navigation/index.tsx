@@ -415,7 +415,7 @@ const highlightStyles = StyleSheet.create({
   body: { color: colors.ivory, fontSize: 13, opacity: 0.9 },
 });
 
-// Boutons "Y aller" de la fenetre Quoi de neuf et de la visite guidee
+// Boutons "Y aller" de la fenetre Quoi de nouveau et de la visite guidee
 function allerVers(cible: CibleVisite) {
   if (!navigationRef.isReady()) return;
   const onglet = (screen: string) => navigationRef.navigate('Tabs' as any, { screen } as any);

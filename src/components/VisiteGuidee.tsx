@@ -7,7 +7,7 @@ import { colors } from '../lib/theme';
 import { visiteGuidee, type CibleVisite } from '../lib/visiteGuidee';
 
 // Visite guidee de l'app, en quelques ecrans : montree UNE fois aux comptes
-// crees a partir de DEBUT (les anciens ont la fenetre "Quoi de neuf"), juste
+// crees a partir de DEBUT (les anciens ont la fenetre "Quoi de nouveau"), juste
 // apres l'inscription. Reouvrable depuis Reglages (visiteGuidee.ouvrir()).
 const DEBUT = new Date('2026-11-03T12:00:00+01:00');
 const CLE = (uid: string) => `thepack_visite_vue_${uid}`;

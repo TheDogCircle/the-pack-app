@@ -6,7 +6,7 @@ import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
 import type { CibleVisite } from '../lib/visiteGuidee';
 
-// Pop-up "Quoi de neuf" : affiche UNE fois par telephone, a partir de DEBUT,
+// Pop-up "Quoi de nouveau" : affiche UNE fois par telephone, a partir de DEBUT,
 // et seulement aux comptes crees avant (les nouveaux ont la visite guidee).
 // Pour une prochaine annonce : changer ID_ANNONCE, DEBUT et NOUVEAUTES.
 const ID_ANNONCE = '2026-11-03';
