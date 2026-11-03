@@ -42,9 +42,26 @@ const GOOGLE_KEY = 'AIzaSyAvVkbdbfvP3Rkp59754kDfhyDYD0xLNvA';
 // l'icone de categorie, sans attendre un nouvel echec a chaque image.
 let googlePlacesApiBlocked = false;
 
-// Les references photo Google mises en cache dans lieux.google_photo_url peuvent expirer :
-// cette fonction en redemande une fraiche et met a jour le cache en base.
+// Photo Google d'un lieu, recopiee UNE fois dans notre Storage par l'edge function
+// cache-lieu-photo : ensuite elle s'affiche depuis chez nous, sans cout Google.
+// - lien Google encore en base -> la fonction le recopie
+// - lien expire ou lieu jamais cherche -> recherche Google (1 fois) puis recopie
+// - pas de photo chez Google -> 'none' en base, plus jamais recherche
+export function estLienGoogle(url?: string | null): boolean {
+  return !!url && url.startsWith('https://places.googleapis.com/');
+}
+
+async function appelerCachePhoto(body: Record<string, unknown>): Promise<any> {
+  try {
+    const { data } = await supabase.functions.invoke('cache-lieu-photo', { body });
+    return data || {};
+  } catch { return {}; }
+}
+
 async function fetchAndCacheGooglePhoto(lieuData: { id: string; nom: string; ville: string }): Promise<string | null> {
+  const r1 = await appelerCachePhoto({ lieuId: lieuData.id });
+  if (r1.url) return r1.url;
+  if (r1.ok && !r1.aChercher) return null; // deja verifie : pas de photo
   if (googlePlacesApiBlocked) return null;
   try {
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
@@ -53,18 +70,12 @@ async function fetchAndCacheGooglePhoto(lieuData: { id: string; nom: string; vil
       body: JSON.stringify({ textQuery: `${lieuData.nom} ${lieuData.ville} France`, languageCode: 'fr', maxResultCount: 1 }),
     });
     if (res.status === 403) { googlePlacesApiBlocked = true; return null; }
+    if (!res.ok) return null;
     const json = await res.json();
     const photoName = json.places?.[0]?.photos?.[0]?.name;
-    if (!photoName) {
-      // Aucune photo chez Google : on le note ('none' = deja cherche, meme
-      // convention que le site) pour ne pas relancer une recherche payante a
-      // chaque ouverture de la fiche.
-      if (res.ok) supabase.rpc('memoriser_photo_google', { p_lieu: lieuData.id, p_url: 'none' }).then(() => {});
-      return null;
-    }
-    const url = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=800&key=${GOOGLE_KEY}`;
-    supabase.rpc('memoriser_photo_google', { p_lieu: lieuData.id, p_url: url }).then(() => {});
-    return url;
+    if (!photoName) { appelerCachePhoto({ lieuId: lieuData.id, noPhoto: true }); return null; }
+    const r2 = await appelerCachePhoto({ lieuId: lieuData.id, photoName });
+    return r2.url || null;
   } catch {
     return null;
   }
@@ -1115,15 +1126,15 @@ export default function CarteScreen() {
     const since30days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const qTop = supabase.from('lieux')
-      .select('id,nom,cat,ville,note_moyenne,nb_avis,created_at,mise_en_avant')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
       .eq('actif', true).not('note_moyenne', 'is', null).order('note_moyenne', { ascending: false }).limit(20);
 
     const qRecent = supabase.from('lieux')
-      .select('id,nom,cat,ville,note_moyenne,nb_avis,created_at,mise_en_avant')
+      .select('id,nom,cat,ville,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant')
       .eq('actif', true).gte('created_at', since30days).order('created_at', { ascending: false }).limit(10);
 
     let qNearby = supabase.from('lieux')
-      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,created_at,mise_en_avant').eq('actif', true);
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant').eq('actif', true);
     if (userLat && userLng) {
       const delta = (10 / 111) * 1.3;
       qNearby = (qNearby as any)
@@ -1133,7 +1144,7 @@ export default function CarteScreen() {
     qNearby = (qNearby as any).limit(60);
 
     const qEducateurs = supabase.from('lieux')
-      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,created_at,mise_en_avant,plan')
+      .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant,plan')
       .eq('actif', true).eq('cat', 'educateur').limit(20);
 
     // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
@@ -1179,7 +1190,8 @@ export default function CarteScreen() {
     const photoMap = await fetchPhotosForLieux(allIds);
     // Photos des membres uniquement : les photos Google (payantes a chaque
     // affichage) sont reservees a la fiche du lieu.
-    const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || null });
+    const notreCopie = (u?: string | null) => (u && u !== 'none' && !estLienGoogle(u) ? u : null);
+    const enrich = (l: DiscoverLieu): DiscoverLieu => ({ ...l, photoUrl: photoMap[l.id] || notreCopie(l.google_photo_url) });
 
     const topE = top.slice(0, 10).map(enrich);
     const recentE = recent.map(enrich);
@@ -1642,6 +1654,11 @@ export default function CarteScreen() {
         if (lieuData) {
           if (lieuData.google_photo_url === 'none') {
             setGooglePhotoUrl(null); // deja cherche, pas de photo Google
+          } else if (estLienGoogle(lieuData.google_photo_url)) {
+            // Lien Google (payant a chaque affichage) : on ne l'affiche pas, on le
+            // fait recopier chez nous une fois et on affiche notre copie
+            setGooglePhotoUrl(null);
+            fetchAndCacheGooglePhoto(lieuData).then(setGooglePhotoUrl);
           } else if (lieuData.google_photo_url) {
             setGooglePhotoUrl(lieuData.google_photo_url);
           } else {
