@@ -41,6 +41,8 @@ import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import NpsPromptModal, { NpsPending } from '../components/NpsPromptModal';
 import NouveautesModal from '../components/NouveautesModal';
+import VisiteGuidee from '../components/VisiteGuidee';
+import type { CibleVisite } from '../lib/visiteGuidee';
 import { colors } from '../lib/theme';
 
 export type RootStackParamList = {
@@ -412,6 +414,21 @@ const highlightStyles = StyleSheet.create({
   title: { color: colors.ivory, fontFamily: 'PlayfairDisplay_500Medium', fontSize: 15, marginBottom: 2 },
   body: { color: colors.ivory, fontSize: 13, opacity: 0.9 },
 });
+
+// Boutons "Y aller" de la fenetre Quoi de neuf et de la visite guidee
+function allerVers(cible: CibleVisite) {
+  if (!navigationRef.isReady()) return;
+  const onglet = (screen: string) => navigationRef.navigate('Tabs' as any, { screen } as any);
+  switch (cible) {
+    case 'carte': case 'balade': onglet('Carte'); break;
+    case 'meute': onglet('Meute'); break;
+    case 'events': onglet('Events'); break;
+    case 'partenaires': onglet('Services'); break;
+    case 'profil': onglet('Profil'); break;
+    case 'classement': navigationRef.navigate('Classement' as any); break;
+    case 'messages': navigationRef.navigate('Messages' as any); break;
+  }
+}
 
 export default function Navigation() {
   const { session, loading } = useSession();
@@ -941,10 +958,10 @@ export default function Navigation() {
       <NpsPromptModal pending={npsPending} onDone={() => setNpsPending(null)} />
     )}
     {session && onboardingChecked && !needsOnboarding && !missingFields && !npsPending && (
-      <NouveautesModal
-        creeLe={session.user.created_at}
-        onBalade={() => { if (navigationRef.isReady()) navigationRef.navigate('Tabs' as any, { screen: 'Carte' } as any); }}
-      />
+      <>
+        <NouveautesModal creeLe={session.user.created_at} onAller={allerVers} />
+        <VisiteGuidee userId={session.user.id} creeLe={session.user.created_at} onAller={allerVers} />
+      </>
     )}
     {highlight && (
       <HighlightBanner highlight={highlight} topOffset={insets.top} onDismiss={() => setHighlight(null)} />

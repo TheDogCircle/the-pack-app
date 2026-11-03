@@ -57,6 +57,7 @@ const NOTIF_GROUPS: { key: string; label: string; sub: string; icon: keyof typeo
 ];
 const ALL_NOTIF_KEYS = NOTIF_GROUPS.flatMap(g => g.items.map(i => i.key));
 import { savePushToken } from '../lib/notifications';
+import { visiteGuidee } from '../lib/visiteGuidee';
 import { normalizePhone } from '../lib/phone';
 import { RACES } from '../constants/races';
 import { COUNTRIES } from '../constants/countries';
@@ -772,6 +773,11 @@ export default function SettingsScreen() {
       {/* Aide */}
       <View style={styles.section}>
         <View style={styles.sectionTitleWrap}><Text style={styles.sectionTitle}>Aide</Text></View>
+        <TouchableOpacity style={styles.menuRow} onPress={() => { navigation.goBack(); setTimeout(() => visiteGuidee.ouvrir(), 300); }}>
+          <Ionicons name="compass-outline" size={20} color={colors.bordeaux} />
+          <Text style={styles.menuRowText}>Revoir la visite guidée de l'app</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.menuRow, { borderBottomWidth: 0 }]} onPress={() => navigation.navigate('Contact' as any)}>
           <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.bordeaux} />
           <Text style={styles.menuRowText}>Contacter l'équipe</Text>
