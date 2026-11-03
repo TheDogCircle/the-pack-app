@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
@@ -158,7 +159,7 @@ function GroupeCard({
     <TouchableOpacity style={g.card} onPress={joined ? onOpen : undefined} activeOpacity={joined ? 0.7 : 1}>
       {groupe.image_url ? (
         <View style={g.cardCover}>
-          <Image source={{ uri: groupe.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <Image source={{ uri: imgL(groupe.image_url) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           <View style={g.cardCoverGrad} />
           {groupe.ville ? (
             <View style={g.villeBadge}>
@@ -1255,7 +1256,7 @@ export default function MessagerieScreen({
       return (
         <View style={s.convAvatarWrap}>
           {groupePublic?.image_url
-            ? <Image source={{ uri: groupePublic.image_url }} style={s.convAvatar} />
+            ? <Image source={{ uri: imgL(groupePublic.image_url) }} style={s.convAvatar} />
             : <View style={[s.convAvatar, s.convAvatarGroupe]}><Ionicons name={conv.type === 'evenement_prive' ? 'calendar' : 'people'} size={20} color={colors.ivory} /></View>}
           {groupePublic ? <View style={s.groupBadge}><Ionicons name="globe-outline" size={10} color={colors.ivory} /></View> : null}
         </View>
@@ -1267,7 +1268,7 @@ export default function MessagerieScreen({
     return (
       <View style={s.convAvatarWrap}>
         {first?.avatar_url
-          ? <Image source={{ uri: first.avatar_url }} style={s.convAvatar} />
+          ? <Image source={{ uri: imgL(first.avatar_url) }} style={s.convAvatar} />
           : <View style={[s.convAvatar, s.convAvatarFallback]}><Text style={s.convAvatarLetter}>{letter}</Text></View>}
         {conv.members.length > 2 && <View style={s.groupBadge}><Ionicons name="people" size={10} color={colors.ivory} /></View>}
       </View>
@@ -1449,7 +1450,7 @@ export default function MessagerieScreen({
                     const disabledDM = modeDirect && selectedMembers.length === 1 && !selected;
                     return (
                       <TouchableOpacity style={[s.memberRow, selected && s.memberRowSelected, disabledDM && s.memberRowDisabled]} activeOpacity={disabledDM ? 1 : 0.7} onPress={() => { if (disabledDM) return; setSelectedMembers(modeDirect ? (selected ? [] : [f.id]) : (selected ? selectedMembers.filter(id => id !== f.id) : [...selectedMembers, f.id])); }}>
-                        {f.avatar_url ? <Image source={{ uri: f.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(f.prenom[0] || '?').toUpperCase()}</Text></View>}
+                        {f.avatar_url ? <Image source={{ uri: imgL(f.avatar_url) }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(f.prenom[0] || '?').toUpperCase()}</Text></View>}
                         <View style={{ flex: 1 }}>
                           <Text style={[s.memberName, selected && s.memberNameSelected]}>{f.prenom}</Text>
                           {f.ville ? <Text style={s.memberVille}>{f.ville}</Text> : null}
@@ -1514,7 +1515,7 @@ export default function MessagerieScreen({
                 <View style={[s.msgRow, isMe && s.msgRowMe, surbrillanceId === m.id && s.msgRowHighlight]}>
                   {!isMe && (
                     <View style={s.msgAvatarWrap}>
-                      {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.msgAvatar} /> : <View style={[s.msgAvatar, s.msgAvatarFallback]}><Text style={s.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
+                      {m.avatar_url ? <Image source={{ uri: imgL(m.avatar_url) }} style={s.msgAvatar} /> : <View style={[s.msgAvatar, s.msgAvatarFallback]}><Text style={s.msgAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
                     </View>
                   )}
                   <View style={[s.msgBubbleWrap, isMe && s.msgBubbleWrapMe]}>
@@ -1522,7 +1523,7 @@ export default function MessagerieScreen({
                     {renderCitation(m, isMe)}
                     <TouchableOpacity activeOpacity={0.85} delayLongPress={300} onLongPress={() => { if (!m.id.startsWith('tmp-')) { Keyboard.dismiss(); setMenuMessage(m); } }}>
                       {m.image_url ? (
-                        <Image source={{ uri: m.image_url }} style={s.msgImage} resizeMode="cover" />
+                        <Image source={{ uri: imgL(m.image_url) }} style={s.msgImage} resizeMode="cover" />
                       ) : (
                         <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
                           <TexteAvecLiens texte={m.contenu} style={[s.msgText, isMe && s.msgTextMe]} lienStyle={[s.msgLink, isMe && s.msgLinkMe]} />
@@ -1643,7 +1644,7 @@ export default function MessagerieScreen({
                   const isMe = m.user_id === myUserId;
                   const row = (
                     <View key={m.user_id} style={s.memberListRow}>
-                      {m.avatar_url ? <Image source={{ uri: m.avatar_url }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
+                      {m.avatar_url ? <Image source={{ uri: imgL(m.avatar_url) }} style={s.memberAvatar} /> : <View style={[s.memberAvatar, s.memberAvatarFallback]}><Text style={s.memberAvatarLetter}>{(m.prenom[0] || '?').toUpperCase()}</Text></View>}
                       <Text style={s.memberName}>{isMe ? 'Moi' : m.prenom}</Text>
                       {m.user_id === selectedConv.created_by && <Text style={s.memberOwnerTag}>Créateur</Text>}
                       {!isMe && <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />}
@@ -1785,7 +1786,7 @@ export default function MessagerieScreen({
       {storyGroupe && (
         <View ref={storyCardRef} collapsable={false} style={sc.card}>
           {storyGroupe.image_url
-            ? <Image source={{ uri: storyGroupe.image_url }} style={sc.bgImage} resizeMode="cover" />
+            ? <Image source={{ uri: imgL(storyGroupe.image_url) }} style={sc.bgImage} resizeMode="cover" />
             : <View style={sc.bgFallback} />}
           <View style={sc.overlay} />
           <View style={sc.topBrand}>
@@ -1821,7 +1822,7 @@ export default function MessagerieScreen({
               </View>
               <TouchableOpacity style={s.photoPicker} onPress={() => pickGroupePhoto('create')}>
                 {groupeForm.photoUri ? (
-                  <Image source={{ uri: groupeForm.photoUri }} style={s.photoPickerImage} resizeMode="cover" />
+                  <Image source={{ uri: imgL(groupeForm.photoUri) }} style={s.photoPickerImage} resizeMode="cover" />
                 ) : (
                   <>
                     <Ionicons name="image-outline" size={20} color={colors.textMuted} />
@@ -1858,7 +1859,7 @@ export default function MessagerieScreen({
               </View>
               <TouchableOpacity style={s.photoPicker} onPress={() => pickGroupePhoto('edit')}>
                 {(editForm.photoUri || editForm.existingImageUrl) ? (
-                  <Image source={{ uri: editForm.photoUri || editForm.existingImageUrl! }} style={s.photoPickerImage} resizeMode="cover" />
+                  <Image source={{ uri: imgL(editForm.photoUri || editForm.existingImageUrl!) }} style={s.photoPickerImage} resizeMode="cover" />
                 ) : (
                   <>
                     <Ionicons name="image-outline" size={20} color={colors.textMuted} />

@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase, trackEvent } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
@@ -299,7 +300,7 @@ function BrandModal({
         {/* Hero */}
         <View style={s.hero}>
           {partenaire.banniere_url
-            ? <Image source={{ uri: partenaire.banniere_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            ? <Image source={{ uri: imgL(partenaire.banniere_url) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             : null}
           <LinearGradient
             colors={['rgba(0,0,0,0.08)', 'rgba(61,26,26,0.82)']}
@@ -311,7 +312,7 @@ function BrandModal({
           <View style={s.heroInfo}>
             <View style={s.heroLogo}>
               {partenaire.logo_url
-                ? <Image source={{ uri: partenaire.logo_url }} style={s.heroLogoImg} resizeMode="contain" />
+                ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.heroLogoImg} resizeMode="contain" />
                 : <Text style={s.heroLogoFallback}>{partenaire.nom[0]}</Text>}
             </View>
             <View style={{ flex: 1 }}>
@@ -352,21 +353,21 @@ function BrandModal({
 
           {/* Gallery */}
           {galleryImgs.length === 1 && (
-            <Image source={{ uri: galleryImgs[0] }} style={[s.galleryFull, { width: imgW }]} resizeMode="cover" />
+            <Image source={{ uri: imgL(galleryImgs[0]) }} style={[s.galleryFull, { width: imgW }]} resizeMode="cover" />
           )}
           {galleryImgs.length === 2 && (
             <View style={s.galleryRow}>
               {galleryImgs.map(img => (
-                <Image key={img} source={{ uri: img }} style={[s.galleryHalf, { width: halfW }]} resizeMode="cover" />
+                <Image key={img} source={{ uri: imgL(img) }} style={[s.galleryHalf, { width: halfW }]} resizeMode="cover" />
               ))}
             </View>
           )}
           {galleryImgs.length >= 3 && (
             <View style={s.galleryThree}>
-              <Image source={{ uri: galleryImgs[0] }} style={[s.galleryThreeMain, { width: imgW * 0.6 - 4 }]} resizeMode="cover" />
+              <Image source={{ uri: imgL(galleryImgs[0]) }} style={[s.galleryThreeMain, { width: imgW * 0.6 - 4 }]} resizeMode="cover" />
               <View style={[s.galleryThreeSide, { width: imgW * 0.4 - 4 }]}>
-                <Image source={{ uri: galleryImgs[1] }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
-                <Image source={{ uri: galleryImgs[2] }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
+                <Image source={{ uri: imgL(galleryImgs[1]) }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
+                <Image source={{ uri: imgL(galleryImgs[2]) }} style={[s.galleryThreeSmall, { width: '100%' }]} resizeMode="cover" />
               </View>
             </View>
           )}
@@ -386,7 +387,7 @@ function BrandModal({
                       onPress={() => { trackEvent('click', 'partenaires', { target_type: 'produit', target_id: produit.id, action: 'produit_lien' }); Linking.openURL(produit.lien!); }}
                     >
                       {produit.photo_url
-                        ? <Image source={{ uri: produit.photo_url }} style={s.produitCardImg} resizeMode="cover" />
+                        ? <Image source={{ uri: imgL(produit.photo_url) }} style={s.produitCardImg} resizeMode="cover" />
                         : <View style={[s.produitCardImg, s.produitCardImgFallback]} />}
                       <TouchableOpacity
                         style={s.produitCardFavBtn}
@@ -422,7 +423,7 @@ function BrandModal({
                     style={[s.postItem, isHighlighted && s.postItemHighlighted]}
                   >
                     {post.image_url
-                      ? <Image source={{ uri: post.image_url }} style={s.postItemImg} resizeMode="cover" />
+                      ? <Image source={{ uri: imgL(post.image_url) }} style={s.postItemImg} resizeMode="cover" />
                       : null}
                     <View style={s.postItemBody}>
                       <Text style={s.postItemTitle}>{post.titre}</Text>
@@ -430,7 +431,7 @@ function BrandModal({
                       {(post.images?.length || 0) > 1 ? (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.photoStrip}>
                           {post.images!.slice(1).map((img, i) => (
-                            <Image key={i} source={{ uri: img }} style={s.photoStripThumb} resizeMode="cover" />
+                            <Image key={i} source={{ uri: imgL(img) }} style={s.photoStripThumb} resizeMode="cover" />
                           ))}
                         </ScrollView>
                       ) : null}
@@ -468,7 +469,7 @@ function BrandModal({
                     style={[s.offerCard, isHighlighted && s.offerCardHighlighted]}
                   >
                     {post.image_url
-                      ? <Image source={{ uri: post.image_url }} style={s.offerCardImg} resizeMode="cover" />
+                      ? <Image source={{ uri: imgL(post.image_url) }} style={s.offerCardImg} resizeMode="cover" />
                       : null}
                     <View style={s.offerCardBody}>
                       <Text style={s.offerCardTitle}>{post.titre}</Text>
@@ -476,7 +477,7 @@ function BrandModal({
                       {(post.images?.length || 0) > 1 ? (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.photoStrip}>
                           {post.images!.slice(1).map((img, i) => (
-                            <Image key={i} source={{ uri: img }} style={s.photoStripThumb} resizeMode="cover" />
+                            <Image key={i} source={{ uri: imgL(img) }} style={s.photoStripThumb} resizeMode="cover" />
                           ))}
                         </ScrollView>
                       ) : null}
@@ -538,7 +539,7 @@ function BrandCard({
     <TouchableOpacity style={[s.card, { width: cardWidth }]} onPress={onPress} activeOpacity={0.88}>
       <View style={s.cardCover}>
         {coverImg
-          ? <Image source={{ uri: coverImg }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          ? <Image source={{ uri: imgL(coverImg) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           : null}
         <LinearGradient
           colors={['transparent', 'rgba(61,26,26,0.7)']}
@@ -546,7 +547,7 @@ function BrandCard({
         />
         <View style={s.cardLogo}>
           {partenaire.logo_url
-            ? <Image source={{ uri: partenaire.logo_url }} style={s.cardLogoImg} resizeMode="contain" />
+            ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.cardLogoImg} resizeMode="contain" />
             : <Text style={s.cardLogoFallback}>{partenaire.nom[0]}</Text>}
         </View>
         {hasOffer ? (
@@ -583,7 +584,7 @@ function PrestataireCard({
       <View style={s.cardCover}>
         <View style={s.cardLogo}>
           {partenaire.logo_url
-            ? <Image source={{ uri: partenaire.logo_url }} style={s.cardLogoImg} resizeMode="contain" />
+            ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.cardLogoImg} resizeMode="contain" />
             : <Text style={s.cardLogoFallback}>{partenaire.nom[0]}</Text>}
         </View>
       </View>
@@ -653,7 +654,7 @@ function ActuCarousel({
           return (
             <TouchableOpacity key={post.id} style={[s.carouselItem, { width: itemW }]} activeOpacity={0.9} onPress={() => onOpen(post)}>
               {img
-                ? <Image source={{ uri: img }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                ? <Image source={{ uri: imgL(img) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
                 : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.bordeaux }]} />}
               <LinearGradient colors={['transparent', 'rgba(61,26,26,0.85)']} style={StyleSheet.absoluteFillObject} />
               <View style={s.carouselBadge}>
@@ -664,7 +665,7 @@ function ActuCarousel({
                   <View style={s.carouselBrandRow}>
                     <View style={s.actuCardBrandLogo}>
                       {partenaire.logo_url
-                        ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                        ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
                         : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
                     </View>
                     <Text style={s.carouselBrand} numberOfLines={1}>{partenaire.nom}</Text>
@@ -704,7 +705,7 @@ function AvantagesStrip({
           return (
             <TouchableOpacity key={post.id} style={s.avantageCard} activeOpacity={0.88} onPress={() => onOpen(post)}>
               {img
-                ? <Image source={{ uri: img }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                ? <Image source={{ uri: imgL(img) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
                 : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.bordeauxMid }]} />}
               <LinearGradient colors={['transparent', 'rgba(61,26,26,0.88)']} style={StyleSheet.absoluteFillObject} />
               <View style={s.avantageBadge}>
@@ -715,7 +716,7 @@ function AvantagesStrip({
                 <View style={s.carouselBrandRow}>
                   <View style={s.actuCardBrandLogo}>
                     {partenaire?.logo_url
-                      ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                      ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
                       : <Text style={s.actuCardBrandLogoFallback}>{partenaire?.nom?.[0] || '?'}</Text>}
                   </View>
                   <Text style={s.carouselBrand} numberOfLines={1}>{partenaire?.nom || ''}</Text>
@@ -768,7 +769,7 @@ function PostSheet({
                   onMomentumScrollEnd={e => setPhoto(Math.round(e.nativeEvent.contentOffset.x / photoW))}
                 >
                   {images.map(u => (
-                    <Image key={u} source={{ uri: u }} style={[s.sheetPhoto, { width: photoW }]} resizeMode="cover" />
+                    <Image key={u} source={{ uri: imgL(u) }} style={[s.sheetPhoto, { width: photoW }]} resizeMode="cover" />
                   ))}
                 </ScrollView>
                 {images.length > 1 ? (
@@ -784,7 +785,7 @@ function PostSheet({
                 <TouchableOpacity style={s.sheetBrandRow} onPress={onOpenBrand} activeOpacity={0.7}>
                   <View style={s.offreLogo}>
                     {partenaire.logo_url
-                      ? <Image source={{ uri: partenaire.logo_url }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
+                      ? <Image source={{ uri: imgL(partenaire.logo_url) }} style={s.actuCardBrandLogoImg} resizeMode="contain" />
                       : <Text style={s.actuCardBrandLogoFallback}>{partenaire.nom[0]}</Text>}
                   </View>
                   <Text style={s.sheetBrand}>{partenaire.nom} · {TYPE_LABEL[post.type] || 'Actualité'}</Text>

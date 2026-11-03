@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshCo
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../hooks/useSession';
 import { colors } from '../lib/theme';
@@ -155,7 +156,7 @@ export default function ActiviteScreen() {
           return (
             <TouchableOpacity key={item.id} style={styles.row} activeOpacity={0.75} onPress={() => onItemPress(item)}>
               {item.actorAvatarUrl ? (
-                <Image source={{ uri: item.actorAvatarUrl }} style={styles.avatar} />
+                <Image source={{ uri: imgL(item.actorAvatarUrl) }} style={styles.avatar} />
               ) : (
                 <View style={styles.avatarFallback}>
                   <Text style={styles.avatarLetter}>{item.actorPrenom[0]?.toUpperCase() || '?'}</Text>
@@ -168,7 +169,7 @@ export default function ActiviteScreen() {
                 <Text style={styles.rowLabel}>{activityLabel(item)}</Text>
                 <Text style={styles.rowTime}>{timeAgo(item.createdAt)}</Text>
               </View>
-              {item.thumbnailUrl ? <Image source={{ uri: item.thumbnailUrl }} style={styles.thumb} /> : null}
+              {item.thumbnailUrl ? <Image source={{ uri: imgL(item.thumbnailUrl) }} style={styles.thumb} /> : null}
             </TouchableOpacity>
           );
         })

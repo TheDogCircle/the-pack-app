@@ -13,6 +13,7 @@ import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
 import { mapNavigation } from '../lib/mapNavigation';
 import { Ionicons } from '@expo/vector-icons';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
@@ -1068,7 +1069,7 @@ export default function EvenementsScreen() {
               <TouchableOpacity style={styles.card} onPress={() => setSelectedEvent(e)} activeOpacity={0.85}>
                 {e.image_url ? (
                   <View>
-                    <Image source={{ uri: e.image_url }} style={styles.cardImg} />
+                    <Image source={{ uri: imgL(e.image_url) }} style={styles.cardImg} />
                     {e.images && e.images.length > 1 && (
                       <View style={styles.photoCountBadge}>
                         <Ionicons name="images-outline" size={11} color="#fff" />
@@ -1152,7 +1153,7 @@ export default function EvenementsScreen() {
                 {privatePhotos.length > 0 && (
                   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20, marginTop: -20, marginBottom: 16 }}>
                     {privatePhotos.map((url, idx) => (
-                      <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
+                      <Image key={idx} source={{ uri: imgL(url) }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
                     ))}
                   </ScrollView>
                 )}
@@ -1264,7 +1265,7 @@ export default function EvenementsScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
                   {pPhotoUris.map((uri, idx) => (
                     <View key={idx} style={styles.photoThumb}>
-                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                       <TouchableOpacity style={styles.photoRemove} onPress={() => setPPhotoUris(p => p.filter((_, i) => i !== idx))}>
                         <Ionicons name="close-circle" size={20} color="#fff" />
                       </TouchableOpacity>
@@ -1342,7 +1343,7 @@ export default function EvenementsScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
                   {ePPhotoUris.map((uri, idx) => (
                     <View key={idx} style={styles.photoThumb}>
-                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                       <TouchableOpacity style={styles.photoRemove} onPress={() => setEPPhotoUris(p => p.filter((_, i) => i !== idx))}>
                         <Ionicons name="close-circle" size={20} color="#fff" />
                       </TouchableOpacity>
@@ -1418,7 +1419,7 @@ export default function EvenementsScreen() {
                       keyExtractor={p => p.id}
                       renderItem={({ item: p }) => (
                         <TouchableOpacity style={styles.inviteResultRow} onPress={() => selectInviteUser(p)}>
-                          {p.avatar_url ? <Image source={{ uri: p.avatar_url }} style={styles.inviteAvatar} /> : (
+                          {p.avatar_url ? <Image source={{ uri: imgL(p.avatar_url) }} style={styles.inviteAvatar} /> : (
                             <View style={[styles.inviteAvatar, styles.inviteAvatarFallback]}><Text style={styles.inviteAvatarLetter}>{(p.prenom || p.username || '?')[0]?.toUpperCase()}</Text></View>
                           )}
                           <View>
@@ -1490,7 +1491,7 @@ export default function EvenementsScreen() {
                         onMomentumScrollEnd={ev => setModalPhotoIndex(Math.round(ev.nativeEvent.contentOffset.x / Dimensions.get('window').width))}
                       >
                         {allPhotos.map((url, idx) => (
-                          <Image key={idx} source={{ uri: url }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
+                          <Image key={idx} source={{ uri: imgL(url) }} style={[styles.modalImg, { width: Dimensions.get('window').width }]} />
                         ))}
                       </ScrollView>
                       {allPhotos.length > 1 && (
@@ -1558,7 +1559,7 @@ export default function EvenementsScreen() {
                                 else navigation.navigate('Services');
                               }}
                             >
-                              {m.logo_url ? <Image source={{ uri: m.logo_url }} style={styles.mentionLogo} /> : null}
+                              {m.logo_url ? <Image source={{ uri: imgL(m.logo_url) }} style={styles.mentionLogo} /> : null}
                               <Text style={styles.mentionChipText}>{m.type === 'instagram' ? `📷 ${m.nom}` : m.nom}</Text>
                             </TouchableOpacity>
                           ))}
@@ -1712,7 +1713,7 @@ export default function EvenementsScreen() {
         <View ref={shareEventCardRef} collapsable={false} style={styles.shareEventCard}>
           {selectedEvent.image_url ? (
             <>
-              <Image source={{ uri: selectedEvent.image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+              <Image source={{ uri: imgL(selectedEvent.image_url) }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
               <LinearGradient
                 colors={['rgba(0,0,0,0.35)', 'rgba(42,16,16,0.55)', 'rgba(42,16,16,0.97)']}
                 locations={[0, 0.45, 0.85]}
@@ -1840,7 +1841,7 @@ export default function EvenementsScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 90 }} contentContainerStyle={{ flexDirection: 'row', gap: 10 }}>
                   {photoUris.map((uri, idx) => (
                     <View key={idx} style={styles.photoThumb}>
-                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                       <TouchableOpacity style={styles.photoRemove} onPress={() => setPhotoUris(p => p.filter((_, i) => i !== idx))}>
                         <Ionicons name="close-circle" size={20} color="#fff" />
                       </TouchableOpacity>

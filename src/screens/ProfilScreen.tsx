@@ -10,6 +10,7 @@ const PHOTO_CELL = (Dimensions.get('window').width - 32 - 8) / 3;
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { colors } from '../lib/theme';
@@ -136,7 +137,7 @@ function ExplorateurEditModal({ explorateur, userId, onClose, onSaved }: {
           <Text style={xStyles.sectionLabel}>PHOTO DE BANNIÈRE</Text>
           <TouchableOpacity style={xStyles.banniereBox} onPress={() => pickAndUpload('banniere')} activeOpacity={0.85}>
             {banniereUrl
-              ? <Image source={{ uri: banniereUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              ? <Image source={{ uri: imgL(banniereUrl) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               : <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />}
             <View style={xStyles.banniereOverlay}>
               {uploadingBanniere
@@ -149,7 +150,7 @@ function ExplorateurEditModal({ explorateur, userId, onClose, onSaved }: {
           <Text style={xStyles.sectionLabel}>PHOTO DE PROFIL</Text>
           <TouchableOpacity style={xStyles.profilRow} onPress={() => pickAndUpload('profil')} activeOpacity={0.85}>
             {profilUrl
-              ? <Image source={{ uri: profilUrl }} style={xStyles.profilThumb} />
+              ? <Image source={{ uri: imgL(profilUrl) }} style={xStyles.profilThumb} />
               : <View style={[xStyles.profilThumb, { backgroundColor: colors.terra, alignItems: 'center', justifyContent: 'center' }]}>
                   <Ionicons name="person" size={28} color={colors.ivory} />
                 </View>}
@@ -471,7 +472,7 @@ export default function ProfilScreen() {
           <TouchableOpacity onPress={pickAvatar}>
             <View style={styles.avatarWrap}>
               {profil?.avatar_url
-                ? <Image source={{ uri: profil.avatar_url }} style={styles.avatarImg} />
+                ? <Image source={{ uri: imgL(profil.avatar_url) }} style={styles.avatarImg} />
                 : <View style={styles.avatarFallback}><Text style={styles.avatarLetter}>{(profil?.prenom || '?')[0].toUpperCase()}</Text></View>}
               <View style={styles.avatarEditBadge}><Ionicons name="camera" size={10} color={colors.ivory} /></View>
             </View>
@@ -567,7 +568,7 @@ export default function ProfilScreen() {
           {pendingRequests.map(req => (
             <View key={req.id} style={styles.pendingRow}>
               {req.avatar_url
-                ? <Image source={{ uri: req.avatar_url }} style={styles.pendingAvatar} />
+                ? <Image source={{ uri: imgL(req.avatar_url) }} style={styles.pendingAvatar} />
                 : <View style={styles.pendingAvatarFallback}><Text style={styles.pendingAvatarLetter}>{(req.prenom || '?')[0].toUpperCase()}</Text></View>}
               <View style={{ flex: 1 }}>
                 <Text style={styles.pendingName}>{req.prenom || 'Utilisateur'}</Text>
@@ -605,7 +606,7 @@ export default function ProfilScreen() {
           {explorateur && (
             <TouchableOpacity style={styles.explorateurCard} onPress={() => setShowExplorEdit(true)} activeOpacity={0.88}>
               {explorateur.photo_banniere_url
-                ? <Image source={{ uri: explorateur.photo_banniere_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ? <Image source={{ uri: imgL(explorateur.photo_banniere_url) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 : <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bordeaux }]} />}
               <View style={styles.explorateurCardOverlay}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -838,7 +839,7 @@ export default function ProfilScreen() {
                   }
                 }}
               >
-                <Image source={{ uri: item.url }} style={styles.photoCellImg} />
+                <Image source={{ uri: imgL(item.url) }} style={styles.photoCellImg} />
                 {!item.validee && (
                   <View style={styles.photoPendingOverlay}>
                     <Text style={styles.photoPendingText}>En attente</Text>
@@ -860,7 +861,7 @@ export default function ProfilScreen() {
         <View style={styles.shareCardAvatarRing}>
           <View style={styles.shareCardAvatar}>
             {profil?.avatar_url
-              ? <Image source={{ uri: profil.avatar_url }} style={styles.shareCardAvatarImg} />
+              ? <Image source={{ uri: imgL(profil.avatar_url) }} style={styles.shareCardAvatarImg} />
               : <Text style={styles.shareCardAvatarLetter}>{(profil?.prenom || '?')[0].toUpperCase()}</Text>}
           </View>
         </View>
@@ -921,7 +922,7 @@ export default function ProfilScreen() {
                     onPress={() => { setFollowModal(null); navigation.navigate('ProfilPublic', { userId: item.id }); }}
                   >
                     {item.avatar_url
-                      ? <Image source={{ uri: item.avatar_url }} style={styles.followAvatar} />
+                      ? <Image source={{ uri: imgL(item.avatar_url) }} style={styles.followAvatar} />
                       : <View style={styles.followAvatarFallback}><Text style={styles.followAvatarLetter}>{(item.prenom || '?')[0].toUpperCase()}</Text></View>}
                     <View style={{ flex: 1 }}>
                       <Text style={styles.followNom}>{item.prenom || 'Membre'}</Text>

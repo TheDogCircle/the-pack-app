@@ -41,6 +41,7 @@ import OnboardingScreen from '../screens/OnboardingScreen';
 import CompleteProfileModal, { MissingFields } from '../components/CompleteProfileModal';
 import NpsPromptModal, { NpsPending } from '../components/NpsPromptModal';
 import NouveautesModal from '../components/NouveautesModal';
+import { chargerReglageImages } from '../lib/imagesLegeres';
 import VisiteGuidee from '../components/VisiteGuidee';
 import type { CibleVisite } from '../lib/visiteGuidee';
 import { colors } from '../lib/theme';
@@ -161,104 +162,60 @@ function MainTabs() {
       vuDepuis('Services', Date.now() - 7 * 86400 * 1000),
     ]);
 
-    const { data: moi } = await supabase.from('profils').select('lat,lng').eq('id', userId).maybeSingle();
-    const { data: follows } = await supabase
-      .from('follows').select('following_id')
-      .eq('follower_id', userId).eq('statut', 'accepte');
-    const suivis = (follows || []).map((f: any) => f.following_id);
-
-    // Carte : nouveaux lieux pres de chez moi (~50 km) ou nouvelles balades des gens
-    // que je suis -- de quoi donner envie d'aller se balader
-    {
-      let lq = supabase.from('lieux').select('id', { count: 'exact', head: true })
-        .eq('actif', true).gt('created_at', carteDepuis);
-      if (moi?.lat && moi?.lng) {
-        lq = lq.gte('lat', moi.lat - 0.45).lte('lat', moi.lat + 0.45).gte('lng', moi.lng - 0.65).lte('lng', moi.lng + 0.65);
-      }
-      const [{ count: nouveauxLieux }, baladesRes] = await Promise.all([
-        lq,
-        suivis.length
-          ? supabase.from('balades').select('id', { count: 'exact', head: true })
-            .in('user_id', suivis).neq('visibilite', 'prive').gt('created_at', carteDepuis)
-          : Promise.resolve({ count: 0 } as any),
-      ]);
-      setCarteBadge(((nouveauxLieux ?? 0) + ((baladesRes as any).count ?? 0)) > 0);
-    }
-
-    // Events : nouveaux events valides, ou un event du jour ou je suis inscrit
-    {
-      const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
-      const finJour = new Date(debutJour); finJour.setDate(finJour.getDate() + 1);
-      const [{ count: nouveaux }, { data: duJour }] = await Promise.all([
-        supabase.from('evenements').select('id', { count: 'exact', head: true })
-          .eq('valide', true).eq('actif', true).gt('created_at', eventsDepuis).gte('date_heure', new Date().toISOString()),
-        supabase.from('participations').select('event_id, evenements!inner(date_heure)')
-          .eq('user_id', userId)
-          .gte('evenements.date_heure', debutJour.toISOString()).lt('evenements.date_heure', finJour.toISOString())
-          .limit(1),
-      ]);
-      const vuAujourdhui = new Date(eventsDepuis) >= debutJour;
-      setEventsBadge((nouveaux ?? 0) > 0 || (!vuAujourdhui && (duJour?.length ?? 0) > 0));
-    }
-
-    // Partenaires : nouvelles actus / avantages depuis la derniere visite
-    const { count: partCount } = await supabase
-      .from('partenaire_posts').select('id', { count: 'exact', head: true })
-      .eq('actif', true).gt('created_at', partDepuis);
-    setPartBadge((partCount ?? 0) > 0);
-
-    // Profil : demandes d'abonnement en attente
-    const { count: demandes } = await supabase.from('follows').select('id', { count: 'exact', head: true })
-      .eq('following_id', userId).eq('statut', 'en_attente');
-    setProfilBadge((demandes ?? 0) > 0);
-
-    // Meute : avis/photos des gens suivis + messages recus, depuis la derniere visite
-    let meuteHasActivity = false;
-    if (suivis.length) {
-      const ids = suivis;
-      const [{ count: a }, { count: p }] = await Promise.all([
-        supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', ids).gt('created_at', meuteDepuis),
-        supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', ids).eq('validee', true).gt('created_at', meuteDepuis),
-      ]);
-      meuteHasActivity = ((a ?? 0) + (p ?? 0)) > 0;
-    }
-
-    // Messages des autres dans mes conversations depuis la derniere visite (24 h max)
-    const since24h = new Date(Math.max(new Date(meuteDepuis).getTime(), Date.now() - 24 * 3600 * 1000)).toISOString();
-    const { data: myConvs } = await supabase
-      .from('conversation_members').select('conversation_id').eq('user_id', userId);
-    if (myConvs?.length) {
-      const convIds = myConvs.map((r: any) => r.conversation_id);
-      const { count: msgCount } = await supabase
-        .from('messages').select('id', { count: 'exact', head: true })
-        .in('conversation_id', convIds)
-        .neq('user_id', userId)
-        .gte('created_at', since24h);
-      if ((msgCount ?? 0) > 0) meuteHasActivity = true;
-    }
-
-    setMeuteBadge(meuteHasActivity);
-
-    // Activité (cœur) : likes/commentaires reçus + nouveaux abonnés + anniversaire du jour
-    const lastSeenActivity = await AsyncStorage.getItem(activityLastSeenKey(userId));
+    // Deux vagues de requetes en parallele (avant : une dizaine l'une apres
+    // l'autre, ~3 s, qui occupaient le reseau pendant le chargement des ecrans)
+    const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
+    const finJour = new Date(debutJour); finJour.setDate(finJour.getDate() + 1);
+    const lastSeenActivity = await AsyncStorage.getItem(activityLastSeenKey(userId)).catch(() => null);
     const sinceActivity = lastSeenActivity || since48h;
 
-    // Derniere activite recue (une seule requete serveur, cf. mon_activite)
-    let activityCount = 0;
-    const { data: derniere } = await supabase.rpc('mon_activite', { p_limite: 1 });
-    if (derniere?.[0] && new Date(derniere[0].created_at) > new Date(sinceActivity)) activityCount = 1;
+    const [
+      { data: moi }, { data: follows }, { count: partCount }, { count: demandes }, { data: myConvs },
+      { data: derniere }, { data: chiensSuivis }, { count: nouveauxEvents }, { data: duJour },
+    ] = await Promise.all([
+      supabase.from('profils').select('lat,lng').eq('id', userId).maybeSingle(),
+      supabase.from('follows').select('following_id').eq('follower_id', userId).eq('statut', 'accepte'),
+      supabase.from('partenaire_posts').select('id', { count: 'exact', head: true }).eq('actif', true).gt('created_at', partDepuis),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', userId).eq('statut', 'en_attente'),
+      supabase.from('conversation_members').select('conversation_id').eq('user_id', userId),
+      supabase.rpc('mon_activite', { p_limite: 1 }),
+      supabase.rpc('anniversaires_suivis'),
+      supabase.from('evenements').select('id', { count: 'exact', head: true })
+        .eq('valide', true).eq('actif', true).gt('created_at', eventsDepuis).gte('date_heure', new Date().toISOString()),
+      supabase.from('participations').select('event_id, evenements!inner(date_heure)')
+        .eq('user_id', userId)
+        .gte('evenements.date_heure', debutJour.toISOString()).lt('evenements.date_heure', finJour.toISOString())
+        .limit(1),
+    ]);
 
-    let hasBirthdayToday = false;
-    if (follows?.length) {
-      const ids = follows.map((f: any) => f.following_id);
-      const { data: dogs } = await supabase
-        .from('chiens').select('user_id, date_naissance_parsed')
-        .in('user_id', ids).not('date_naissance_parsed', 'is', null);
-      const now = new Date();
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const dd = String(now.getDate()).padStart(2, '0');
-      hasBirthdayToday = (dogs || []).some((d: any) => d.date_naissance_parsed?.slice(5, 7) === mm && d.date_naissance_parsed?.slice(8, 10) === dd);
+    setPartBadge((partCount ?? 0) > 0);
+    setProfilBadge((demandes ?? 0) > 0);
+    const vuAujourdhui = new Date(eventsDepuis) >= debutJour;
+    setEventsBadge((nouveauxEvents ?? 0) > 0 || (!vuAujourdhui && (duJour?.length ?? 0) > 0));
+
+    const now = new Date();
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const hasBirthdayToday = ((chiensSuivis as any[]) || []).some((d: any) => (d.date_naissance || '').slice(5, 10) === mmdd);
+    const activityCount = (derniere as any)?.[0] && new Date((derniere as any)[0].created_at) > new Date(sinceActivity) ? 1 : 0;
+
+    // 2e vague : ce qui depend de ma position, de mes abonnements, de mes conversations
+    const suivis = (follows || []).map((f: any) => f.following_id);
+    const convIds = (myConvs || []).map((r: any) => r.conversation_id);
+    const since24h = new Date(Math.max(new Date(meuteDepuis).getTime(), Date.now() - 24 * 3600 * 1000)).toISOString();
+    let lq = supabase.from('lieux').select('id', { count: 'exact', head: true }).eq('actif', true).gt('created_at', carteDepuis);
+    if (moi?.lat && moi?.lng) {
+      lq = lq.gte('lat', moi.lat - 0.45).lte('lat', moi.lat + 0.45).gte('lng', moi.lng - 0.65).lte('lng', moi.lng + 0.65);
     }
+    const zero = Promise.resolve({ count: 0 } as any);
+    const [{ count: nouveauxLieux }, baladesRes, avisRes, photosRes, msgRes] = await Promise.all([
+      lq,
+      suivis.length ? supabase.from('balades').select('id', { count: 'exact', head: true }).in('user_id', suivis).neq('visibilite', 'prive').gt('created_at', carteDepuis) : zero,
+      suivis.length ? supabase.from('avis').select('id', { count: 'exact', head: true }).in('user_id', suivis).gt('created_at', meuteDepuis) : zero,
+      suivis.length ? supabase.from('photos').select('id', { count: 'exact', head: true }).in('user_id', suivis).eq('validee', true).gt('created_at', meuteDepuis) : zero,
+      convIds.length ? supabase.from('messages').select('id', { count: 'exact', head: true }).in('conversation_id', convIds).neq('user_id', userId).gte('created_at', since24h) : zero,
+    ]);
+    setCarteBadge(((nouveauxLieux ?? 0) + ((baladesRes as any).count ?? 0)) > 0);
+    setMeuteBadge((((avisRes as any).count ?? 0) + ((photosRes as any).count ?? 0) + ((msgRes as any).count ?? 0)) > 0);
 
     setActivityBadge(activityCount > 0 || hasBirthdayToday);
   }
@@ -407,6 +364,9 @@ function allerVers(cible: CibleVisite) {
     case 'messages': navigationRef.navigate('Messages' as any); break;
   }
 }
+
+// Reglage "photos allegees" (app_settings.images_reduites), lu des le lancement
+chargerReglageImages();
 
 export default function Navigation() {
   const { session, loading } = useSession();

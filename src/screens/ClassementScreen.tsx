@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -119,7 +120,7 @@ export default function ClassementScreen() {
       <TouchableOpacity style={styles.ligne} activeOpacity={0.7} onPress={() => setFicheId(b.id)}>
         {avecAuteur ? (
           b.avatar_url
-            ? <Image source={{ uri: b.avatar_url }} style={styles.avatar} />
+            ? <Image source={{ uri: imgL(b.avatar_url) }} style={styles.avatar} />
             : <View style={[styles.avatar, styles.avatarVide]}><Text style={styles.avatarLettre}>{(b.prenom || '?')[0].toUpperCase()}</Text></View>
         ) : (
           <View style={[styles.avatar, styles.iconeBalade]}><Ionicons name="footsteps" size={16} color={colors.ivory} /></View>
@@ -299,7 +300,7 @@ export default function ClassementScreen() {
               >
                 <Text style={styles.rang}>{l.rang <= 3 ? MEDAILLES[l.rang - 1] : l.rang}</Text>
                 {l.avatar_url
-                  ? <Image source={{ uri: l.avatar_url }} style={styles.avatar} />
+                  ? <Image source={{ uri: imgL(l.avatar_url) }} style={styles.avatar} />
                   : <View style={[styles.avatar, styles.avatarVide]}><Text style={styles.avatarLettre}>{(l.prenom || '?')[0].toUpperCase()}</Text></View>}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.nom} numberOfLines={1}>

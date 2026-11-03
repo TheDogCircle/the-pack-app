@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Contacts from 'expo-contacts';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
@@ -124,7 +125,7 @@ function fmtAllureFeed(totalSec: number, km: number): string {
 
 function PostAvatar({ prenom, avatarUrl }: { prenom: string; avatarUrl: string | null }) {
   return avatarUrl ? (
-    <Image source={{ uri: avatarUrl }} style={styles.postAvatarImg} />
+    <Image source={{ uri: imgL(avatarUrl) }} style={styles.postAvatarImg} />
   ) : (
     <View style={styles.postAvatarFallback}>
       <Text style={styles.postAvatarLetter}>{(prenom || '?')[0].toUpperCase()}</Text>
@@ -193,11 +194,11 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
             }}
           >
             {images.map((uri, i) => (
-              <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
+              <Image key={i} source={{ uri: imgL(uri) }} style={styles.postImage} resizeMode="cover" />
             ))}
           </ScrollView>
         ) : (
-          <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
+          <Image source={{ uri: imgL(images[0]) }} style={styles.postImage} resizeMode="cover" />
         )}
         {post.fromMap && (
           <View style={styles.fromMapBadge}>
@@ -475,11 +476,11 @@ function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onD
               }}
             >
               {images.map((uri, i) => (
-                <Image key={i} source={{ uri }} style={styles.postImage} resizeMode="cover" />
+                <Image key={i} source={{ uri: imgL(uri) }} style={styles.postImage} resizeMode="cover" />
               ))}
             </ScrollView>
           ) : (
-            <Image source={{ uri: images[0] }} style={styles.postImage} resizeMode="cover" />
+            <Image source={{ uri: imgL(images[0]) }} style={styles.postImage} resizeMode="cover" />
           )
         ) : null}
       </TouchableOpacity>
@@ -748,7 +749,7 @@ function CommentsModal({
               {mentionSuggestions.map(f => (
                 <TouchableOpacity key={f.id} style={styles.mentionRow} onPress={() => insertMention(f.username || '', f.id)}>
                   {f.avatar_url
-                    ? <Image source={{ uri: f.avatar_url }} style={styles.mentionAvatar} />
+                    ? <Image source={{ uri: imgL(f.avatar_url) }} style={styles.mentionAvatar} />
                     : <View style={[styles.mentionAvatar, { backgroundColor: colors.ivoryPale }]} />}
                   <View>
                     <Text style={styles.mentionName}>{f.prenom || ''}</Text>
@@ -968,7 +969,7 @@ function NewPostModal({
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageThumbsRow}>
               {imageUris.map((uri, idx) => (
                 <View key={idx} style={styles.imageThumb}>
-                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   <TouchableOpacity style={styles.imageThumbRemove} onPress={() => setImageUris(prev => prev.filter((_, i) => i !== idx))}>
                     <Ionicons name="close-circle" size={20} color="#fff" />
                   </TouchableOpacity>
@@ -1991,7 +1992,7 @@ export default function FeedScreen() {
                             })}
                           >
                             {s.user.avatar_url ? (
-                              <Image source={{ uri: s.user.avatar_url }} style={styles.suggestAvatar} />
+                              <Image source={{ uri: imgL(s.user.avatar_url) }} style={styles.suggestAvatar} />
                             ) : (
                               <View style={styles.suggestAvatarFallback}>
                                 <Text style={styles.suggestAvatarLetter}>{(s.user.prenom || '?')[0].toUpperCase()}</Text>
@@ -2140,7 +2141,7 @@ export default function FeedScreen() {
               })}
             >
               {m.user.avatar_url ? (
-                <Image source={{ uri: m.user.avatar_url }} style={styles.avatarImg} />
+                <Image source={{ uri: imgL(m.user.avatar_url) }} style={styles.avatarImg} />
               ) : (
                 <View style={styles.avatarFallback}>
                   <Text style={styles.avatarLetter}>{(m.user.prenom || '?')[0].toUpperCase()}</Text>
@@ -2222,7 +2223,7 @@ export default function FeedScreen() {
                         disabled={sendingToId === item.id}
                       >
                         {item.avatar_url
-                          ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
+                          ? <Image source={{ uri: imgL(item.avatar_url) }} style={styles.sendFriendAvatar} />
                           : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
                         <View style={{ flex: 1 }}>
                           <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
@@ -2270,7 +2271,7 @@ export default function FeedScreen() {
                       }}
                     >
                       {m.user.avatar_url ? (
-                        <Image source={{ uri: m.user.avatar_url }} style={styles.suggestAvatar} />
+                        <Image source={{ uri: imgL(m.user.avatar_url) }} style={styles.suggestAvatar} />
                       ) : (
                         <View style={styles.suggestAvatarFallback}>
                           <Text style={styles.suggestAvatarLetter}>{(m.user.prenom || '?')[0].toUpperCase()}</Text>

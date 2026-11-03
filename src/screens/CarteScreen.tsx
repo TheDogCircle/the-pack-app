@@ -16,6 +16,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
@@ -432,7 +433,7 @@ function ListCardPhoto({ uri, hasCommunityPhoto, lieu, style }: { uri: string; h
   if (!src) return null;
   return (
     <Image
-      source={{ uri: src }}
+      source={{ uri: imgL(src) }}
       style={style}
       resizeMode="cover"
       onError={() => {
@@ -453,7 +454,7 @@ function DiscoverThumb({ lieu, style }: { lieu: DiscoverLieu; style: any }) {
   }, [lieu.id, lieu.photoUrl, lieu.google_photo_url]);
   if (photo) return (
     <Image
-      source={{ uri: photo }}
+      source={{ uri: imgL(photo) }}
       style={style}
       resizeMode="cover"
       onError={() => {
@@ -513,7 +514,7 @@ function FeaturedDiscoverCard({ lieu, onPress }: { lieu: DiscoverLieu; onPress: 
     <TouchableOpacity style={dstyles.featured} onPress={onPress} activeOpacity={0.88}>
       {photo ? (
         <Image
-          source={{ uri: photo }}
+          source={{ uri: imgL(photo) }}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
           onError={() => {
@@ -545,7 +546,7 @@ function PhotoDiscoverCard({
   const cfg = CAT_CONFIG[photo.lieu.cat] || CAT_CONFIG.autre;
   return (
     <TouchableOpacity style={dstyles.photoCard} onPress={onPress} activeOpacity={0.88}>
-      <Image source={{ uri: photo.url }} style={dstyles.photoCardImg} resizeMode="cover" />
+      <Image source={{ uri: imgL(photo.url) }} style={dstyles.photoCardImg} resizeMode="cover" />
       <View style={dstyles.photoCardOverlay}>
         {photo.nomChien ? (
           <View style={dstyles.photoCardDogTag}><Text style={dstyles.photoCardDogText}>🐾 {photo.nomChien}</Text></View>
@@ -1585,22 +1586,17 @@ export default function CarteScreen() {
     // empecherait tout futur chargement de lieux au pan/zoom suivant.
     setTimeout(() => { skipNextFetchRef.current = false; }, 1200);
 
-    let lieuData: any = null, favData: any = null, myAvisData: any = null, photosRaw: any[] = [], avisRaw: any[] = [], communityPostsRaw: any[] = [];
+    // Une seule vague : la fiche + tout son contenu (fonction fiche_lieu_contenu).
+    // Avant : 3 vagues successives (fiche/photos/avis, puis likes et auteurs, puis
+    // auteurs des avis), soit 1 a 2 s d'attente.
+    let lieuData: any = null, contenu: any = null;
     try {
-      const results = await Promise.all([
+      const [rLieu, rContenu] = await Promise.all([
         supabase.from('lieux').select('*').eq('id', lieu.id).single(),
-        userId ? supabase.from('favoris').select('id,liste').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
-        userId ? supabase.from('avis').select('id,note,commentaire').eq('user_id', userId).eq('lieu_id', lieu.id).maybeSingle() : Promise.resolve({ data: null }),
-        supabase.from('photos').select('id,url,user_id,nom_chien').eq('lieu_id', lieu.id).order('created_at', { ascending: true }).limit(20),
-        supabase.from('avis').select('id,note,commentaire,created_at,user_id,reponse_pro').eq('lieu_id', lieu.id).order('created_at', { ascending: false }).limit(8),
-        supabase.from('community_posts').select('id,image_url,user_id').eq('lieu_id', lieu.id).eq('hidden', false).not('image_url', 'is', null).order('created_at', { ascending: false }).limit(10),
+        supabase.rpc('fiche_lieu_contenu', { p_lieu: lieu.id }),
       ]);
-      lieuData = results[0].data;
-      favData = results[1];
-      myAvisData = results[2];
-      photosRaw = results[3].data || [];
-      avisRaw = results[4].data || [];
-      communityPostsRaw = results[5].data || [];
+      lieuData = rLieu.data;
+      contenu = rContenu.data || {};
     } catch (e) {
       setSheetLoading(false);
       return;
@@ -1608,42 +1604,26 @@ export default function CarteScreen() {
 
     try {
       if (lieuData) setSelectedLieu(lieuData);
-      const favRow = (favData as any)?.data;
-      setFavListe(favRow ? (favRow.liste || 'favori') : null);
-      const myAvisRow = (myAvisData as any)?.data;
-      setMyAvis(myAvisRow ? { note: myAvisRow.note, commentaire: myAvisRow.commentaire } : null);
+      setFavListe(userId && contenu.mon_favori ? contenu.mon_favori : null);
+      setMyAvis(userId && contenu.mon_avis ? { note: contenu.mon_avis.note, commentaire: contenu.mon_avis.commentaire } : null);
 
-      // Photos avec likes + auteur + posts communauté tagués sur ce lieu
-      const photoIds = (photosRaw || []).map((p: any) => p.id);
-      const allPhotoUserIds = [...new Set([
-        ...(photosRaw || []).map((p: any) => p.user_id),
-        ...communityPostsRaw.map((p: any) => p.user_id),
-      ].filter(Boolean))];
-      if (photoIds.length > 0 || communityPostsRaw.length > 0) {
-        const [{ data: allLikes }, { data: myLikes }, { data: photoAuthors }] = await Promise.all([
-          photoIds.length > 0 ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds) : Promise.resolve({ data: [] }),
-          photoIds.length > 0 && userId ? supabase.from('photo_likes').select('photo_id').in('photo_id', photoIds).eq('user_id', userId) : Promise.resolve({ data: [] }),
-          allPhotoUserIds.length > 0 ? supabase.from('profils').select('id,username,prenom').in('id', allPhotoUserIds) : Promise.resolve({ data: [] }),
-        ]);
-        const countMap: Record<string, number> = {};
-        (allLikes || []).forEach((l: any) => { countMap[l.photo_id] = (countMap[l.photo_id] || 0) + 1; });
-        const mySet = new Set((myLikes || []).map((l: any) => l.photo_id));
-        const authorMap: Record<string, string | null> = {};
-        (photoAuthors || []).forEach((p: any) => { authorMap[p.id] = p.username ? `@${p.username}` : (p.prenom || null); });
-        const regularPhotos: PhotoFiche[] = (photosRaw || []).map((p: any) => ({
+      const photosRaw: any[] = contenu.photos || [];
+      const postsRaw: any[] = contenu.posts || [];
+      if (photosRaw.length > 0 || postsRaw.length > 0) {
+        const regularPhotos: PhotoFiche[] = photosRaw.map((p: any) => ({
           id: p.id, url: p.url,
-          likeCount: countMap[p.id] || 0,
-          likedByMe: mySet.has(p.id),
-          authorUsername: authorMap[p.user_id] || null,
+          likeCount: Number(p.likes) || 0,
+          likedByMe: !!p.liked,
+          authorUsername: p.auteur || null,
           nomChien: p.nom_chien || null,
           fromCommunity: false,
         }));
-        const communityPhotos: PhotoFiche[] = communityPostsRaw.map((p: any) => ({
+        const communityPhotos: PhotoFiche[] = postsRaw.map((p: any) => ({
           id: 'cp-' + p.id,
           url: p.image_url,
           likeCount: 0,
           likedByMe: false,
-          authorUsername: authorMap[p.user_id] || null,
+          authorUsername: p.auteur || null,
           nomChien: null,
           fromCommunity: true,
         }));
@@ -1670,19 +1650,13 @@ export default function CarteScreen() {
         }
       }
 
-      if ((avisRaw || []).length > 0) {
-        const avisUserIds = [...new Set(avisRaw.map((a: any) => a.user_id))];
-        const { data: avisProfils } = await supabase.from('profils').select('id,prenom,username,ambassadeur').in('id', avisUserIds);
-        const avisProfilMap: Record<string, any> = {};
-        (avisProfils || []).forEach((p: any) => { avisProfilMap[p.id] = p; });
-        setFicheAvis((avisRaw || []).map((a: any) => ({
-          id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
-          prenom: avisProfilMap[a.user_id]?.prenom || 'Membre',
-          username: avisProfilMap[a.user_id]?.username || null,
-          reponse_pro: a.reponse_pro || null,
-          ambassadeur: avisProfilMap[a.user_id]?.ambassadeur || null,
-        })));
-      }
+      setFicheAvis((contenu.avis || []).map((a: any) => ({
+        id: a.id, note: a.note, commentaire: a.commentaire, created_at: a.created_at,
+        prenom: a.prenom || 'Membre',
+        username: a.username || null,
+        reponse_pro: a.reponse_pro || null,
+        ambassadeur: a.ambassadeur || null,
+      })));
     } catch (_) {
       // erreur silencieuse, on affiche quand même ce qu'on a
     } finally {
@@ -2734,13 +2708,13 @@ export default function CarteScreen() {
               >
                 {photos.map((ph, idx) => (
                   <TouchableOpacity key={ph.id} activeOpacity={0.9} onPress={() => setLightboxIdx(idx)} style={{ width: SCREEN_W }}>
-                    <Image source={{ uri: ph.url }} style={{ width: SCREEN_W, height: FICHE_HEADER_H }} resizeMode="cover" />
+                    <Image source={{ uri: imgL(ph.url) }} style={{ width: SCREEN_W, height: FICHE_HEADER_H }} resizeMode="cover" />
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             ) : googlePhotoUrl ? (
               <Image
-                source={{ uri: googlePhotoUrl }}
+                source={{ uri: imgL(googlePhotoUrl) }}
                 style={[StyleSheet.absoluteFill, { width: SCREEN_W, height: FICHE_HEADER_H }]}
                 resizeMode="cover"
                 onError={() => {
@@ -3153,7 +3127,7 @@ export default function CarteScreen() {
                       disabled={sendingToId === item.id}
                     >
                       {item.avatar_url
-                        ? <Image source={{ uri: item.avatar_url }} style={styles.sendFriendAvatar} />
+                        ? <Image source={{ uri: imgL(item.avatar_url) }} style={styles.sendFriendAvatar} />
                         : <View style={[styles.sendFriendAvatar, { backgroundColor: colors.ivoryPale }]} />}
                       <View style={{ flex: 1 }}>
                         <Text style={styles.sendFriendName}>{item.prenom || 'Membre'}</Text>
@@ -3894,7 +3868,7 @@ export default function CarteScreen() {
               }}
               renderItem={({ item }) => (
                 <TouchableOpacity activeOpacity={1} onPress={() => setLightboxIdx(null)} style={{ width: SCREEN_W, alignItems: 'center', justifyContent: 'center' }}>
-                  <Image source={{ uri: item.url }} style={styles.lightboxImg} resizeMode="contain" />
+                  <Image source={{ uri: imgL(item.url) }} style={styles.lightboxImg} resizeMode="contain" />
                 </TouchableOpacity>
               )}
             />
@@ -4148,7 +4122,7 @@ export default function CarteScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
                   {proposePhotos.map((uri, idx) => (
                     <View key={idx} style={styles.proposeMediaThumb}>
-                      <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                       <TouchableOpacity style={styles.proposeMediaRemove} onPress={() => setProposePhotos(p => p.filter((_, i) => i !== idx))}>
                         <Ionicons name="close-circle" size={20} color="#fff" />
                       </TouchableOpacity>
@@ -4436,7 +4410,7 @@ export default function CarteScreen() {
                               else navigation.navigate('Services');
                             }}
                           >
-                            {m.logo_url ? <Image source={{ uri: m.logo_url }} style={styles.eventModalMentionLogo} /> : null}
+                            {m.logo_url ? <Image source={{ uri: imgL(m.logo_url) }} style={styles.eventModalMentionLogo} /> : null}
                             <Text style={styles.eventModalMentionText}>{m.type === 'instagram' ? `📷 ${m.nom}` : m.nom}</Text>
                           </TouchableOpacity>
                         ))}
@@ -4503,7 +4477,7 @@ export default function CarteScreen() {
       {/* Off-screen share card for image sharing */}
       <View ref={shareLieuCardRef} collapsable={false} style={styles.shareLieuCard}>
         {photos[0]?.url ? (
-          <Image source={{ uri: photos[0].url }} style={styles.shareLieuPhoto} resizeMode="cover" />
+          <Image source={{ uri: imgL(photos[0].url) }} style={styles.shareLieuPhoto} resizeMode="cover" />
         ) : (
           <View style={[styles.shareLieuPhotoPlaceholder, { backgroundColor: (CAT_CONFIG[selectedLieu?.cat || 'autre'] || CAT_CONFIG.autre).color }]}>
             <Ionicons name={(CAT_CONFIG[selectedLieu?.cat || 'autre'] || CAT_CONFIG.autre).markerIcon} size={64} color="rgba(255,255,255,0.5)" />
@@ -4611,7 +4585,7 @@ export default function CarteScreen() {
           {baladePost && ((baladePost.images && baladePost.images.length > 0) || baladePost.image_url) ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 14 }}>
               {(baladePost.images && baladePost.images.length ? baladePost.images : [baladePost.image_url as string]).map((uri, idx) => (
-                <Image key={idx} source={{ uri }} style={styles.baladeSheetPhoto} resizeMode="cover" />
+                <Image key={idx} source={{ uri: imgL(uri) }} style={styles.baladeSheetPhoto} resizeMode="cover" />
               ))}
             </ScrollView>
           ) : null}
@@ -4707,7 +4681,7 @@ export default function CarteScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
               {baladePhotoUris.map((uri, idx) => (
                 <View key={idx} style={styles.proposeMediaThumb}>
-                  <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <Image source={{ uri: imgL(uri) }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   <TouchableOpacity style={styles.proposeMediaRemove} onPress={() => setBaladePhotoUris(p => p.filter((_, i) => i !== idx))}>
                     <Ionicons name="close-circle" size={20} color="#fff" />
                   </TouchableOpacity>

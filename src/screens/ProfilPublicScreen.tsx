@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { imgL } from '../lib/imagesLegeres';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { mapNavigation } from '../lib/mapNavigation';
@@ -225,7 +226,7 @@ export default function ProfilPublicScreen() {
         <View style={styles.avatarRow}>
           {profil.avatar_url ? (
             <TouchableOpacity activeOpacity={0.85} onPress={() => setAvatarViewerVisible(true)}>
-              <Image source={{ uri: profil.avatar_url }} style={styles.avatar} />
+              <Image source={{ uri: imgL(profil.avatar_url) }} style={styles.avatar} />
             </TouchableOpacity>
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
@@ -384,7 +385,7 @@ export default function ProfilPublicScreen() {
                   onPress={() => ph.lieu_id && goToLieu(ph.lieu_id)}
                   activeOpacity={0.85}
                 >
-                  <Image source={{ uri: ph.url }} style={styles.photoImg} resizeMode="cover" />
+                  <Image source={{ uri: imgL(ph.url) }} style={styles.photoImg} resizeMode="cover" />
                   {ph.lieu_id && (
                     <View style={styles.photoOverlay}>
                       <Ionicons name="location-outline" size={12} color="#fff" />
@@ -464,7 +465,7 @@ export default function ProfilPublicScreen() {
                     onPress={() => { setFollowModal(false); navigation.push('ProfilPublic', { userId: item.id }); }}
                   >
                     {item.avatar_url
-                      ? <Image source={{ uri: item.avatar_url }} style={styles.followAvatar} />
+                      ? <Image source={{ uri: imgL(item.avatar_url) }} style={styles.followAvatar} />
                       : <View style={styles.followAvatarFallback}><Text style={styles.followAvatarLetter}>{(item.prenom || '?')[0].toUpperCase()}</Text></View>}
                     <View style={{ flex: 1 }}>
                       <Text style={styles.followNom}>{item.prenom || 'Membre'}</Text>
@@ -487,7 +488,7 @@ export default function ProfilPublicScreen() {
           onPress={() => setAvatarViewerVisible(false)}
         >
           {profil.avatar_url ? (
-            <Image source={{ uri: profil.avatar_url }} style={styles.avatarViewerImage} resizeMode="contain" />
+            <Image source={{ uri: imgL(profil.avatar_url) }} style={styles.avatarViewerImage} resizeMode="contain" />
           ) : null}
           <TouchableOpacity style={styles.avatarViewerClose} onPress={() => setAvatarViewerVisible(false)}>
             <Ionicons name="close" size={28} color={colors.ivory} />
