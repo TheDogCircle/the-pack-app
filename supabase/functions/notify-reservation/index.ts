@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-const FROM_EMAIL = 'The Pack La Meute <reservations@thepacklameute.fr>';
+const FROM_EMAIL = 'The Pack La Meute <reservations@thepackclub.fr>';
 
 async function sendEmail(to: string, subject: string, html: string) {
   if (!RESEND_API_KEY) { console.log('RESEND_API_KEY not set, skipping email'); return; }

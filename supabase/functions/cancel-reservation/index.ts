@@ -9,7 +9,7 @@ const CORS = {
 import { recordRefundRevenue } from '../_shared/revenueEvents.ts'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack La Meute <reservations@thepacklameute.fr>'
+const FROM_EMAIL = 'The Pack La Meute <reservations@thepackclub.fr>'
 
 // Memes helpers que notify-reservation (declenchee a la creation) -- ici on
 // notifie sur l'annulation, toujours les deux parties (client + pro), peu

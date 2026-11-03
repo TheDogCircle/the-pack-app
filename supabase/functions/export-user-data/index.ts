@@ -7,7 +7,7 @@ const CORS = {
 }
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack La Meute <contact@thepacklameute.fr>'
+const FROM_EMAIL = 'The Pack La Meute <contact@thepackclub.fr>'
 
 // Droit d'acces RGPD. Les photos/videos sont deja sur des URLs publiques
 // permanentes (R2 cote mobile, Storage cote web) : pas d'objet prive a

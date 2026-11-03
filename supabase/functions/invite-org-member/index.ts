@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: 'The Pack La Meute <contact@thepacklameute.fr>',
+          from: 'The Pack La Meute <contact@thepackclub.fr>',
           to: [email],
           subject: `Invitation à rejoindre ${org?.nom || 'une organisation'} sur The Pack`,
           html: `
