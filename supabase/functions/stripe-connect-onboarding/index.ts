@@ -61,7 +61,8 @@ Deno.serve(async (req) => {
         type: 'express',
         country: 'FR',
         email: caller.email,
-        business_type: 'individual',
+        // Pas de business_type impose : le pro choisit particulier / entreprise
+        // dans le formulaire Stripe (beaucoup sont en SARL, EURL ou SAS).
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },

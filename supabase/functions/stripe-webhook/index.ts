@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
   // avec cette cle pour ces evenements-la (voir plus bas), seule la verification
   // de signature differe (secret test vs secret live, essayes l'un puis l'autre).
   const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', { apiVersion: '2024-06-20' })
-  const webhookSecrets = [Deno.env.get('STRIPE_WEBHOOK_SECRET'), Deno.env.get('STRIPE_LIVE_WEBHOOK_SECRET')].filter(Boolean) as string[]
+  const webhookSecrets = [Deno.env.get('STRIPE_WEBHOOK_SECRET'), Deno.env.get('STRIPE_LIVE_WEBHOOK_SECRET'), Deno.env.get('STRIPE_LIVE_CONNECT_WEBHOOK_SECRET')].filter(Boolean) as string[]
 
   const signature = req.headers.get('stripe-signature')
   const body = await req.text()
