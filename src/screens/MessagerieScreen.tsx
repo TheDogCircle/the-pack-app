@@ -639,6 +639,19 @@ export default function MessagerieScreen({
     return () => { supabase.removeChannel(ch); };
   }, [myUserId]);
 
+  // Remonte une conversation en tete de liste des qu'on y ecrit (sans attendre
+  // le signal temps reel, qui peut se perdre apres un passage en arriere-plan)
+  function remonterConversation(convId: string, msg: { contenu: string; image_url: string | null; created_at: string; user_id: string }) {
+    setConversations(prev => {
+      const i = prev.findIndex(c => c.id === convId);
+      if (i < 0) return prev;
+      const maj: Conversation = { ...prev[i], last_message: msg };
+      const liste = [maj, ...prev.slice(0, i), ...prev.slice(i + 1)];
+      if (myUserId) ecrireCache(`conversations:${myUserId}`, liste);
+      return liste;
+    });
+  }
+
   // Marque la conversation comme lue (en base + pastille de la liste)
   function markConversationRead(convId: string, dernierMessageAt?: string | null) {
     if (!myUserId) return;
@@ -801,7 +814,7 @@ export default function MessagerieScreen({
     setInputText('');
     setReplyTo(null);
     setMyMuted(false);
-    loadConversations();
+    loadConversations(true);
   }
 
   async function loadMessages(convId: string) {
@@ -932,6 +945,7 @@ export default function MessagerieScreen({
         reactions: {}, maReaction: null, reply_to_id: reponseA?.id ?? null,
       };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
+      remonterConversation(selectedConv.id, { contenu: '', image_url: pub.publicUrl, created_at: optimistic.created_at, user_id: myUserId });
       if (!notifParServeur) notifyOtherMembers('📷 Photo', selectedConv);
     } catch (e: any) {
       Alert.alert('Erreur', e.message || "Impossible d'envoyer la photo.");
@@ -954,6 +968,7 @@ export default function MessagerieScreen({
     if (!error) {
       const optimistic: Message = { id: data?.id ?? `tmp-${Date.now()}`, user_id: myUserId, contenu: text, image_url: null, created_at: data?.created_at ?? new Date().toISOString(), prenom: 'Moi', avatar_url: null, reactions: {}, maReaction: null, reply_to_id: reponseA?.id ?? null };
       setMessages(prev => prev.some(m => m.id === optimistic.id) ? prev : [...prev, optimistic]);
+      remonterConversation(selectedConv.id, { contenu: text, image_url: null, created_at: optimistic.created_at, user_id: myUserId });
       if (!notifParServeur) notifyOtherMembers(text, selectedConv);
     } else {
       Alert.alert('Erreur', `Message non envoyé : ${error.message}`);
