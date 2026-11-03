@@ -3,7 +3,16 @@ import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityInd
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
-export type MissingFields = { nom: boolean; dateNaissance: boolean; nomChien: boolean };
+export type MissingFields = { nom: boolean; dateNaissance: boolean; nomChien: boolean; genre?: boolean };
+
+// Memes choix qu'a l'inscription (OnboardingScreen)
+const OWNER_GENRES = [
+  { key: 'femme', label: 'Femme' },
+  { key: 'homme', label: 'Homme' },
+  { key: 'non_binaire', label: 'Non-binaire' },
+  { key: 'neutre', label: 'Neutre' },
+  { key: 'autre', label: 'Autre' },
+];
 
 function formatDate(text: string): string {
   const digits = text.replace(/\D/g, '').slice(0, 8);
@@ -26,21 +35,26 @@ export default function CompleteProfileModal({
   const [nomError, setNomError] = useState(false);
   const [dateError, setDateError] = useState(false);
   const [nomChienError, setNomChienError] = useState(false);
+  const [genre, setGenre] = useState('');
+  const [genreError, setGenreError] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function save() {
     const nomMissing = missing.nom && !nom.trim();
     const dateMissing = missing.dateNaissance && !dateNaissance.trim();
     const nomChienMissing = missing.nomChien && !nomChien.trim();
+    const genreMissing = !!missing.genre && !genre;
     setNomError(nomMissing);
     setDateError(dateMissing);
     setNomChienError(nomChienMissing);
-    if (nomMissing || dateMissing || nomChienMissing) return;
+    setGenreError(genreMissing);
+    if (nomMissing || dateMissing || nomChienMissing || genreMissing) return;
 
     const updates: Record<string, string> = {};
     if (missing.nom) updates.nom = nom.trim();
     if (missing.dateNaissance) updates.date_naissance_humain = dateNaissance.trim();
     if (missing.nomChien) updates.nom_chien = nomChien.trim();
+    if (missing.genre) updates.genre = genre;
 
     setSaving(true);
     const { error } = await supabase.from('profils').update(updates).eq('id', userId);
@@ -90,6 +104,26 @@ export default function CompleteProfileModal({
                 {dateError && <Text style={styles.errorText}>L'anniversaire est requis</Text>}
               </View>
             )}
+            {missing.genre && (
+              <View style={styles.field}>
+                <Text style={styles.label}>Ton genre *</Text>
+                <View style={styles.genres}>
+                  {OWNER_GENRES.map(g => {
+                    const actif = genre === g.key;
+                    return (
+                      <TouchableOpacity
+                        key={g.key}
+                        style={[styles.genrePill, actif && styles.genrePillActive, genreError && !genre && styles.inputError]}
+                        onPress={() => { setGenre(g.key); setGenreError(false); }}
+                      >
+                        <Text style={[styles.genreText, actif && styles.genreTextActive]}>{g.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {genreError && <Text style={styles.errorText}>Le genre est requis</Text>}
+              </View>
+            )}
             {missing.nomChien && (
               <View style={styles.field}>
                 <Text style={styles.label}>Nom du chien *</Text>
@@ -131,6 +165,11 @@ const styles = StyleSheet.create({
   title: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 20, color: colors.bordeaux, textAlign: 'center', marginBottom: 6 },
   sub: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 19, marginBottom: 20 },
   field: { marginBottom: 14 },
+  genres: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  genrePill: { borderWidth: 1.5, borderColor: colors.border, backgroundColor: 'white', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14 },
+  genrePillActive: { backgroundColor: colors.bordeaux, borderColor: colors.bordeaux },
+  genreText: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.bordeaux },
+  genreTextActive: { color: colors.ivory },
   label: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8 },
   input: { fontFamily: 'DMSans_400Regular', fontSize: 15, backgroundColor: 'white', borderRadius: 10, padding: 14, color: colors.bordeaux, borderWidth: 1.5, borderColor: colors.border },
   inputError: { borderColor: '#C43A3A' },

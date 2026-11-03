@@ -691,7 +691,7 @@ export default function Navigation() {
     lireCache<boolean>(`profil_complet:${userId}`).then(ok => { if (ok) setOnboardingChecked(true); });
     async function checkOnboarding(retriesLeft = 2) {
       const { data, error } = await supabase.from('profils')
-        .select('prenom, nom, date_naissance_humain, nom_chien').eq('id', userId).maybeSingle();
+        .select('prenom, nom, date_naissance_humain, nom_chien, genre').eq('id', userId).maybeSingle();
       if (error) {
         if (retriesLeft > 0) {
           await new Promise(r => setTimeout(r, 800));
@@ -707,8 +707,9 @@ export default function Navigation() {
       setNeedsOnboarding(!data?.prenom);
       ecrireCache(`profil_complet:${userId}`, !!data?.prenom);
       if (data?.prenom) {
-        const missing = { nom: !data.nom, dateNaissance: !data.date_naissance_humain, nomChien: !data.nom_chien };
-        setMissingFields((missing.nom || missing.dateNaissance || missing.nomChien) ? missing : null);
+        // (03/11) Genre obligatoire aussi pour les membres inscrits avant le 30/08
+        const missing = { nom: !data.nom, dateNaissance: !data.date_naissance_humain, nomChien: !data.nom_chien, genre: !data.genre };
+        setMissingFields((missing.nom || missing.dateNaissance || missing.nomChien || missing.genre) ? missing : null);
       }
       setOnboardingChecked(true);
     }
