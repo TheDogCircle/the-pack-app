@@ -284,7 +284,7 @@ function LieuMarker({ lieu, isSelected, forceTrack, onPress }: { lieu: Lieu; isS
   // onPress de façon fiable dans cette version de react-native-maps : le
   // cercle reste purement visuel, un marqueur reduit au centre sert de
   // cible tactile (meme composant que le pin normal, en plus petit).
-  if (lieu.cat === 'educateur' && !lieu.adresse && lieu.zone_rayon_km) {
+  if (lieu.cat === 'educateur' && !lieu.adresse && lieu.zone_rayon_km && (lieu as any).zone_mode !== 'dessin') {
     return (
       <>
         <Circle
@@ -627,6 +627,9 @@ async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string
 }
 
 
+
+// Prestations d'un pro (lieux.services)
+const PRESTA_LIB: Record<string, string> = { toiletteur: 'Toilettage', educateur: 'Éducation canine', comportementaliste: 'Comportementaliste', promeneur: 'Promenade', garde: 'Garde / pension' };
 
 export default function CarteScreen() {
   const insets = useSafeAreaInsets();
@@ -1082,7 +1085,7 @@ export default function CarteScreen() {
     if (lieux.length === 0) setLoading(true);
     try {
       let query = supabase
-        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,zone_rayon_km,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,created_at,mise_en_avant').eq('actif', true)
+        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,zone_rayon_km,zone_mode,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,created_at,mise_en_avant').eq('actif', true)
         .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
         .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
         .limit(3000);
@@ -2964,7 +2967,23 @@ export default function CarteScreen() {
                   </TouchableOpacity>
                 ) : null}
 
-                {(selectedLieu as any).zone_rayon_km ? (
+                {/* (03/11) Prestations d'un pro (il peut en cumuler plusieurs) */}
+                {(selectedLieu as any).services?.length ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="checkmark-circle-outline" size={15} color={colors.textMuted} />
+                    <Text style={styles.infoText}>{(selectedLieu as any).services.map((k: string) => PRESTA_LIB[k]).filter(Boolean).join(' · ')}</Text>
+                  </View>
+                ) : null}
+
+                {((selectedLieu as any).arrondissements?.length || (selectedLieu as any).zones_villes?.length) ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons name="navigate-circle-outline" size={15} color={colors.textMuted} />
+                    <Text style={styles.infoText}>Intervient à {[
+                      ...((selectedLieu as any).arrondissements || []).map((c: string) => /^750\d\d$/.test(c) ? `Paris ${+c.slice(3)}${c === '75001' ? 'er' : 'e'}` : c),
+                      ...((selectedLieu as any).zones_villes || []),
+                    ].join(', ')}</Text>
+                  </View>
+                ) : (selectedLieu as any).zone_rayon_km && (selectedLieu as any).zone_mode !== 'dessin' ? (
                   <View style={styles.infoRow}>
                     <Ionicons name="navigate-circle-outline" size={15} color={colors.textMuted} />
                     <Text style={styles.infoText}>Se déplace dans un rayon de {(selectedLieu as any).zone_rayon_km} km</Text>
