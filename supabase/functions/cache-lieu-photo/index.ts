@@ -19,6 +19,7 @@ const corsHeaders = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
+const PLAFOND_JOUR = 150;
 const LIEN_GOOGLE = /^https:\/\/places\.googleapis\.com\/v1\/(places\/[^/]+\/photos\/[^/?]+)\/media/;
 
 serve(async (req) => {
@@ -45,6 +46,15 @@ serve(async (req) => {
       if (!actuel) await supabase.from('lieux').update({ google_photo_url: 'none' }).eq('id', lieuId).is('google_photo_url', null);
       return json({ ok: true, url: null });
     }
+
+    // Plafond de depense : au plus PLAFOND_JOUR photos Google recopiees par jour
+    // (~0,6 centime chacune). Au-dela, pas de photo aujourd'hui, on reessaiera
+    // demain : le client affiche l'icone de la categorie.
+    const { data: recentes } = await supabase.storage.from('lieu-photos')
+      .list('google-cache', { limit: PLAFOND_JOUR + 1, sortBy: { column: 'created_at', order: 'desc' } });
+    const minuit = new Date(); minuit.setUTCHours(0, 0, 0, 0);
+    const aujourdhui = (recentes || []).filter((f: any) => f.created_at && new Date(f.created_at) >= minuit).length;
+    if (aujourdhui >= PLAFOND_JOUR) return json({ ok: true, url: null, plafond: true });
 
     // Photo a recuperer : celle donnee par la recherche, sinon celle du lien en base
     const nom = photoName || (actuelGoogle ? actuel!.match(LIEN_GOOGLE)![1] : null);
