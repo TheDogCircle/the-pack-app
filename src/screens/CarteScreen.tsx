@@ -4392,7 +4392,14 @@ export default function CarteScreen() {
                         <Text style={styles.eventModalText}>{selectedMapEvent.prix ? `${selectedMapEvent.prix} €` : 'Payant'}</Text>
                       </View>
                     ) : null}
-                    {selectedMapEvent.profils?.username ? (
+                    {/* Evenement repere par la veille (lien vers le site de l'organisateur) :
+                        on ne l'attribue pas au compte qui l'a ajoute */}
+                    {selectedMapEvent.site_web ? (
+                      <View style={styles.eventModalRow}>
+                        <Ionicons name="globe-outline" size={14} color={colors.textMuted} />
+                        <Text style={styles.eventModalText}>Organisé par un tiers</Text>
+                      </View>
+                    ) : selectedMapEvent.profils?.username ? (
                       <View style={styles.eventModalRow}>
                         <Ionicons name="person-outline" size={14} color={colors.textMuted} />
                         <Text style={styles.eventModalText}>@{selectedMapEvent.profils.username}</Text>
