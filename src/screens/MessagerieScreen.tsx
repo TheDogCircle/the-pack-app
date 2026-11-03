@@ -1110,11 +1110,12 @@ export default function MessagerieScreen({
     setMyConvIds(new Set((memberRows || []).map((m: any) => m.conversation_id)));
 
     if (gData?.length) {
-      // Nombre de membres de tous les groupes en une requete (avant : une par groupe)
-      const { data: membresGroupes } = await supabase.from('conversation_members')
-        .select('conversation_id').in('conversation_id', gData.map((gr: any) => gr.conversation_id));
+      // Nombre de membres de tous les groupes en une requete. Via une fonction
+      // serveur : la lecture directe de conversation_members ne voit (RLS) que les
+      // groupes deja rejoints, les autres affichaient "0 membre".
+      const { data: nbs } = await supabase.rpc('groupes_nombre_membres');
       const compte: Record<string, number> = {};
-      (membresGroupes || []).forEach((m: any) => { compte[m.conversation_id] = (compte[m.conversation_id] || 0) + 1; });
+      (nbs || []).forEach((r: any) => { compte[r.conversation_id] = Number(r.nb_membres) || 0; });
       setGroupes(gData.map((gr: any) => ({ ...gr, membre_count: compte[gr.conversation_id] ?? 0 })));
     } else { setGroupes([]); }
     setGroupesLoading(false);
