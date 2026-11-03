@@ -71,8 +71,8 @@ const OWNER_GENRES = [
   { key: 'femme', label: 'Femme' },
   { key: 'homme', label: 'Homme' },
   { key: 'non_binaire', label: 'Non-binaire' },
-  { key: 'neutre', label: 'Neutre' },
   { key: 'autre', label: 'Autre' },
+  { key: 'non_precise', label: 'Je préfère ne pas répondre' },
 ];
 
 const TRANCHES_AGE = [
