@@ -3,6 +3,10 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const CLE_TOKEN_ENREGISTRE = 'push_token_enregistre_v1';
+const UN_JOUR_MS = 86400000;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -54,6 +58,12 @@ export async function savePushToken(userId: string): Promise<void> {
   try {
     const token = await registerForPushNotifications();
     if (!token) return;
+    // Deja enregistre pour ce compte il y a moins de 24 h : rien a ecrire
+    // (avant : 3 ecritures en base a chaque retour dans l'app).
+    try {
+      const deja = JSON.parse((await AsyncStorage.getItem(CLE_TOKEN_ENREGISTRE)) || 'null');
+      if (deja && deja.u === userId && deja.t === token && Date.now() - deja.at < UN_JOUR_MS) return;
+    } catch {}
     // Un token de push identifie un appareil precis, pas un compte : si un autre profil
     // (ex : session precedente sur ce meme telephone) a encore ce token enregistre, on le
     // retire de ce profil-la avant de l'attribuer ici. Sans ca, deux comptes utilises sur
@@ -72,6 +82,7 @@ export async function savePushToken(userId: string): Promise<void> {
     const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : null;
     const appVersion = Constants.expoConfig?.version ?? null;
     await supabase.rpc('claim_device_token', { p_token: token, p_platform: platform, p_app_version: appVersion });
+    AsyncStorage.setItem(CLE_TOKEN_ENREGISTRE, JSON.stringify({ u: userId, t: token, at: Date.now() })).catch(() => {});
   } catch {}
 }
 

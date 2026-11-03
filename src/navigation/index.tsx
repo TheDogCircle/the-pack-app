@@ -714,7 +714,10 @@ export default function Navigation() {
     // Verifie un prompt NPS en attente (Phase 6 lot 5) -- a la connexion et a
     // chaque retour au premier plan, pas seulement sur tap de notification
     // (plus fiable : ne depend pas de la livraison du push).
+    let derniereVerifNps = 0;
     async function checkNpsPrompt() {
+      if (Date.now() - derniereVerifNps < 3600000) return;
+      derniereVerifNps = Date.now();
       const { data } = await supabase.rpc('nps_prompt_pending');
       if (data?.[0]) setNpsPending(data[0]);
     }

@@ -599,15 +599,31 @@ async function fetchPhotosForLieux(ids: string[]): Promise<Record<string, string
   // decoupe en lots pour rester tres en dessous du seuil observe.
   const CHUNK_SIZE = 150;
   const map: Record<string, string> = {};
-  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-    const chunk = ids.slice(i, i + CHUNK_SIZE);
-    const { data, error } = await supabase
-      .from('photos').select('lieu_id,url')
-      .in('lieu_id', chunk).eq('validee', true)
-      .order('created_at', { ascending: false });
-    if (error) { console.warn('[fetchPhotosForLieux] chunk failed:', error.message); continue; }
+  const lots: string[][] = [];
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) lots.push(ids.slice(i, i + CHUNK_SIZE));
+  // Lots en parallele (avant : l'un apres l'autre)
+  const res = await Promise.all(lots.map(chunk => supabase
+    .from('photos').select('lieu_id,url')
+    .in('lieu_id', chunk).eq('validee', true)
+    .order('created_at', { ascending: false })));
+  res.forEach(({ data, error }) => {
+    if (error) { console.warn('[fetchPhotosForLieux] chunk failed:', error.message); return; }
     (data || []).forEach((p: any) => { if (!map[p.lieu_id]) map[p.lieu_id] = p.url; });
-  }
+  });
+  return map;
+}
+
+// Photos Google des lieux, chargees seulement pour la vue liste : les inclure
+// dans le chargement de la carte doublait son poids (~560 caracteres par lieu).
+async function fetchGooglePhotoUrls(ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const CHUNK_SIZE = 150;
+  const lots: string[][] = [];
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) lots.push(ids.slice(i, i + CHUNK_SIZE));
+  const res = await Promise.all(lots.map(chunk => supabase
+    .from('lieux').select('id,google_photo_url').in('id', chunk).not('google_photo_url', 'is', null)));
+  const map: Record<string, string> = {};
+  res.forEach(({ data }) => (data || []).forEach((l: any) => { map[l.id] = l.google_photo_url; }));
   return map;
 }
 
@@ -753,6 +769,7 @@ export default function CarteScreen() {
   const [discoverPhotoLikes, setDiscoverPhotoLikes] = useState<Record<string, number>>({});
   const [discoverPhotoLikedByMe, setDiscoverPhotoLikedByMe] = useState<Set<string>>(new Set());
   const [listPhotoMap, setListPhotoMap] = useState<Record<string, string>>({});
+  const [listGoogleMap, setListGoogleMap] = useState<Record<string, string>>({});
   const [selectedMapEvent, setSelectedMapEvent] = useState<EventMarker | null>(null);
   const [mapEventInscLoading, setMapEventInscLoading] = useState(false);
   const markerResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1060,9 +1077,14 @@ export default function CarteScreen() {
   useEffect(() => {
     if (!listView || !lieux.length) return;
     const missing = lieux.filter(l => !listPhotoMap[l.id]).map(l => l.id);
-    if (!missing.length) return;
-    fetchPhotosForLieux(missing).then(map => {
+    if (missing.length) fetchPhotosForLieux(missing).then(map => {
       if (Object.keys(map).length) setListPhotoMap(prev => ({ ...prev, ...map }));
+    });
+    const sansGoogle = lieux.filter(l => !l.google_photo_url && !(l.id in listGoogleMap)).map(l => l.id);
+    if (sansGoogle.length) fetchGooglePhotoUrls(sansGoogle).then(map => {
+      const complet: Record<string, string> = {};
+      sansGoogle.forEach(id => { complet[id] = map[id] || ''; });
+      setListGoogleMap(prev => ({ ...prev, ...complet }));
     });
   }, [listView, lieux]);
 
@@ -1086,7 +1108,7 @@ export default function CarteScreen() {
     if (lieux.length === 0) setLoading(true);
     try {
       let query = supabase
-        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,zone_rayon_km,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,google_photo_url,created_at,mise_en_avant').eq('actif', true)
+        .from('lieux').select('id,nom,lat,lng,cat,ville,adresse,zone_rayon_km,note_moyenne,nb_avis,chiens_salle,chiens_terrasse,espace_dedie,eau,gamelles,chiens_laches,chiens_laisse,petits_chiens,moyens_chiens,grands_chiens,created_at,mise_en_avant').eq('actif', true)
         .gte('lat', r.latitude - r.latitudeDelta).lte('lat', r.latitude + r.latitudeDelta)
         .gte('lng', r.longitude - r.longitudeDelta).lte('lng', r.longitude + r.longitudeDelta)
         .limit(3000);
@@ -3557,7 +3579,7 @@ export default function CarteScreen() {
                   const dist = (userLat !== null && userLng !== null)
                     ? haversine(userLat, userLng, item.lat, item.lng)
                     : null;
-                  const photo = listPhotoMap[item.id] || item.google_photo_url;
+                  const photo = listPhotoMap[item.id] || item.google_photo_url || listGoogleMap[item.id] || null;
                   return (
                     <TouchableOpacity
                       key={item.id}
