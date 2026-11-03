@@ -63,11 +63,29 @@ Deno.serve(async (req) => {
   // aucun prix connu et le plan n'est alors pas touche (pas de valeur
   // inventee), meme logique que le reste de ce fichier pour un rattachement
   // non resolu.
+  // (03/11) L'annuel est aussi reconnu : prix annuel = 10 x le mensuel
+  // (290 EUR / 890 EUR, 2 mois offerts). Avant, un abonne annuel ne recevait
+  // jamais ses fonctions.
   async function resolvePlanFromPrice(price: Stripe.Price | null | undefined): Promise<string | null> {
-    if (!price?.unit_amount || price.recurring?.interval !== 'month') return null
+    if (!price?.unit_amount) return null
+    const interval = price.recurring?.interval
+    const mensuel = interval === 'month' ? price.unit_amount : interval === 'year' ? price.unit_amount / 10 : null
+    if (!mensuel) return null
     const { data: offres } = await supabaseAdmin
       .from('offres').select('plan_key, prix_cents').eq('intervalle', 'month').not('prix_cents', 'is', null)
-    return (offres || []).find((o) => o.prix_cents === price.unit_amount)?.plan_key ?? null
+      .in('plan_key', ['essentiel', 'premium'])
+    return (offres || []).find((o) => o.prix_cents === mensuel)?.plan_key ?? null
+  }
+
+  // (03/11) Etablissements (restaurants, cafes, hotels, boutiques) : le meme
+  // paiement a 29 EUR / 290 EUR que l'Essentiel des prestataires active la
+  // formule "Visibilite" (mise en avant, notifications, stats), sans la
+  // reservation en ligne qui ne leur sert pas.
+  const CATS_PRESTA = ['educateur', 'toiletteur', 'promeneur']
+  function planPourLieu(plan: string | null, lieu: { cat?: string | null; source?: string | null } | null): string | null {
+    if (plan !== 'essentiel' || !lieu) return plan
+    const presta = CATS_PRESTA.includes(lieu.cat ?? '') || lieu.source === 'partenaire_educateur'
+    return presta ? plan : 'visibilite'
   }
 
   // Notifie l'owner (email) via notify-subscription-event -- meme pattern de
@@ -321,6 +339,20 @@ Deno.serve(async (req) => {
           // (quasi simultane) corrige/confirme juste apres avec le statut exact.
           subscription_status: 'active',
         }
+        // (03/11) Formule deduite du lien de paiement : l'evenement
+        // subscription.created peut arriver AVANT celui-ci (fiche pas encore
+        // reliee a l'abonnement) et la formule ne s'activait alors qu'a la
+        // fin de l'essai.
+        const LIENS_PLANS: Record<string, string> = {
+          plink_1UKZKuEFUYTQpFTeBZdEtiKZ: 'essentiel', plink_1UKZKaEFUYTQpFTe7Uh9bbFV: 'essentiel',
+          plink_1UKwYREFUYTQpFTe4IPbS5We: 'premium', plink_1UKwbSEFUYTQpFTe6Ml9eNvX: 'premium',
+        }
+        const lienId = typeof session.payment_link === 'string' ? session.payment_link : session.payment_link?.id
+        if (lienId && LIENS_PLANS[lienId]) {
+          const { data: lieuCo } = await supabaseAdmin.from('lieux').select('cat, source').eq('id', session.client_reference_id).maybeSingle()
+          const planCo = planPourLieu(LIENS_PLANS[lienId], lieuCo)
+          if (planCo) (patch as Record<string, unknown>).plan = planCo
+        }
         await supabaseAdmin.from('lieux').update(patch).eq('id', session.client_reference_id)
 
         // Miroir sur organizations (socle commun). stripe_customer_id existe
@@ -334,6 +366,7 @@ Deno.serve(async (req) => {
             stripe_customer_id: patch.stripe_subscription_customer_id,
             stripe_subscription_id: patch.stripe_subscription_id,
             subscription_status: patch.subscription_status,
+            ...((patch as Record<string, unknown>).plan ? { plan: (patch as Record<string, unknown>).plan } : {}),
           }).eq('id', orgId)
         }
         break
@@ -368,8 +401,10 @@ Deno.serve(async (req) => {
         // Statut avant mise a jour, pour ne notifier que sur une veritable
         // transition (Stripe peut renvoyer plusieurs fois le meme evenement).
         const { data: existingLieu } = await supabaseAdmin
-          .from('lieux').select('id, subscription_status').eq('stripe_subscription_id', sub.id).maybeSingle()
+          .from('lieux').select('id, subscription_status, cat, source').eq('stripe_subscription_id', sub.id).maybeSingle()
         const previousStatus = existingLieu?.subscription_status ?? null
+        const planFinal = planPourLieu(resolvedPlan, existingLieu)
+        if (planFinal) (subPatch as Record<string, unknown>).plan = planFinal
 
         const { data: lieu } = await supabaseAdmin
           .from('lieux').update(subPatch).eq('stripe_subscription_id', sub.id).select('id').maybeSingle()

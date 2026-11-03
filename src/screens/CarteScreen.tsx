@@ -1146,7 +1146,7 @@ export default function CarteScreen() {
 
     const qEducateurs = supabase.from('lieux')
       .select('id,nom,cat,ville,lat,lng,note_moyenne,nb_avis,google_photo_url,created_at,mise_en_avant,plan')
-      .eq('actif', true).eq('cat', 'educateur').limit(20);
+      .eq('actif', true).in('cat', ['educateur', 'toiletteur', 'promeneur']).in('plan', ['essentiel', 'pro', 'premium', 'gestion']).limit(20);
 
     // Univers large pour le scoring "pour toi": on réutilise top+recent+nearby comme pool de candidats
     const [rTop, rRecent, rNearby, rEducateurs, signals] = await Promise.all([
@@ -1168,7 +1168,7 @@ export default function CarteScreen() {
     // Educateurs : uniquement les plans avec reservation en ligne active, tries
     // par distance si on a la position, sinon par note.
     let educateursRaw: DiscoverLieu[] = ((rEducateurs.data || []) as any[])
-      .filter(l => ['essentiel', 'pro', 'premium', 'gestion', 'visibilite'].includes(l.plan)) as DiscoverLieu[];
+      .filter(l => ['essentiel', 'pro', 'premium', 'gestion'].includes(l.plan)) as DiscoverLieu[];
     if (userLat && userLng) {
       educateursRaw = educateursRaw
         .map(l => ({ ...l, distance: l.lat && l.lng ? haversine(userLat!, userLng!, l.lat, l.lng) : undefined }))
@@ -2996,7 +2996,7 @@ export default function CarteScreen() {
                     <Ionicons name="navigate" size={16} color={colors.ivory} />
                     <Text style={styles.actionPrimaryText}>Itinéraire</Text>
                   </TouchableOpacity>
-                  {!selectedLieu.ferme && selectedLieu.cat === 'educateur' && ['essentiel', 'pro', 'premium', 'gestion', 'visibilite'].includes(selectedLieu.plan || '') ? (
+                  {!selectedLieu.ferme && ['educateur', 'toiletteur', 'promeneur'].includes(selectedLieu.cat) && ['essentiel', 'pro', 'premium', 'gestion'].includes(selectedLieu.plan || '') ? (
                     <TouchableOpacity
                       style={styles.actionReserver}
                       onPress={() => {
@@ -3413,7 +3413,7 @@ export default function CarteScreen() {
 
                 {educateurDiscoverLieux.length > 0 && (
                   <View style={dstyles.section}>
-                    <Text style={dstyles.sectionTitle}>Éducateurs près de chez toi</Text>
+                    <Text style={dstyles.sectionTitle}>Pros à réserver près de chez toi</Text>
                     <FlatList
                       data={educateurDiscoverLieux} horizontal showsHorizontalScrollIndicator={false}
                       keyExtractor={i => i.id} contentContainerStyle={dstyles.cardsRow}
