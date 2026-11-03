@@ -24,6 +24,17 @@ serve(async (req) => {
     return new Response('skipped', { status: 200 });
   }
 
+  // Remise en ligne d'un lieu deja valide et publie auparavant (ex. masque par
+  // erreur puis reactive) : ce n'est pas un nouveau lieu -> ni post "nouveau
+  // lieu" dans le feed, ni notifications. Une suggestion validee (statut
+  // 'pending' avant validation) reste annoncee comme avant.
+  const ancienValide = oldRecord?.moderation_status === 'approved';
+  const ancienCree = oldRecord?.created_at && (Date.now() - Date.parse(oldRecord.created_at)) > 2 * 86400000;
+  if (ancienValide && ancienCree) {
+    console.log('[notify-new-lieu] skipped: remise en ligne d\'un lieu deja publie');
+    return new Response('skipped (republication)', { status: 200 });
+  }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
