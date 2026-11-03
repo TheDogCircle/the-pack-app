@@ -4510,7 +4510,7 @@ export default function CarteScreen() {
           </View>
         )}
         <View style={styles.shareLieuContent}>
-          <Text style={styles.shareLieuBrand}>THE PACK CLUB</Text>
+          <Text style={styles.shareLieuBrand}>THE PACK LA MEUTE</Text>
           <View style={styles.shareLieuLine} />
           <Text style={styles.shareLieuNom} numberOfLines={2}>{selectedLieu?.nom || ''}</Text>
           <Text style={styles.shareLieuCat}>{(CAT_CONFIG[selectedLieu?.cat || 'autre'] || CAT_CONFIG.autre).label}</Text>

@@ -852,7 +852,7 @@ export default function ProfilScreen() {
 
       {/* Off-screen profile card for sharing */}
       <View ref={cardRef} collapsable={false} style={styles.shareCard}>
-        <Text style={styles.shareCardBrand}>THE PACK CLUB</Text>
+        <Text style={styles.shareCardBrand}>THE PACK LA MEUTE</Text>
         <View style={styles.shareCardLine} />
         <Text style={styles.shareCardTitle}>The Pack</Text>
         <Text style={styles.shareCardSub}>Club dog-friendly</Text>
