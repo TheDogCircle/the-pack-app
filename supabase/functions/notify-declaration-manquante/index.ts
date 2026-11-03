@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack Club <partenaires@thepackclub.fr>'
+const FROM_EMAIL = 'The Pack La Meute <partenaires@thepacklameute.fr>'
 
 // Phase Pro 7, point 5 : relance une marque n'ayant soumis aucune
 // declaration de ventes pour le mois precedent. Appelee par le cron

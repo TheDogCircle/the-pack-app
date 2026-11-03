@@ -13,7 +13,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // pour le fixer de facon declarative -- a rappeler a chaque redeploiement
 // de cette fonction precise :
 //   supabase functions deploy go-redirect --no-verify-jwt
-const FALLBACK_URL = 'https://thepackclub.fr'
+const FALLBACK_URL = 'https://thepacklameute.fr'
 
 Deno.serve(async (req) => {
   try {

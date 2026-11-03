@@ -7,7 +7,7 @@ const CORS = {
 }
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack Club <reservations@thepackclub.fr>'
+const FROM_EMAIL = 'The Pack La Meute <reservations@thepacklameute.fr>'
 
 // Phase Pro 5 : deplace une reservation (meme duree, nouvelle date/heure de
 // debut) -- la duree n'est jamais recalculee ici, seule la variante de prix

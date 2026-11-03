@@ -16,7 +16,7 @@ const CORS = {
 // destructrice au-dela de l'envoi d'un email.
 const MESSAGES: Record<string, { subject: string; body: string }> = {
   payment_failed: {
-    subject: 'Problème avec votre paiement The Pack Club',
+    subject: 'Problème avec votre paiement The Pack La Meute',
     body: "Le paiement de votre abonnement a échoué. Vous avez <strong>7 jours</strong> pour régulariser votre moyen de paiement, sans quoi votre compte repassera automatiquement à l'offre Découverte (vos données restent intactes).",
   },
   payment_recovered: {
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'The Pack Club <contact@thepackclub.fr>',
+        from: 'The Pack La Meute <contact@thepacklameute.fr>',
         to: [target.email],
         subject: message.subject,
         html: `
@@ -73,8 +73,8 @@ Deno.serve(async (req) => {
             <p>Bonjour,</p>
             <p>${message.body}</p>
             ${org?.nom ? `<p style="font-size:13px;color:#8A6B5A">Concerne : ${org.nom}</p>` : ''}
-            <p><a href="https://thepackclub.fr/espace-pro.html" style="display:inline-block;background:#3D1A1A;color:#F5EFE0;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:8px">Voir mon abonnement</a></p>
-            <p style="font-size:13px;color:#8A6B5A;margin-top:24px">The Pack Club</p>
+            <p><a href="https://thepacklameute.fr/espace-pro.html" style="display:inline-block;background:#3D1A1A;color:#F5EFE0;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:8px">Voir mon abonnement</a></p>
+            <p style="font-size:13px;color:#8A6B5A;margin-top:24px">The Pack La Meute</p>
           </div>
         `,
       }),

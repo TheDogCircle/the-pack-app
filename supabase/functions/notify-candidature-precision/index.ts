@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack Club <partenaires@thepackclub.fr>'
+const FROM_EMAIL = 'The Pack La Meute <partenaires@thepacklameute.fr>'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

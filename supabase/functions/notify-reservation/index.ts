@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-const FROM_EMAIL = 'The Pack Club <reservations@thepackclub.fr>';
+const FROM_EMAIL = 'The Pack La Meute <reservations@thepacklameute.fr>';
 
 async function sendEmail(to: string, subject: string, html: string) {
   if (!RESEND_API_KEY) { console.log('RESEND_API_KEY not set, skipping email'); return; }
@@ -98,7 +98,7 @@ serve(async (req) => {
           </table>
           <p style="color:#8A6B5A;font-size:13px">${isPaidBooking ? "À bientôt !" : "L'établissement va confirmer votre rendez-vous et vous contactera directement."}</p>
           <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
-          <p style="font-size:12px;color:#aaa">The Pack Club · La carte dog-friendly de France</p>
+          <p style="font-size:12px;color:#aaa">The Pack La Meute · La carte dog-friendly de France</p>
         </div>
       `);
     }
@@ -135,9 +135,9 @@ serve(async (req) => {
             <tr><td style="padding:8px 0;${isPaidBooking ? 'border-bottom:1px solid #eee;' : ''}color:#8A6B5A">Heure</td><td style="padding:8px 0;${isPaidBooking ? 'border-bottom:1px solid #eee;' : ''}font-weight:500">${resa.heure_debut.slice(0,5)} – ${resa.heure_fin.slice(0,5)}</td></tr>
             ${isPaidBooking ? `<tr><td style="padding:8px 0;color:#8A6B5A">Montant reversé</td><td style="padding:8px 0;font-weight:500">${(Number(resa.montant_ht || 0) - Number(resa.montant_commission || 0)).toFixed(2)} €</td></tr>` : ''}
           </table>
-          <a href="https://thepackclub.fr/espace-pro.html" style="display:inline-block;background:#C4693A;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;margin-top:8px">Gérer les réservations →</a>
+          <a href="https://thepacklameute.fr/espace-pro.html" style="display:inline-block;background:#C4693A;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;margin-top:8px">Gérer les réservations →</a>
           <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
-          <p style="font-size:12px;color:#aaa">The Pack Club · Espace Pro</p>
+          <p style="font-size:12px;color:#aaa">The Pack La Meute · Espace Pro</p>
         </div>
       `);
     }

@@ -9,7 +9,7 @@ const CORS = {
 import { recordRefundRevenue } from '../_shared/revenueEvents.ts'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack Club <reservations@thepackclub.fr>'
+const FROM_EMAIL = 'The Pack La Meute <reservations@thepacklameute.fr>'
 
 // Memes helpers que notify-reservation (declenchee a la creation) -- ici on
 // notifie sur l'annulation, toujours les deux parties (client + pro), peu
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
                 ${remboursementLigne}
               </table>
               <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
-              <p style="font-size:12px;color:#aaa">The Pack Club · La carte dog-friendly de France</p>
+              <p style="font-size:12px;color:#aaa">The Pack La Meute · La carte dog-friendly de France</p>
             </div>
           `)
         }
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
               </table>
               <a href="https://thepacklameute.fr/espace-pro.html" style="display:inline-block;background:#C4693A;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;margin-top:8px">Voir mes réservations →</a>
               <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
-              <p style="font-size:12px;color:#aaa">The Pack Club · Espace Pro</p>
+              <p style="font-size:12px;color:#aaa">The Pack La Meute · Espace Pro</p>
             </div>
           `)
         }

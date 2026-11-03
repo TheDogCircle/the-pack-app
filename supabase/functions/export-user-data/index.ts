@@ -7,7 +7,7 @@ const CORS = {
 }
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = 'The Pack Club <contact@thepackclub.fr>'
+const FROM_EMAIL = 'The Pack La Meute <contact@thepacklameute.fr>'
 
 // Droit d'acces RGPD. Les photos/videos sont deja sur des URLs publiques
 // permanentes (R2 cote mobile, Storage cote web) : pas d'objet prive a
@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
       zip.file('balades.csv', toCSV(baladesRes.data || []))
       zip.file('evenements_inscriptions.csv', toCSV(evenementsInscriptions))
       zip.file('README.txt', [
-        'The Pack Club -- export de vos données personnelles',
+        'The Pack La Meute -- export de vos données personnelles',
         'Généré le ' + new Date().toLocaleDateString('fr-FR'),
         '',
         'Ce fichier contient donnees.json (export complet structuré) et un CSV',
@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
 
       const toEmail = authUser?.email
       if (toEmail && !toEmail.endsWith('@deleted.invalid')) {
-        await sendEmail(toEmail, 'Votre export de données The Pack Club', `
+        await sendEmail(toEmail, 'Votre export de données The Pack La Meute', `
           <p>Bonjour,</p>
           <p>Voici le lien pour télécharger l'export de vos données personnelles (valable 7 jours) :</p>
           <p><a href="${signed.signedUrl}">${signed.signedUrl}</a></p>

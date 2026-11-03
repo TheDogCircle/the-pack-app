@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: org.stripe_customer_id,
-      return_url: return_url || 'https://thepackclub.fr/espace-pro.html',
+      return_url: return_url || 'https://thepacklameute.fr/espace-pro.html',
     })
 
     return new Response(JSON.stringify({ url: session.url }), {

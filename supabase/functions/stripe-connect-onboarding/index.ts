@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
         .eq('id', lieu_id)
     }
 
-    const origin = req.headers.get('origin') || 'https://thepackclub.fr'
+    const origin = req.headers.get('origin') || 'https://thepacklameute.fr'
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
       refresh_url: `${origin}/espace-pro.html?stripe_refresh=1`,

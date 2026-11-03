@@ -43,17 +43,17 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: 'The Pack Club <contact@thepackclub.fr>',
+          from: 'The Pack La Meute <contact@thepacklameute.fr>',
           to: [email],
           subject: `Invitation à rejoindre ${org?.nom || 'une organisation'} sur The Pack`,
           html: `
             <div style="font-family:Georgia,serif;color:#3D1A1A;max-width:480px;margin:0 auto;padding:24px">
               <h2 style="font-weight:500">Vous êtes invité(e) à rejoindre ${org?.nom || 'une organisation'}</h2>
               <p>Bonjour,</p>
-              <p>Vous avez été invité(e) à rejoindre l'équipe de <strong>${org?.nom || 'cette organisation'}</strong> sur The Pack Club, avec le rôle ${role === 'manager' ? 'gestionnaire' : 'employé'}.</p>
+              <p>Vous avez été invité(e) à rejoindre l'équipe de <strong>${org?.nom || 'cette organisation'}</strong> sur The Pack La Meute, avec le rôle ${role === 'manager' ? 'gestionnaire' : 'employé'}.</p>
               <p>Connectez-vous (ou créez un compte) avec l'adresse <strong>${email}</strong> pour accéder à l'espace pro.</p>
-              <p><a href="https://thepackclub.fr/pro-auth.html" style="display:inline-block;background:#3D1A1A;color:#F5EFE0;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:8px">Accéder à l'espace pro</a></p>
-              <p style="font-size:13px;color:#8A6B5A;margin-top:24px">The Pack Club</p>
+              <p><a href="https://thepacklameute.fr/pro-auth.html" style="display:inline-block;background:#3D1A1A;color:#F5EFE0;padding:10px 20px;border-radius:8px;text-decoration:none;margin-top:8px">Accéder à l'espace pro</a></p>
+              <p style="font-size:13px;color:#8A6B5A;margin-top:24px">The Pack La Meute</p>
             </div>
           `,
         }),
