@@ -17,6 +17,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { imgL } from '../lib/imagesLegeres';
+import { memoriserPositionNotif } from '../lib/positionNotif';
 import { supabase, uploadToR2, trackEvent } from '../lib/supabase';
 import { track } from '../lib/tracking';
 import { colors } from '../lib/theme';
@@ -1023,6 +1024,7 @@ export default function CarteScreen() {
       const loc = await Location.getCurrentPositionAsync({});
       setUserLat(loc.coords.latitude);
       setUserLng(loc.coords.longitude);
+      memoriserPositionNotif(loc.coords.latitude, loc.coords.longitude);
       const r: Region = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.08, longitudeDelta: 0.08 };
       gpsCameraHandledRef.current = true;
       mapRef.current?.animateToRegion(r, 600);

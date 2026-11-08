@@ -13,6 +13,7 @@ import * as Contacts from 'expo-contacts';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { imgL } from '../lib/imagesLegeres';
+import { memoriserPositionNotif } from '../lib/positionNotif';
 import { supabase, uploadToR2 } from '../lib/supabase';
 import { lireCache, ecrireCache } from '../lib/cacheEcran';
 import { sendPushNotification } from '../lib/notifications';
@@ -58,7 +59,7 @@ type CommunityPost = {
   balade_id?: string | null;
   balades?: { distance_km: number | null; duree_secondes: number | null } | null;
   profils: { prenom: string; avatar_url: string | null; ambassadeur?: boolean | null } | null;
-  lieux: { id: string; nom: string; cat: string; ville: string } | null;
+  lieux: { id: string; nom: string; cat: string; ville: string; lat?: number | null; lng?: number | null; google_photo_url?: string | null } | null;
   community_post_likes: { user_id: string }[];
   community_post_comments: { id: string }[];
   fromMap?: boolean;
@@ -263,12 +264,21 @@ function PostCard({ post, myUserId, onLike, onCommentPress, onLieuPress, onDelet
 
 // ─── NouveauLieuCard ──────────────────────────────────────────────────────────
 
-function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds }: { post: CommunityPost; onLieuPress: (id: string) => void; onAuthorPress: (post: CommunityPost) => void; birthdayUserIds?: Set<string> }) {
+function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds, myLoc }: { post: CommunityPost; onLieuPress: (id: string) => void; onAuthorPress: (post: CommunityPost) => void; birthdayUserIds?: Set<string>; myLoc: Pos }) {
   const author = post.profils?.prenom || 'Un membre';
   const lieu = post.lieux;
+  const d = distanceLieu(lieu, myLoc);
+  const proche = d != null && d <= RAYON_ACTU_KM;
+  const photo = photoLieu(lieu);
 
   return (
     <View style={[styles.postCard, styles.lieuCard]}>
+      {proche ? (
+        <View style={styles.actuBandeau}>
+          <Ionicons name="sparkles" size={13} color={colors.terra} />
+          <Text style={styles.actuBandeauTexte}>Nouveau près de toi · {timeAgo(post.created_at)}</Text>
+        </View>
+      ) : null}
       <View style={styles.postHeader}>
         <TouchableOpacity style={styles.postHeaderAuthor} activeOpacity={0.7} onPress={() => onAuthorPress(post)}>
           <PostAvatar prenom={author} avatarUrl={post.profils?.avatar_url ?? null} />
@@ -278,37 +288,46 @@ function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds }: 
               {post.profils?.ambassadeur ? <AmbassadeurBadge /> : null}
               {birthdayUserIds?.has(post.user_id) ? <BirthdayBadge /> : null}
             </View>
-            <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+            <Text style={styles.postTime}>a ajouté un lieu dog-friendly{proche ? '' : ` · ${timeAgo(post.created_at)}`}</Text>
           </View>
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity
-        style={styles.nouveauLieuBody}
-        onPress={() => lieu && onLieuPress(lieu.id)}
-        activeOpacity={lieu ? 0.8 : 1}
-      >
-        <View style={styles.nouveauLieuIconWrap}>
-          <Ionicons name="location" size={26} color={colors.terra} />
-        </View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={styles.nouveauLieuLabel}>a ajouté un lieu dog-friendly</Text>
-          {lieu ? (
-            <>
-              <Text style={styles.nouveauLieuNom}>{lieu.nom}</Text>
-              <Text style={styles.nouveauLieuMeta}>{lieu.cat} · {lieu.ville}</Text>
-            </>
+      <TouchableOpacity onPress={() => lieu && onLieuPress(lieu.id)} activeOpacity={lieu ? 0.85 : 1}>
+        {photo ? <Image source={{ uri: imgL(photo) }} style={styles.actuPhoto} resizeMode="cover" /> : null}
+        <View style={styles.nouveauLieuBody}>
+          {!photo ? (
+            <View style={styles.nouveauLieuIconWrap}>
+              <Ionicons name="location" size={26} color={colors.terra} />
+            </View>
           ) : null}
+          <View style={{ flex: 1, gap: 2 }}>
+            {lieu ? (
+              <>
+                <Text style={styles.nouveauLieuNom}>{lieu.nom}</Text>
+                <Text style={styles.nouveauLieuMeta}>{[lieu.cat, lieu.ville].filter(Boolean).join(' · ')}</Text>
+              </>
+            ) : null}
+          </View>
+          {d != null ? (
+            <View style={[styles.distancePastille, proche && styles.distancePastilleProche]}>
+              <Ionicons name="navigate" size={11} color={proche ? colors.ivory : colors.terra} />
+              <Text style={[styles.distancePastilleTexte, proche && { color: colors.ivory }]}>{fmtDistance(d)}</Text>
+            </View>
+          ) : lieu ? <Ionicons name="chevron-forward" size={16} color={colors.textMuted} /> : null}
         </View>
-        {lieu ? <Ionicons name="chevron-forward" size={16} color={colors.textMuted} /> : null}
       </TouchableOpacity>
     </View>
   );
 }
 
 // ─── Regroupement des annonces "nouveau lieu" ─────────────────────────────────
-// Les annonces automatiques (une par lieu ajoute) noyaient les publications des
-// membres : on les regroupe en une seule carte par semaine.
+// (08/11) Les lieux ajoutes PRES de soi sont des actualites : une carte chacun,
+// avec la distance. Ceux plus loin sont regroupes par semaine dans une carte
+// "Ailleurs en France", triee par distance. Sans position : regroupement par
+// semaine comme avant, avec la ville.
+
+const RAYON_ACTU_KM = 25;
 
 function lundiDe(iso: string): string {
   const d = new Date(iso);
@@ -318,10 +337,36 @@ function lundiDe(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function grouperNouveauxLieux(posts: CommunityPost[]): CommunityPost[] {
+type Pos = { lat: number; lng: number } | null;
+
+function distanceLieu(lieu: CommunityPost['lieux'], loc: Pos): number | null {
+  if (!loc || !lieu || lieu.lat == null || lieu.lng == null) return null;
+  return haversineKm(loc.lat, loc.lng, Number(lieu.lat), Number(lieu.lng));
+}
+
+function fmtDistance(km: number): string {
+  if (km < 1) return `${Math.max(100, Math.round(km * 10) * 100)} m`;
+  if (km < 10) return `${km.toFixed(1).replace('.', ',')} km`;
+  return `${Math.round(km)} km`;
+}
+
+// Photo du lieu seulement si elle est hebergee chez nous (jamais un lien Google, payant)
+function photoLieu(lieu: CommunityPost['lieux']): string | null {
+  const u = lieu?.google_photo_url;
+  if (!u || u === 'none' || /googleapis|googleusercontent|maps\.google/.test(u)) return null;
+  return u;
+}
+
+function grouperNouveauxLieux(postsBruts: CommunityPost[], loc: Pos): CommunityPost[] {
+  // Ancien cache : des groupes deja formes -> on les redeplie
+  const posts = postsBruts.flatMap(p => (p.type === 'lieux_groupe' ? (p.groupe || []) : [p]));
+  const estProche = (p: CommunityPost) => {
+    const d = distanceLieu(p.lieux, loc);
+    return d != null && d <= RAYON_ACTU_KM;
+  };
   const parSemaine = new Map<string, CommunityPost[]>();
   posts.forEach(p => {
-    if (p.type !== 'nouveau_lieu') return;
+    if (p.type !== 'nouveau_lieu' || estProche(p)) return;
     const k = lundiDe(p.created_at);
     if (!parSemaine.has(k)) parSemaine.set(k, []);
     parSemaine.get(k)!.push(p);
@@ -329,7 +374,7 @@ function grouperNouveauxLieux(posts: CommunityPost[]): CommunityPost[] {
   const dejaPlace = new Set<string>();
   const res: CommunityPost[] = [];
   posts.forEach(p => {
-    if (p.type !== 'nouveau_lieu') { res.push(p); return; }
+    if (p.type !== 'nouveau_lieu' || estProche(p)) { res.push(p); return; }
     const k = lundiDe(p.created_at);
     const groupe = parSemaine.get(k)!;
     if (groupe.length < 2) { res.push(p); return; }
@@ -344,30 +389,38 @@ function grouperNouveauxLieux(posts: CommunityPost[]): CommunityPost[] {
   return res;
 }
 
-function LieuxGroupeCard({ post, onLieuPress }: { post: CommunityPost; onLieuPress: (id: string) => void }) {
+function LieuxGroupeCard({ post, onLieuPress, myLoc }: { post: CommunityPost; onLieuPress: (id: string) => void; myLoc: Pos }) {
   const [ouvert, setOuvert] = useState(false);
-  const groupe = (post.groupe || []).filter(p => p.lieux);
+  const groupe = (post.groupe || []).filter(p => p.lieux)
+    .map(p => ({ p, d: distanceLieu(p.lieux, myLoc) }))
+    .sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9));
   const n = groupe.length;
   const lundi = lundiDe(post.created_at);
   const periode = lundi === lundiDe(new Date().toISOString())
     ? 'cette semaine'
     : `la semaine du ${new Date(lundi + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`;
   const visibles = ouvert ? groupe : groupe.slice(0, 3);
+  // Villes concernees, pour lire la carte d'un coup d'oeil
+  const villes = [...new Set(groupe.map(x => x.p.lieux!.ville).filter(Boolean))];
   if (n === 0) return null;
 
   return (
     <View style={[styles.postCard, styles.lieuCard]}>
       <View style={styles.postHeader}>
         <View style={styles.nouveauLieuIconWrap}>
-          <Ionicons name="location" size={22} color={colors.terra} />
+          <Ionicons name={myLoc ? 'map-outline' : 'location'} size={22} color={colors.terra} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.postAuthor}>{n} nouveau{n > 1 ? 'x' : ''} lieu{n > 1 ? 'x' : ''} dog-friendly</Text>
-          <Text style={styles.postTime}>ajouté{n > 1 ? 's' : ''} à la carte {periode}</Text>
+          <Text style={styles.postAuthor}>
+            {myLoc ? 'Ailleurs en France' : `${n} nouveau${n > 1 ? 'x' : ''} lieu${n > 1 ? 'x' : ''} dog-friendly`}
+          </Text>
+          <Text style={styles.postTime} numberOfLines={2}>
+            {myLoc ? `${n} lieu${n > 1 ? 'x' : ''} ajouté${n > 1 ? 's' : ''} ${periode} · ${villes.slice(0, 3).join(', ')}${villes.length > 3 ? '…' : ''}` : `ajouté${n > 1 ? 's' : ''} à la carte ${periode}`}
+          </Text>
         </View>
       </View>
       <View style={styles.lieuxGroupeListe}>
-        {visibles.map((p, i) => (
+        {visibles.map(({ p, d }, i) => (
           <TouchableOpacity
             key={p.id}
             style={[styles.lieuxGroupeLigne, i > 0 && styles.lieuxGroupeSep]}
@@ -377,10 +430,11 @@ function LieuxGroupeCard({ post, onLieuPress }: { post: CommunityPost; onLieuPre
             <View style={{ flex: 1, gap: 1 }}>
               <Text style={styles.nouveauLieuNom} numberOfLines={1}>{p.lieux!.nom}</Text>
               <Text style={styles.nouveauLieuMeta} numberOfLines={1}>
-                {[p.lieux!.cat, p.lieux!.ville].filter(Boolean).join(' · ')}
+                {[p.lieux!.ville, p.lieux!.cat].filter(Boolean).join(' · ')}
                 {p.profils?.prenom ? ` · par ${p.profils.prenom}` : ''}
               </Text>
             </View>
+            {d != null ? <Text style={styles.distancePetite}>{fmtDistance(d)}</Text> : null}
             <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </TouchableOpacity>
         ))}
@@ -1190,6 +1244,23 @@ export default function FeedScreen() {
   const [distancePickerVisible, setDistancePickerVisible] = useState(false);
   const [ambassadeurFilter, setAmbassadeurFilter] = useState(false);
   const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Position pour situer les nouveaux lieux du feed ("a 2,3 km de toi") : derniere
+  // position connue, sans redemander l'autorisation (deja demandee par la carte).
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const pos = await Location.getLastKnownPositionAsync();
+        if (!pos) return;
+        setMyLoc(prev => prev ?? { lat: pos.coords.latitude, lng: pos.coords.longitude });
+        memoriserPositionNotif(pos.coords.latitude, pos.coords.longitude);
+      } catch {}
+    })();
+  }, []);
+
+  const postsAffiches = useMemo(() => grouperNouveauxLieux(posts, myLoc), [posts, myLoc]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
@@ -1527,7 +1598,7 @@ export default function FeedScreen() {
         ? supabase.from('profils').select('id, prenom, avatar_url, ambassadeur').in('id', allUserIds)
         : Promise.resolve({ data: [] as any[] }),
       allLieuIds.length > 0
-        ? supabase.from('lieux').select('id, nom, cat, ville').in('id', allLieuIds)
+        ? supabase.from('lieux').select('id, nom, cat, ville, lat, lng, google_photo_url').in('id', allLieuIds)
         : Promise.resolve({ data: [] as any[] }),
     ]);
 
@@ -1590,9 +1661,10 @@ export default function FeedScreen() {
       };
     });
 
-    const merged = grouperNouveauxLieux([...communityPosts, ...mapPosts].sort(
+    // Regroupement des "nouveau lieu" fait a l'affichage (depend de la position)
+    const merged = [...communityPosts, ...mapPosts].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    ));
+    );
 
     setPosts(merged);
     setFeedLoading(false);
@@ -1941,7 +2013,7 @@ export default function FeedScreen() {
             <ActivityIndicator style={{ flex: 1 }} color={colors.terra} />
           ) : (
             <FlatList
-              data={posts}
+              data={postsAffiches}
               keyExtractor={p => p.id}
               contentContainerStyle={styles.feedList}
               refreshControl={
@@ -2018,9 +2090,9 @@ export default function FeedScreen() {
               }
               renderItem={({ item }) =>
                 item.type === 'lieux_groupe' ? (
-                  <LieuxGroupeCard post={item} onLieuPress={openLieu} />
+                  <LieuxGroupeCard post={item} onLieuPress={openLieu} myLoc={myLoc} />
                 ) : item.type === 'nouveau_lieu' ? (
-                  <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} birthdayUserIds={birthdayUserIds} />
+                  <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} birthdayUserIds={birthdayUserIds} myLoc={myLoc} />
                 ) : item.type === 'balade' ? (
                   <BaladeCard
                     post={item}
@@ -2597,6 +2669,13 @@ const styles = StyleSheet.create({
   lieuxGroupeSep: { borderTopWidth: 1, borderTopColor: colors.border },
   lieuxGroupeVoir: { alignSelf: 'center', marginTop: -2, marginBottom: 14 },
   lieuxGroupeVoirTexte: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  distancePetite: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginRight: 4 },
+  actuBandeau: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  actuBandeauTexte: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra, letterSpacing: 0.2 },
+  actuPhoto: { width: '100%', height: 170, borderRadius: 12, marginTop: 4, marginBottom: 2, backgroundColor: colors.border },
+  distancePastille: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.terra },
+  distancePastilleProche: { backgroundColor: colors.terra },
+  distancePastilleTexte: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra },
   composer: {
     flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white,
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,

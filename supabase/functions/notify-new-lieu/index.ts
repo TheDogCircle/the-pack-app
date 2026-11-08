@@ -74,9 +74,13 @@ serve(async (req) => {
   console.log('[notify-new-lieu] photos/videos validated for lieu:', record.nom);
 
   // 0b. Create a feed post for this validated lieu
-  if (record.submitted_by) {
+  // (08/11) Sans auteur connu (suggestion faite depuis le site sans compte), le
+  // post est publie au nom du compte The Pack La Meute : avant, ces lieux
+  // n'apparaissaient jamais dans le feed.
+  const COMPTE_THE_PACK = '28f8c781-f384-4fcd-89a2-6347e7ca352a';
+  {
     const { error: postErr } = await supabase.from('community_posts').insert({
-      user_id: record.submitted_by,
+      user_id: record.submitted_by || COMPTE_THE_PACK,
       type: 'nouveau_lieu',
       lieu_id: record.id,
       auto_generated: true,
@@ -84,8 +88,6 @@ serve(async (req) => {
     });
     if (postErr) console.log('[notify-new-lieu] feed post skipped (likely duplicate):', postErr.message);
     else console.log('[notify-new-lieu] feed post created for lieu:', record.nom);
-  } else {
-    console.log('[notify-new-lieu] no submitted_by — feed post skipped');
   }
 
   const notifiedIds = new Set<string>();
@@ -165,6 +167,21 @@ serve(async (req) => {
     .not('push_token', 'is', null);
 
   console.log('[notify-new-lieu] users query error:', usersError?.message ?? 'none', '| users found:', users?.length ?? 0);
+
+  // (08/11) Position reelle approximative (table privee positions_notif, mise a
+  // jour par l'app au plus une fois par jour) : prioritaire sur le centre de la
+  // ville du profil si elle date de moins de 45 jours.
+  if (users && users.length > 0) {
+    const depuis = new Date(Date.now() - 45 * 86400000).toISOString();
+    const { data: positions } = await supabase
+      .from('positions_notif').select('user_id, lat, lng').gte('updated_at', depuis);
+    const posMap = new Map((positions || []).map((p: any) => [p.user_id, p]));
+    for (const u of users as any[]) {
+      const p = posMap.get(u.id);
+      if (p) { u.lat = p.lat; u.lng = p.lng; }
+    }
+    console.log('[notify-new-lieu] positions reelles utilisees:', posMap.size);
+  }
 
   if (users && users.length > 0) {
     const lieuLat = record.lat ? parseFloat(record.lat) : null;
