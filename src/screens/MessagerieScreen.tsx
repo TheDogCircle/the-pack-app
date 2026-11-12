@@ -52,6 +52,7 @@ type Groupe = {
   id: string; nom: string; description: string | null; ville: string | null;
   image_url: string | null; created_by: string; conversation_id: string;
   type: GroupeType; membre_count?: number;
+  pro_nom?: string | null; // groupe cree par un compte pro (fiche ou marque)
 };
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🐶'];
@@ -175,12 +176,21 @@ function GroupeCard({
             <Ionicons name="people" size={20} color={colors.ivory} />
           </View>
           <View style={{ flex: 1 }}>
-            {groupe.type ? (
-              <View style={g.typePill}>
-                <Text style={g.typePillText}>{GROUPE_TYPE_LABELS[groupe.type]}</Text>
-              </View>
-            ) : null}
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {groupe.type ? (
+                <View style={g.typePill}>
+                  <Text style={g.typePillText}>{GROUPE_TYPE_LABELS[groupe.type]}</Text>
+                </View>
+              ) : null}
+              {groupe.pro_nom ? (
+                <View style={[g.typePill, g.proPill]}>
+                  <Ionicons name="checkmark-circle" size={11} color={colors.ivory} />
+                  <Text style={[g.typePillText, { color: colors.ivory }]}>Pro</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={g.cardNom} numberOfLines={1}>{groupe.nom}</Text>
+            {groupe.pro_nom ? <Text style={g.proPar} numberOfLines={1}>Groupe animé par {groupe.pro_nom}</Text> : null}
             {groupe.ville ? (
               <View style={g.villeInline}>
                 <Ionicons name="location-outline" size={11} color={colors.textMuted} />
@@ -1129,10 +1139,15 @@ export default function MessagerieScreen({
       // Nombre de membres de tous les groupes en une requete. Via une fonction
       // serveur : la lecture directe de conversation_members ne voit (RLS) que les
       // groupes deja rejoints, les autres affichaient "0 membre".
-      const { data: nbs } = await supabase.rpc('groupes_nombre_membres');
+      const [{ data: nbs }, { data: pros }] = await Promise.all([
+        supabase.rpc('groupes_nombre_membres'),
+        supabase.rpc('groupes_pros'),
+      ]);
       const compte: Record<string, number> = {};
       (nbs || []).forEach((r: any) => { compte[r.conversation_id] = Number(r.nb_membres) || 0; });
-      setGroupes(gData.map((gr: any) => ({ ...gr, membre_count: compte[gr.conversation_id] ?? 0 })));
+      const proParGroupe: Record<string, string> = {};
+      (pros || []).forEach((r: any) => { proParGroupe[r.groupe_id] = r.pro_nom; });
+      setGroupes(gData.map((gr: any) => ({ ...gr, membre_count: compte[gr.conversation_id] ?? 0, pro_nom: proParGroupe[gr.id] || null })));
     } else { setGroupes([]); }
     setGroupesLoading(false);
   }
@@ -1840,6 +1855,16 @@ export default function MessagerieScreen({
               </View>
               <TextInput style={[s.groupNameInput, { minHeight: 80, textAlignVertical: 'top' }]} value={groupeForm.description} onChangeText={t => setGroupeForm(f => ({ ...f, description: t }))} placeholder="Description (optionnel)" placeholderTextColor={colors.textMuted} multiline />
               <TextInput style={s.groupNameInput} value={groupeForm.ville} onChangeText={t => setGroupeForm(f => ({ ...f, ville: t }))} placeholder="Ville (ex: Paris, Lyon…)" placeholderTextColor={colors.textMuted} />
+              {/* (12/11) Charte des groupes : se montrer oui, vendre via l'espace pro */}
+              <View style={s.charteBox}>
+                <Text style={s.charteTitre}>Les groupes, c'est pour se retrouver 🐾</Text>
+                <Text style={s.charteLigne}>• Balades, entraide, conseils, rencontres : tout le monde est bienvenu.</Text>
+                <Text style={s.charteLigne}>• Tu peux parler de ton métier, mais pas de prix, liens d'achat ou codes promo dans les groupes.</Text>
+                <Text style={s.charteLigne}>• Tu es pro (éducateur, toiletteur, promeneur, marque…) ? Crée ton espace pro : ton groupe aura le badge Pro et tes clients pourront réserver.</Text>
+                <TouchableOpacity onPress={() => Linking.openURL('https://thepacklameute.fr/pro-auth').catch(() => {})} hitSlop={8}>
+                  <Text style={s.charteLien}>Créer mon espace pro (3 mois offerts) →</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity style={[s.createBtn, (!groupeForm.nom.trim() || creatingGroupe) && s.createBtnDisabled]} onPress={createGroupe} disabled={!groupeForm.nom.trim() || creatingGroupe}>
                 {creatingGroupe ? <ActivityIndicator color={colors.ivory} /> : <Text style={s.createBtnText}>Créer le groupe</Text>}
               </TouchableOpacity>
@@ -2036,6 +2061,10 @@ const s = StyleSheet.create({
   memberNameSelected: { fontFamily: 'DMSans_500Medium', color: colors.terra },
   memberVille: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 1 },
   createBtn: { backgroundColor: colors.bordeaux, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 4 },
+  charteBox: { backgroundColor: colors.ivoryPale, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 4 },
+  charteTitre: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.bordeaux, marginBottom: 2 },
+  charteLigne: { fontFamily: 'DMSans_400Regular', fontSize: 12, lineHeight: 17, color: colors.textMid },
+  charteLien: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra, marginTop: 4 },
   createBtnDisabled: { opacity: 0.45 },
   createBtnText: { fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ivory },
 
@@ -2063,6 +2092,8 @@ const g = StyleSheet.create({
   cardIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.bordeaux, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   typePill: { alignSelf: 'flex-start', backgroundColor: colors.bordeaux + '10', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 2, marginBottom: 3 },
   typePillText: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.bordeaux },
+  proPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: colors.sage },
+  proPar: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.sage, marginTop: 1 },
   editBtn: { padding: 4, alignSelf: 'flex-start' },
   cardNom: { fontFamily: 'PlayfairDisplay_500Medium', fontSize: 17, color: colors.bordeaux },
   villeInline: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
