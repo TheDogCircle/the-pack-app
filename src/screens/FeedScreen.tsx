@@ -448,6 +448,85 @@ function LieuxGroupeCard({ post, onLieuPress, myLoc }: { post: CommunityPost; on
   );
 }
 
+// ─── À venir près de toi (événements) et balades à faire ──────────────────────
+// (12/11) Rendre le feed vivant : les prochains événements et des balades
+// partagées par la communauté autour de soi, en carrousels glissés dans le feed.
+
+type EvtProche = { id: string; titre: string; date_heure: string; ville: string | null; image: string | null; payant: boolean | null; prix: number | null; nb: number; d: number | null };
+type BaladeProche = { id: string; nom: string; depart_label: string | null; distance_km: number | null; duree_secondes: number | null; d: number | null; ombragee?: boolean | null; sans_laisse?: boolean | null };
+
+function fmtDateEvt(iso: string): string {
+  const d = new Date(iso);
+  const auj = new Date(); auj.setHours(0, 0, 0, 0);
+  const j = new Date(d); j.setHours(0, 0, 0, 0);
+  const diff = Math.round((j.getTime() - auj.getTime()) / 86400000);
+  const heure = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+  if (diff === 0) return `Aujourd'hui · ${heure}`;
+  if (diff === 1) return `Demain · ${heure}`;
+  const jour = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${jour.charAt(0).toUpperCase()}${jour.slice(1)} · ${heure}`;
+}
+
+function AVenirCard({ evts, proche, onPress, onVoirTout }: { evts: EvtProche[]; proche: boolean; onPress: (id: string) => void; onVoirTout: () => void }) {
+  if (!evts.length) return null;
+  return (
+    <View style={[styles.postCard, styles.carrouselCarte]}>
+      <View style={styles.carrouselEntete}>
+        <Ionicons name="calendar" size={18} color={colors.terra} />
+        <Text style={styles.carrouselTitre}>{proche ? 'À venir près de toi' : 'Prochains événements'}</Text>
+        <TouchableOpacity onPress={onVoirTout} hitSlop={8}><Text style={styles.carrouselVoir}>Tout voir</Text></TouchableOpacity>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carrouselRail}>
+        {evts.map(e => (
+          <TouchableOpacity key={e.id} style={styles.evtTuile} activeOpacity={0.85} onPress={() => onPress(e.id)}>
+            {e.image ? <Image source={{ uri: imgL(e.image, 500) }} style={styles.evtImage} resizeMode="cover" />
+              : <View style={[styles.evtImage, styles.evtImageVide]}><Ionicons name="paw" size={28} color={colors.terraPale} /></View>}
+            <View style={styles.evtCorps}>
+              <Text style={styles.evtDate} numberOfLines={1}>{fmtDateEvt(e.date_heure)}</Text>
+              <Text style={styles.evtTitre} numberOfLines={2}>{e.titre}</Text>
+              <Text style={styles.evtMeta} numberOfLines={1}>
+                {[e.ville, e.d != null ? fmtDistance(e.d) : null].filter(Boolean).join(' · ')}
+              </Text>
+              <Text style={styles.evtMeta} numberOfLines={1}>
+                {e.nb > 0 ? `${e.nb} participant${e.nb > 1 ? 's' : ''}` : 'Sois le premier inscrit'}{e.payant && e.prix ? ` · ${e.prix} €` : ' · Gratuit'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function BaladesProchesCard({ balades, onPress }: { balades: BaladeProche[]; onPress: (id: string) => void }) {
+  if (!balades.length) return null;
+  return (
+    <View style={[styles.postCard, styles.carrouselCarte]}>
+      <View style={styles.carrouselEntete}>
+        <Ionicons name="walk" size={18} color={colors.sage} />
+        <Text style={styles.carrouselTitre}>Balades à faire près de toi</Text>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carrouselRail}>
+        {balades.map(b => (
+          <TouchableOpacity key={b.id} style={styles.baladeTuile} activeOpacity={0.85} onPress={() => onPress(b.id)}>
+            <Text style={styles.evtTitre} numberOfLines={2}>{b.nom}</Text>
+            <Text style={styles.evtMeta} numberOfLines={1}>{b.depart_label || 'Départ sur la carte'}</Text>
+            <View style={styles.baladeTuileStats}>
+              {b.distance_km ? <Text style={styles.baladeTuileStat}>{String(b.distance_km).replace('.', ',')} km</Text> : null}
+              {b.duree_secondes ? <Text style={styles.baladeTuileStat}>{Math.round(b.duree_secondes / 60)} min</Text> : null}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+              {b.ombragee ? <Text style={styles.baladeTuileTag}>Ombragée</Text> : null}
+              {b.sans_laisse ? <Text style={styles.baladeTuileTag}>Sans laisse</Text> : null}
+            </View>
+            {b.d != null ? <Text style={styles.distancePetite}>📍 à {fmtDistance(b.d)}</Text> : null}
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 // ─── BaladeCard ───────────────────────────────────────────────────────────────
 
 function BaladeCard({ post, myUserId, onLike, onCommentPress, onBaladePress, onDeletePress, onAuthorPress, birthdayUserIds }: {
@@ -1260,7 +1339,59 @@ export default function FeedScreen() {
     })();
   }, []);
 
-  const postsAffiches = useMemo(() => grouperNouveauxLieux(posts, myLoc), [posts, myLoc]);
+  // Evenements a venir et balades autour de soi (carrousels du feed)
+  const [evtsProches, setEvtsProches] = useState<EvtProche[]>([]);
+  const [evtsSontProches, setEvtsSontProches] = useState(false);
+  const [baladesProches, setBaladesProches] = useState<BaladeProche[]>([]);
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const maintenant = new Date().toISOString();
+        const dans3sem = new Date(Date.now() + 21 * 86400000).toISOString();
+        const { data: evs } = await supabase.from('evenements')
+          .select('id, titre, date_heure, ville, lat, lng, image_url, images, payant, prix, participations(count)')
+          .eq('valide', true).or('actif.is.null,actif.eq.true').or('refuse.is.null,refuse.eq.false')
+          .gte('date_heure', maintenant).lte('date_heure', dans3sem)
+          .order('date_heure').limit(60);
+        const tous: EvtProche[] = (evs || []).map((e: any) => ({
+          id: e.id, titre: e.titre, date_heure: e.date_heure, ville: e.ville,
+          image: (e.images && e.images[0]) || e.image_url || null, payant: e.payant, prix: e.prix,
+          nb: e.participations?.[0]?.count ?? 0,
+          d: myLoc && e.lat != null && e.lng != null ? haversineKm(myLoc.lat, myLoc.lng, e.lat, e.lng) : null,
+        }));
+        const pres = myLoc ? tous.filter(e => e.d != null && e.d <= 50) : [];
+        if (!annule) {
+          setEvtsSontProches(pres.length > 0);
+          setEvtsProches((pres.length ? pres : tous).slice(0, 10));
+        }
+
+        if (myLoc) {
+          const { data: bs } = await supabase.from('balades')
+            .select('id, nom, depart_label, depart_lat, depart_lng, distance_km, duree_secondes, ombragee, sans_laisse')
+            .eq('visibilite', 'public').eq('validee', true)
+            .gte('depart_lat', myLoc.lat - 0.3).lte('depart_lat', myLoc.lat + 0.3)
+            .gte('depart_lng', myLoc.lng - 0.45).lte('depart_lng', myLoc.lng + 0.45)
+            .limit(40);
+          const liste = (bs || []).map((b: any) => ({ ...b, d: haversineKm(myLoc.lat, myLoc.lng, b.depart_lat, b.depart_lng) }))
+            .filter((b: any) => b.d <= 30).sort((a: any, b: any) => a.d - b.d).slice(0, 10);
+          if (!annule) setBaladesProches(liste);
+        }
+      } catch {}
+    })();
+    return () => { annule = true; };
+  }, [myLoc?.lat, myLoc?.lng]);
+
+  const postsAffiches = useMemo(() => {
+    const liste = grouperNouveauxLieux(posts, myLoc);
+    const vide = (id: string, type: string): CommunityPost => ({
+      id, user_id: '', type, image_url: null, caption: null, lieu_id: null, auto_generated: true,
+      created_at: new Date().toISOString(), profils: null, lieux: null, community_post_likes: [], community_post_comments: [],
+    });
+    if (evtsProches.length) liste.splice(Math.min(1, liste.length), 0, vide('carrousel-evenements', 'a_venir'));
+    if (baladesProches.length) liste.splice(Math.min(6, liste.length), 0, vide('carrousel-balades', 'balades_proches'));
+    return liste;
+  }, [posts, myLoc, evtsProches, baladesProches]);
   const [following, setFollowing] = useState<Set<string>>(new Set());
   const [mutuals, setMutuals] = useState<Record<string, number>>({});
 
@@ -2089,7 +2220,19 @@ export default function FeedScreen() {
                 </>
               }
               renderItem={({ item }) =>
-                item.type === 'lieux_groupe' ? (
+                item.type === 'a_venir' ? (
+                  <AVenirCard
+                    evts={evtsProches}
+                    proche={evtsSontProches}
+                    onPress={(id) => { mapNavigation.setPendingEvent(id); navigation.navigate('Events' as any); }}
+                    onVoirTout={() => navigation.navigate('Events' as any)}
+                  />
+                ) : item.type === 'balades_proches' ? (
+                  <BaladesProchesCard
+                    balades={baladesProches}
+                    onPress={(id) => { mapNavigation.setPendingBalade(id); navigation.navigate('Carte' as any); }}
+                  />
+                ) : item.type === 'lieux_groupe' ? (
                   <LieuxGroupeCard post={item} onLieuPress={openLieu} myLoc={myLoc} />
                 ) : item.type === 'nouveau_lieu' ? (
                   <NouveauLieuCard post={item} onLieuPress={openLieu} onAuthorPress={openAuthor} birthdayUserIds={birthdayUserIds} myLoc={myLoc} />
@@ -2670,9 +2813,25 @@ const styles = StyleSheet.create({
   lieuxGroupeVoir: { alignSelf: 'center', marginTop: -2, marginBottom: 14 },
   lieuxGroupeVoirTexte: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
   distancePetite: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginRight: 4 },
-  actuBandeau: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  carrouselCarte: { paddingTop: 12, paddingBottom: 14 },
+  carrouselEntete: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, marginBottom: 10 },
+  carrouselTitre: { flex: 1, fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
+  carrouselVoir: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
+  carrouselRail: { paddingHorizontal: 14, gap: 10 },
+  evtTuile: { width: 210, borderRadius: 14, backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  evtImage: { width: '100%', height: 110, backgroundColor: colors.ivoryLight },
+  evtImageVide: { alignItems: 'center', justifyContent: 'center' },
+  evtCorps: { padding: 10, gap: 2 },
+  evtDate: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra },
+  evtTitre: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.bordeaux },
+  evtMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.textMuted },
+  baladeTuile: { width: 190, borderRadius: 14, backgroundColor: colors.ivoryPale, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 4 },
+  baladeTuileStats: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  baladeTuileStat: { fontFamily: 'DMSans_600SemiBold', fontSize: 13, color: colors.sage },
+  baladeTuileTag: { fontFamily: 'DMSans_500Medium', fontSize: 11, color: colors.sage, backgroundColor: 'rgba(46,125,107,0.1)', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },
+  actuBandeau: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingTop: 12 },
   actuBandeauTexte: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra, letterSpacing: 0.2 },
-  actuPhoto: { width: '100%', height: 170, borderRadius: 12, marginTop: 4, marginBottom: 2, backgroundColor: colors.border },
+  actuPhoto: { alignSelf: 'stretch', height: 170, borderRadius: 12, marginHorizontal: 14, marginBottom: 10, backgroundColor: colors.border },
   distancePastille: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.terra },
   distancePastilleProche: { backgroundColor: colors.terra },
   distancePastilleTexte: { fontFamily: 'DMSans_600SemiBold', fontSize: 12, color: colors.terra },
