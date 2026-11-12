@@ -271,6 +271,24 @@ function NouveauLieuCard({ post, onLieuPress, onAuthorPress, birthdayUserIds, my
   const proche = d != null && d <= RAYON_ACTU_KM;
   const photo = photoLieu(lieu);
 
+  // Lieu loin de soi : une ligne compacte, pour suivre l'actualite sans noyer le feed
+  if (!proche && lieu) {
+    return (
+      <TouchableOpacity style={[styles.postCard, styles.lieuCompact]} activeOpacity={0.8} onPress={() => onLieuPress(lieu.id)}>
+        <View style={styles.lieuCompactIcone}><Ionicons name="location" size={16} color={colors.terra} /></View>
+        <View style={{ flex: 1, gap: 1 }}>
+          <Text style={styles.lieuCompactTitre} numberOfLines={1}>
+            <Text style={{ fontFamily: 'DMSans_400Regular', color: colors.textMuted }}>Nouveau lieu · </Text>{lieu.nom}
+          </Text>
+          <Text style={styles.nouveauLieuMeta} numberOfLines={1}>
+            {[lieu.cat, lieu.ville, d != null ? fmtDistance(d) : null].filter(Boolean).join(' · ')} · {timeAgo(post.created_at)}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <View style={[styles.postCard, styles.lieuCard]}>
       {proche ? (
@@ -357,36 +375,11 @@ function photoLieu(lieu: CommunityPost['lieux']): string | null {
   return u;
 }
 
-function grouperNouveauxLieux(postsBruts: CommunityPost[], loc: Pos): CommunityPost[] {
-  // Ancien cache : des groupes deja formes -> on les redeplie
-  const posts = postsBruts.flatMap(p => (p.type === 'lieux_groupe' ? (p.groupe || []) : [p]));
-  const estProche = (p: CommunityPost) => {
-    const d = distanceLieu(p.lieux, loc);
-    return d != null && d <= RAYON_ACTU_KM;
-  };
-  const parSemaine = new Map<string, CommunityPost[]>();
-  posts.forEach(p => {
-    if (p.type !== 'nouveau_lieu' || estProche(p)) return;
-    const k = lundiDe(p.created_at);
-    if (!parSemaine.has(k)) parSemaine.set(k, []);
-    parSemaine.get(k)!.push(p);
-  });
-  const dejaPlace = new Set<string>();
-  const res: CommunityPost[] = [];
-  posts.forEach(p => {
-    if (p.type !== 'nouveau_lieu' || estProche(p)) { res.push(p); return; }
-    const k = lundiDe(p.created_at);
-    const groupe = parSemaine.get(k)!;
-    if (groupe.length < 2) { res.push(p); return; }
-    if (dejaPlace.has(k)) return;
-    dejaPlace.add(k);
-    res.push({
-      id: `lieux-${k}`, user_id: '', type: 'lieux_groupe', image_url: null, caption: null, lieu_id: null,
-      auto_generated: true, created_at: groupe[0].created_at, profils: null, lieux: null,
-      community_post_likes: [], community_post_comments: [], groupe,
-    });
-  });
-  return res;
+function grouperNouveauxLieux(postsBruts: CommunityPost[], _loc: Pos): CommunityPost[] {
+  // (12/11) Plus de regroupement : chaque nouveau lieu apparait au fil de l'eau
+  // (carte complete s'il est proche, ligne compacte sinon). Les anciens groupes
+  // presents en cache sont redeplies.
+  return postsBruts.flatMap(p => (p.type === 'lieux_groupe' ? (p.groupe || []) : [p]));
 }
 
 function LieuxGroupeCard({ post, onLieuPress, myLoc }: { post: CommunityPost; onLieuPress: (id: string) => void; myLoc: Pos }) {
@@ -2814,6 +2807,9 @@ const styles = StyleSheet.create({
   lieuxGroupeVoirTexte: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
   distancePetite: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.terra, marginRight: 4 },
   carrouselCarte: { paddingTop: 12, paddingBottom: 14 },
+  lieuCompact: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderLeftWidth: 3, borderLeftColor: colors.terraPale },
+  lieuCompactIcone: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(196,105,58,0.1)', alignItems: 'center', justifyContent: 'center' },
+  lieuCompactTitre: { fontFamily: 'DMSans_600SemiBold', fontSize: 14, color: colors.bordeaux },
   carrouselEntete: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, marginBottom: 10 },
   carrouselTitre: { flex: 1, fontFamily: 'DMSans_600SemiBold', fontSize: 15, color: colors.bordeaux },
   carrouselVoir: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.terra },
